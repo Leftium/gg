@@ -1,58 +1,45 @@
-# Svelte library
+# gg: never use console.log() to debug again!
 
-Everything you need to build a Svelte library, powered by [`sv`](https://npmjs.com/package/sv).
+`gg()` is a lo**gg**er/debu**gg**er with several advantages:
 
-Read more about creating a library [in the docs](https://svelte.dev/docs/kit/packaging).
+- Annotated with automatic _namespace_ based on source file and calling function.
+  - Each namespace gets a unique color for easier visual parsing.
+  - Simple syntax with wildcards to filter/hide debug output at runtime.
+  - Millisecond diff (timestamps) for each namespace.
+- Can be inserted into the middle of expressions (returns the value of the first argument).
+- Can output a link that opens the source file in your editor (like VS Code).
+- Simple to disable (turn all loggs into NOP's for production).
+- Faster to type.
 
-## Creating a project
+## Installation
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```bash
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
+```
+npm add @leftium/gg
 ```
 
-## Developing
+## Usage
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+_Coming soon..._
 
-```bash
-npm run dev
+## Inspirations
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+### debug
 
-Everything inside `src/lib` is part of your library, everything inside `src/routes` can be used as a showcase or preview app.
+> A tiny JavaScript debugging utility modelled after Node.js core's debugging technique. Works in Node.js and web browsers.
 
-## Building
+- https://www.npmjs.com/package/debug
 
-To build your library:
+### q (python)
 
-```bash
-npm run package
-```
+> Quick and dirty debugging output for tired programmers.
 
-To create a production version of your showcase app:
+- https://github.com/zestyping/q
+- [Hacker News discussion](https://hw.leftium.com/#/item/9981430)
+- [PyCon lightning talk](https://www.youtube.com/watch?v=OL3De8BAhME#t=25m15s)
 
-```bash
-npm run build
-```
+### IceCream (python)
 
-You can preview the production build with `npm run preview`.
+> Never use print() to debug again
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
-
-## Publishing
-
-Go into the `package.json` and give your package the desired name through the `"name"` option. Also consider adding a `"license"` field and point it to a `LICENSE` file which you can create from a template (one popular option is the [MIT license](https://opensource.org/license/mit/)).
-
-To publish your library to [npm](https://www.npmjs.com):
-
-```bash
-npm publish
-```
+- https://github.com/gruns/icecream
+- [Hacker News discussion](https://hw.leftium.com/#/item/26631467)
