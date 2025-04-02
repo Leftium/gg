@@ -10,6 +10,7 @@ const ggConfig = {
 	showStatusAndTroubleShootingMessageOnLoad: true,
 	sourceRootMatcher: /.*?(\/(?<name>src|chunks)\/)/i,
 	openInEditorUrl: function (fileName: string) {
+		// TODO: Don't hardcode URL. Autodetect?
 		return `http://localhost:5173/__open-in-editor?file=${encodeURIComponent(fileName)}`;
 	}
 };
