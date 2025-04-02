@@ -9,6 +9,7 @@
 - Can be inserted into the middle of expressions (returns the value of the first argument).
 - Can output a link that opens the source file in your editor (like VS Code).
 - Simple to disable (turn all loggs into NOP's for production).
+- Diagnostics/hints in dev console & terminal to help install and configure correctly.
 - Faster to type.
 
 ## Installation
