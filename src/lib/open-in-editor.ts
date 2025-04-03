@@ -30,7 +30,7 @@ export default function openInEditorPlugin(
 				const { file } = url.parse(req.url || '', true).query || {};
 				if (!file) {
 					res.statusCode = 500;
-					res.end(`launch-editor-middleware: required query param "file" is missing.`);
+					res.end(`open-in-editor-plugin: required query param "file" is missing.`);
 				} else {
 					res.statusCode = 222;
 					launch(path.resolve(srcRoot, file as string), specifiedEditor, onErrorCallback);
