@@ -61,8 +61,13 @@ const ggConfig = {
 const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 
 function openInEditorUrl(fileName: string) {
-	return ggConfig.openInEditorUrlTemplate.replace('$FILENAME', encodeURIComponent(fileName));
+	return ggConfig.openInEditorUrlTemplate.replace(
+		'$FILENAME',
+		encodeURIComponent(fileName).replaceAll('%2F', '/')
+	);
 }
+
+// http://localhost:5173/__open-in-editor?file=src%2Froutes%2F%2Bpage.svelte
 
 const ggLog = debugFactory('gg');
 
