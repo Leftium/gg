@@ -9,10 +9,10 @@
 
 	// gg() without arguments outputs a link that causes
 	// vite to open this file in an editor (like VS Code.)
-	gg('This link opens a different file in your editor:');
+	gg('The link below opens a different file in your editor:');
 	const ggResult = gg();
 
-	gg('Examine the callstack returned when gg() is called without arguments:');
+	gg('Examine the call stack returned when gg() is called without arguments:');
 	console.table(ggResult.stack.map(tidyStackFrame));
 
 	// Utility function just to reorder and shorten fields:

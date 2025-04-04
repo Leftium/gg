@@ -91,7 +91,7 @@ if (ggConfig.showHints) {
 		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");
 		message(`${checkbox(ggLogTest.enabled)} localStorage.debug: ${localStorage?.debug}${hint}`);
 
-		message(`ℹ️ "Verbose" log level must be enabled (in the browser dev tools.)`);
+		message(`ℹ️ "Verbose" log level must be enabled (in the browser DevTools.)`);
 
 		const { status } = await fetch('/__open-in-editor?file=+');
 		message(
