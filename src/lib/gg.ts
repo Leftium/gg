@@ -28,7 +28,6 @@ function getServerPort() {
 			// Browser environment
 			const currentPort =
 				window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-			console.log(`This is running in the browser on port: ${currentPort}`);
 
 			// Resolve the promise with the detected port
 			resolve(currentPort);
@@ -37,12 +36,13 @@ function getServerPort() {
 			const startingPort = Number(process.env.PORT) || 5173; // Default to Vite's default port
 
 			findAvailablePort(startingPort).then((actualPort) => {
-				console.log(`Server is running on http://localhost:${actualPort}`);
 				resolve(actualPort);
 			});
 		}
 	});
 }
+
+const timestampRegex = /(\?t=\d+)?$/;
 
 const port = await getServerPort();
 
@@ -60,6 +60,11 @@ const ggConfig = {
 };
 const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 
+// To maintain unique millisecond diffs for each callpoint:
+// - Create a unique log function for each callpoint.
+// - Cache and reuse the same log function for a given callpoint.
+const callpointToLogFunction = new Map();
+
 function openInEditorUrl(fileName: string) {
 	return ggConfig.openInEditorUrlTemplate.replace(
 		'$FILENAME',
@@ -76,13 +81,24 @@ const ggLog = debugFactory('gg');
 if (ggConfig.showHints) {
 	const ggLogTest = ggLog.extend('TEST');
 
-	let ggMessage = '';
+	let ggMessage = '\n';
 	// Utilities for forming ggMessage:
 	const message = (s: string) => (ggMessage += `${s}\n`);
 	const checkbox = (test: boolean) => (test ? '✅' : '❌');
 	const makeHint = (test: boolean, ifTrue: string, ifFalse = '') => (test ? ifTrue : ifFalse);
 
-	message(`Loaded gg module. To enable output of loggs:`);
+	console.log(`Loaded gg module. Checking configuration...`);
+	if (ggConfig.enabled && ggLogTest.enabled) {
+		gg('If you can see this logg, gg configured correctly!');
+		message(`No problems detected:`);
+		if (BROWSER) {
+			message(
+				`ℹ️ If gg output still not visible above, enable "Verbose" log level in browser DevTools.`
+			);
+		}
+	} else {
+		message(`Problems detected; fix all ❌:`);
+	}
 
 	const hint = makeHint(!ggConfig.enabled, ' (Update value in gg.ts file.)');
 	message(`${checkbox(ggConfig.enabled)} ggConfig.enabled: ${ggConfig.enabled}${hint}`);
@@ -91,31 +107,22 @@ if (ggConfig.showHints) {
 		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");
 		message(`${checkbox(ggLogTest.enabled)} localStorage.debug: ${localStorage?.debug}${hint}`);
 
-		message(`ℹ️ "Verbose" log level must be enabled (in the browser DevTools.)`);
-
 		const { status } = await fetch('/__open-in-editor?file=+');
 		message(
 			makeHint(
 				status === 222,
-				`✅ (optional) open-in-editor vite plugin detected! (${status})`,
-				`⚠️ (optional) open-in-editor vite plugin not detected. (${status})`
+				`✅ (optional) open-in-editor vite plugin detected! (status code: ${status})`,
+				`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}.) Add plugin in vite.config.ts`
 			)
 		);
 	} else {
-		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:*`)');
+		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm dev`)');
 		dotenv.config(); // Load the environment variables
 		message(`${checkbox(ggLogTest.enabled)} DEBUG env variable: ${process?.env?.DEBUG}${hint}`);
 	}
 
 	console.log(ggMessage);
 }
-
-// To maintain unique millisecond diffs for each callpoint:
-// - Create a unique log function for each callpoint.
-// - Cache and reuse the same log function for a given callpoint.
-const callpointToLogFunction = new Map();
-
-const timestampRegex = /(\?t=\d+)?$/;
 
 // Overload signatures
 export function gg(): {
@@ -128,7 +135,7 @@ export function gg<T>(arg: T, ...args: unknown[]): T;
 
 export function gg(...args: [...unknown[]]) {
 	if (!ggConfig.enabled) {
-		return args[0];
+		return args.length ? args[0] : { url: '', stack: [] };
 	}
 
 	// Ignore first stack frame, which is always the call to gg() itself.
@@ -148,14 +155,14 @@ export function gg(...args: [...unknown[]]) {
 	//console.log({ filename, fileNameToOpen: filenameToOpen, fileNameToDisplay: filenameToDisplay });
 
 	// A callpoint is uniquely identified by the filename plus function name
-	const callpoint = `${filenameToDisplay}@${stack[0].functionName}`;
+	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`;
 	const ggLogFunction =
 		callpointToLogFunction.get(callpoint) ||
 		callpointToLogFunction.set(callpoint, ggLog.extend(callpoint)).get(callpoint);
 
 	if (!args.length) {
 		const url = openInEditorUrl(filenameToOpen);
-		ggLogFunction(`📝📝📝 ${url} 👀👀👀`);
+		ggLogFunction(`    📝📝📝 ${url} 👀👀👀`);
 		return {
 			fileName: filenameToDisplay,
 			functionName,
