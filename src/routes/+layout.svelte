@@ -1,4 +1,6 @@
 <script lang="ts">
+	import '@picocss/pico';
+
 	import type { Snippet } from 'svelte';
 	import { gg } from '$lib/index.js';
 	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
@@ -14,6 +16,8 @@
 	const ggResult = gg();
 </script>
 
-<OpenInEditorLink {ggResult} />
+<main class="container">
+	<OpenInEditorLink {ggResult} />
 
-<div>{@render children()}</div>
+	<div>{@render children()}</div>
+</main>

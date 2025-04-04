@@ -14,6 +14,9 @@ importers:
       '@eslint/js':
         specifier: ^9.18.0
         version: 9.23.0
+      '@picocss/pico':
+        specifier: ^2.1.1
+        version: 2.1.1
       '@sveltejs/adapter-vercel':
         specifier: ^5.5.2
         version: 5.6.3(@sveltejs/kit@2.20.3(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17)))(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17)))(rollup@4.39.0)
@@ -506,6 +509,9 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@picocss/pico@2.1.1':
+    resolution: {integrity: sha512-kIDugA7Ps4U+2BHxiNHmvgPIQDWPDU4IeU6TNRdvXQM1uZX+FibqDQT2xUOnnO2yq/LUHcwnGlu1hvf4KfXnMg==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -1874,6 +1880,8 @@ snapshots:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.19.1
+
+  '@picocss/pico@2.1.1': {}
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
