@@ -6,9 +6,7 @@
 	let { children }: { children: Snippet } = $props();
 
 	gg('Hello, gg!!');
-	gg(
-		'The colored annotation to the left is the *callpoint*, indicating the location of this logg. (As filename@function)'
-	);
+	gg('The colored *callpoint* indicates the location of this logg. (As filename@function)');
 
 	// gg() without arguments outputs a link that causes
 	// vite to open this file in an editor (like VS Code.)

@@ -82,7 +82,7 @@ if (ggConfig.showHints) {
 	const checkbox = (test: boolean) => (test ? '✅' : '❌');
 	const makeHint = (test: boolean, ifTrue: string, ifFalse = '') => (test ? ifTrue : ifFalse);
 
-	message(`Loaded gg module. To enable logger/debugger output:`);
+	message(`Loaded gg module. To enable output of loggs:`);
 
 	const hint = makeHint(!ggConfig.enabled, ' (Update value in gg.ts file.)');
 	message(`${checkbox(ggConfig.enabled)} ggConfig.enabled: ${ggConfig.enabled}${hint}`);
@@ -91,14 +91,14 @@ if (ggConfig.showHints) {
 		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");
 		message(`${checkbox(ggLogTest.enabled)} localStorage.debug: ${localStorage?.debug}${hint}`);
 
-		message(`ℹ️ "Verbose" log level must be enabled (in the devtools JS console).`);
+		message(`ℹ️ "Verbose" log level must be enabled (in the browser dev tools.)`);
 
 		const { status } = await fetch('/__open-in-editor?file=+');
 		message(
 			makeHint(
 				status === 222,
-				`✅ open-in-editor plugin detected! (${status})`,
-				`⚠️ open-in-editor plugin not detected. (${status})`
+				`✅ (optional) open-in-editor vite plugin detected! (${status})`,
+				`⚠️ (optional) open-in-editor vite plugin not detected. (${status})`
 			)
 		);
 	} else {
@@ -155,7 +155,7 @@ export function gg(...args: [...unknown[]]) {
 
 	if (!args.length) {
 		const url = openInEditorUrl(filenameToOpen);
-		ggLogFunction(url);
+		ggLogFunction(`📝📝📝 ${url} 👀👀👀`);
 		return {
 			fileName: filenameToDisplay,
 			functionName,

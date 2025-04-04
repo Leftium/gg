@@ -9,7 +9,7 @@
 
 	// gg() without arguments outputs a link that causes
 	// vite to open this file in an editor (like VS Code.)
-	gg("Here's another link that opens a different file in your editor:");
+	gg('This link opens a different file in your editor:');
 	const ggResult = gg();
 
 	gg('Examine the callstack returned when gg() is called without arguments:');
@@ -19,7 +19,7 @@
 	function tidyStackFrame(stackframe: ErrorStackParser.StackFrame) {
 		let { fileName: filename, functionName } = stackframe;
 
-		const maxLength = 30;
+		const maxLength = 40;
 		filename = (filename || '').replace(/(\?(t|v)=\d+e?)?$/, '');
 		filename = `${filename.length > maxLength ? '...' : ''}${filename?.slice(-maxLength)}`;
 

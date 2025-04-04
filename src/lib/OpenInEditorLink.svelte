@@ -13,7 +13,7 @@
 </script>
 
 {#if dev}
-	[✏️<a
+	[📝<a
 		{onclick}
 		href={ggResult.url}
 		title={`${ggResult.fileName}@${ggResult.functionName}`}
