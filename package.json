@@ -48,8 +48,6 @@
 		"@types/node": "^22.13.17",
 		"add": "^2.0.6",
 		"debug": "^4.4.0",
-		"dotenv": "^16.4.7",
-		"error-stack-parser": "^2.1.4",
 		"eslint": "^9.18.0",
 		"eslint-config-prettier": "^10.0.1",
 		"eslint-plugin-svelte": "^3.0.0",
@@ -73,5 +71,9 @@
 		"onlyBuiltDependencies": [
 			"esbuild"
 		]
+	},
+	"dependencies": {
+		"dotenv": "^17.2.0",
+		"error-stack-parser": "^2.1.4"
 	}
 }

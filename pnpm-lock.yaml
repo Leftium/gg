@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      dotenv:
+        specifier: ^17.2.0
+        version: 17.2.0
+      error-stack-parser:
+        specifier: ^2.1.4
+        version: 2.1.4
     devDependencies:
       '@eslint/compat':
         specifier: ^1.2.5
@@ -41,12 +48,6 @@ importers:
       debug:
         specifier: ^4.4.0
         version: 4.4.0
-      dotenv:
-        specifier: ^16.4.7
-        version: 16.4.7
-      error-stack-parser:
-        specifier: ^2.1.4
-        version: 2.1.4
       eslint:
         specifier: ^9.18.0
         version: 9.23.0
@@ -895,8 +896,8 @@ packages:
   devalue@5.1.1:
     resolution: {integrity: sha512-maua5KUiapvEwiEAe+XnlZ3Rh0GD+qI1J/nb9vrJc3muPXvcF/8gXYTWF76+5DAqHyDUtOIImEuo0YKE9mshVw==}
 
-  dotenv@16.4.7:
-    resolution: {integrity: sha512-47qPchRCykZC03FhkYAhrvwU4xDBFIj1QPqaarj6mdM/hgUzfPHcpkHJOn3mJAufFeeAxAzeGsr5X0M4k6fLZQ==}
+  dotenv@17.2.0:
+    resolution: {integrity: sha512-Q4sgBT60gzd0BB0lSyYD3xM4YxrXA9y4uBDof1JNYGzOXrQdQ6yX+7XIAqoFOGQFOTK1D3Hts5OllpxMDZFONQ==}
     engines: {node: '>=12'}
 
   eastasianwidth@0.2.0:
@@ -2255,7 +2256,7 @@ snapshots:
 
   devalue@5.1.1: {}
 
-  dotenv@16.4.7: {}
+  dotenv@17.2.0: {}
 
   eastasianwidth@0.2.0: {}
 
