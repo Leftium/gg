@@ -20,7 +20,7 @@
 		let { fileName: filename, functionName } = stackframe;
 
 		const maxLength = 40;
-		filename = (filename || '').replace(/(\?(t|v)=\d+e?)?$/, '');
+		filename = (filename || '').replace(/(\?(t|v)=[0-9a-f]+)?$/, '');
 		filename = `${filename.length > maxLength ? '...' : ''}${filename?.slice(-maxLength)}`;
 
 		return { function: functionName, filename };
