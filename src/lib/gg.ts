@@ -49,6 +49,7 @@ const port = await getServerPort();
 const ggConfig = {
 	enabled: true,
 	showHints: true,
+	editorLink: false,
 	openInEditorUrlTemplate: `http://localhost:${port}/__open-in-editor?file=$FILENAME`,
 
 	// The srcRoot contains all source files.
@@ -63,7 +64,8 @@ const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 // To maintain unique millisecond diffs for each callpoint:
 // - Create a unique log function for each callpoint.
 // - Cache and reuse the same log function for a given callpoint.
-const callpointToLogFunction = new Map();
+const namespaceToLogFunction = new Map();
+let maxCallpointLength = 0;
 
 function openInEditorUrl(fileName: string) {
 	return ggConfig.openInEditorUrlTemplate.replace(
@@ -146,6 +148,7 @@ export function gg(...args: [...unknown[]]) {
 
 	// Example: src/routes/+page.svelte
 	const filenameToOpen = filename.replace(srcRootRegex, '$<folderName>/');
+	const url = openInEditorUrl(filenameToOpen); 
 
 	// Example: routes/+page.svelte
 	const filenameToDisplay = filename.replace(srcRootRegex, '');
@@ -155,14 +158,16 @@ export function gg(...args: [...unknown[]]) {
 	//console.log({ filename, fileNameToOpen: filenameToOpen, fileNameToDisplay: filenameToDisplay });
 
 	// A callpoint is uniquely identified by the filename plus function name
-	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`;
+	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`
+	maxCallpointLength = Math.max(maxCallpointLength, callpoint.length)
+
+	const namespace = `${callpoint.padEnd(maxCallpointLength, ' ')}\t${ggConfig.editorLink ? url : ''}\n`;
 	const ggLogFunction =
-		callpointToLogFunction.get(callpoint) ||
-		callpointToLogFunction.set(callpoint, ggLog.extend(callpoint)).get(callpoint);
+		namespaceToLogFunction.get(namespace) ||
+		namespaceToLogFunction.set(namespace, ggLog.extend(namespace)).get(namespace);
 
 	if (!args.length) {
-		const url = openInEditorUrl(filenameToOpen);
-		ggLogFunction(`    📝📝📝 ${url} 👀👀👀`);
+		ggLogFunction(`    📝📝 ${url} 👀👀`);
 		return {
 			fileName: filenameToDisplay,
 			functionName,
@@ -171,9 +176,10 @@ export function gg(...args: [...unknown[]]) {
 		};
 	}
 
-	ggLogFunction(...(args as [formatter: unknown, ...args: unknown[]]));
+	ggLogFunction(...(['', '\t', ...args] as [formatter: unknown, ...args: unknown[]]));
 	return args[0];
 }
 
 gg.disable = debugFactory.disable;
+
 gg.enable = debugFactory.enable;
