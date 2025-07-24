@@ -47,13 +47,10 @@
 		"@types/debug": "^4.1.12",
 		"@types/node": "^22.13.17",
 		"add": "^2.0.6",
-		"debug": "^4.4.0",
 		"eslint": "^9.18.0",
 		"eslint-config-prettier": "^10.0.1",
 		"eslint-plugin-svelte": "^3.0.0",
-		"esm-env": "^1.2.2",
 		"globals": "^16.0.0",
-		"launch-editor": "^2.10.0",
 		"prettier": "^3.4.2",
 		"prettier-plugin-svelte": "^3.3.3",
 		"publint": "^0.3.2",
@@ -73,7 +70,10 @@
 		]
 	},
 	"dependencies": {
+		"debug": "^4.4.1",
 		"dotenv": "^17.2.0",
-		"error-stack-parser": "^2.1.4"
+		"error-stack-parser": "^2.1.4",
+		"esm-env": "^1.2.2",
+		"launch-editor": "^2.10.0"
 	}
 }

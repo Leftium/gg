@@ -8,12 +8,21 @@ importers:
 
   .:
     dependencies:
+      debug:
+        specifier: ^4.4.1
+        version: 4.4.1
       dotenv:
         specifier: ^17.2.0
         version: 17.2.0
       error-stack-parser:
         specifier: ^2.1.4
         version: 2.1.4
+      esm-env:
+        specifier: ^1.2.2
+        version: 1.2.2
+      launch-editor:
+        specifier: ^2.10.0
+        version: 2.10.0
     devDependencies:
       '@eslint/compat':
         specifier: ^1.2.5
@@ -45,9 +54,6 @@ importers:
       add:
         specifier: ^2.0.6
         version: 2.0.6
-      debug:
-        specifier: ^4.4.0
-        version: 4.4.0
       eslint:
         specifier: ^9.18.0
         version: 9.23.0
@@ -57,15 +63,9 @@ importers:
       eslint-plugin-svelte:
         specifier: ^3.0.0
         version: 3.5.0(eslint@9.23.0)(svelte@5.25.6)
-      esm-env:
-        specifier: ^1.2.2
-        version: 1.2.2
       globals:
         specifier: ^16.0.0
         version: 16.0.0
-      launch-editor:
-        specifier: ^2.10.0
-        version: 2.10.0
       prettier:
         specifier: ^3.4.2
         version: 3.5.3
@@ -870,8 +870,8 @@ packages:
     engines: {node: '>=4'}
     hasBin: true
 
-  debug@4.4.0:
-    resolution: {integrity: sha512-6WTZ/IxCY/T6BALoZHaE4ctp9xm+Z5kY/pzYaCHRFeyVhojxlrm+46y68HA6hr0TcwEssoxNiDEUJQjfPZ/RYA==}
+  debug@4.4.1:
+    resolution: {integrity: sha512-KcKCqiftBJcZr++7ykoDIEwSa3XWowTfNPo92BYxjXiyYEVrUQh2aLyhxBCwww+heortUFxEJYcRzosstTEBYQ==}
     engines: {node: '>=6.0'}
     peerDependencies:
       supports-color: '*'
@@ -1403,8 +1403,8 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
-  shell-quote@1.8.2:
-    resolution: {integrity: sha512-AzqKpGKjrj7EM6rKVQEPpB288oCfnrEIuyoT9cyF4nmGa7V8Zk6f7RRqYisX8X9m+Q7bd632aZW4ky7EhbQztA==}
+  shell-quote@1.8.3:
+    resolution: {integrity: sha512-ObmnIF4hXNg1BqhnHmgbDETF8dLPCggZWBjkQfhZpbszZnYur5DUljTcCHii5LC3J5E0yeO/1LIMyH+UvHQgyw==}
     engines: {node: '>= 0.4'}
 
   signal-exit@4.1.0:
@@ -1788,7 +1788,7 @@ snapshots:
   '@eslint/config-array@0.19.2':
     dependencies:
       '@eslint/object-schema': 2.1.6
-      debug: 4.4.0
+      debug: 4.4.1
       minimatch: 3.1.2
     transitivePeerDependencies:
       - supports-color
@@ -1806,7 +1806,7 @@ snapshots:
   '@eslint/eslintrc@3.3.1':
     dependencies:
       ajv: 6.12.6
-      debug: 4.4.0
+      debug: 4.4.1
       espree: 10.3.0
       globals: 14.0.0
       ignore: 5.3.2
@@ -2016,7 +2016,7 @@ snapshots:
   '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17)))(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17))':
     dependencies:
       '@sveltejs/vite-plugin-svelte': 5.0.3(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17))
-      debug: 4.4.0
+      debug: 4.4.1
       svelte: 5.25.6
       vite: 6.2.4(@types/node@22.13.17)
     transitivePeerDependencies:
@@ -2025,7 +2025,7 @@ snapshots:
   '@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17))':
     dependencies:
       '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17)))(svelte@5.25.6)(vite@6.2.4(@types/node@22.13.17))
-      debug: 4.4.0
+      debug: 4.4.1
       deepmerge: 4.3.1
       kleur: 4.1.5
       magic-string: 0.30.17
@@ -2074,7 +2074,7 @@ snapshots:
       '@typescript-eslint/types': 8.29.0
       '@typescript-eslint/typescript-estree': 8.29.0(typescript@5.8.2)
       '@typescript-eslint/visitor-keys': 8.29.0
-      debug: 4.4.0
+      debug: 4.4.1
       eslint: 9.23.0
       typescript: 5.8.2
     transitivePeerDependencies:
@@ -2089,7 +2089,7 @@ snapshots:
     dependencies:
       '@typescript-eslint/typescript-estree': 8.29.0(typescript@5.8.2)
       '@typescript-eslint/utils': 8.29.0(eslint@9.23.0)(typescript@5.8.2)
-      debug: 4.4.0
+      debug: 4.4.1
       eslint: 9.23.0
       ts-api-utils: 2.1.0(typescript@5.8.2)
       typescript: 5.8.2
@@ -2102,7 +2102,7 @@ snapshots:
     dependencies:
       '@typescript-eslint/types': 8.29.0
       '@typescript-eslint/visitor-keys': 8.29.0
-      debug: 4.4.0
+      debug: 4.4.1
       fast-glob: 3.3.3
       is-glob: 4.0.3
       minimatch: 9.0.5
@@ -2242,7 +2242,7 @@ snapshots:
 
   cssesc@3.0.0: {}
 
-  debug@4.4.0:
+  debug@4.4.1:
     dependencies:
       ms: 2.1.3
 
@@ -2380,7 +2380,7 @@ snapshots:
       ajv: 6.12.6
       chalk: 4.1.2
       cross-spawn: 7.0.6
-      debug: 4.4.0
+      debug: 4.4.1
       escape-string-regexp: 4.0.0
       eslint-scope: 8.3.0
       eslint-visitor-keys: 4.2.0
@@ -2510,7 +2510,7 @@ snapshots:
   https-proxy-agent@7.0.6:
     dependencies:
       agent-base: 7.1.3
-      debug: 4.4.0
+      debug: 4.4.1
     transitivePeerDependencies:
       - supports-color
 
@@ -2568,7 +2568,7 @@ snapshots:
   launch-editor@2.10.0:
     dependencies:
       picocolors: 1.1.1
-      shell-quote: 1.8.2
+      shell-quote: 1.8.3
 
   levn@0.4.1:
     dependencies:
@@ -2790,7 +2790,7 @@ snapshots:
 
   shebang-regex@3.0.0: {}
 
-  shell-quote@1.8.2: {}
+  shell-quote@1.8.3: {}
 
   signal-exit@4.1.0: {}
 
