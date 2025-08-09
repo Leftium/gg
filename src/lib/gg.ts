@@ -159,7 +159,7 @@ export function gg(...args: [...unknown[]]) {
 
 	// A callpoint is uniquely identified by the filename plus function name
 	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`;
-	maxCallpointLength = Math.max(maxCallpointLength, callpoint.length);
+	maxCallpointLength = Math.min(Math.max(maxCallpointLength, callpoint.length), 80);
 
 	const namespace = `${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
 	const ggLogFunction =
