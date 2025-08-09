@@ -15,7 +15,8 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint ."
+		"lint": "prettier --check . && eslint .",
+		"postinstall": "patch-package"
 	},
 	"files": [
 		"dist",
@@ -67,16 +68,14 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild"
-		],
-		"patchedDependencies": {
-			"debug@4.4.1": "patches/debug@4.4.1.patch"
-		}
+		]
 	},
 	"dependencies": {
 		"debug": "^4.4.1",
 		"dotenv": "^17.2.1",
 		"error-stack-parser": "^2.1.4",
 		"esm-env": "^1.2.2",
-		"launch-editor": "^2.11.1"
+		"launch-editor": "^2.11.1",
+		"patch-package": "^8.0.0"
 	}
 }

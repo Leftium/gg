@@ -1,13 +1,8 @@
-diff --git a/src/browser.js b/src/browser.js
-index 5993451b82e6b27d981e202b349641816d867ccf..6a85edd976bdb9761571f8b29eea90070cb78043 100644
---- a/src/browser.js
-+++ b/src/browser.js
-@@ -1,3 +1,4 @@
-+
- /* eslint-env browser */
- 
- /**
-@@ -148,11 +149,11 @@ function useColors() {
+diff --git a/node_modules/debug/src/browser.js b/node_modules/debug/src/browser.js
+index 5993451..a2eb7c6 100644
+--- a/node_modules/debug/src/browser.js
++++ b/node_modules/debug/src/browser.js
+@@ -148,11 +148,11 @@ function useColors() {
  
  function formatArgs(args) {
  	args[0] = (this.useColors ? '%c' : '') +
@@ -21,10 +16,10 @@ index 5993451b82e6b27d981e202b349641816d867ccf..6a85edd976bdb9761571f8b29eea9007
  
  	if (!this.useColors) {
  		return;
-diff --git a/src/node.js b/src/node.js
-index 715560a4ca8fb4c8dd6353eafdde6e83af28f05e..3829ba356e038a60408f9f7f0ed742baab527c6b 100644
---- a/src/node.js
-+++ b/src/node.js
+diff --git a/node_modules/debug/src/node.js b/node_modules/debug/src/node.js
+index 715560a..3829ba3 100644
+--- a/node_modules/debug/src/node.js
++++ b/node_modules/debug/src/node.js
 @@ -170,10 +170,10 @@ function formatArgs(args) {
  	if (useColors) {
  		const c = this.color;
