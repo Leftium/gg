@@ -148,7 +148,7 @@ export function gg(...args: [...unknown[]]) {
 
 	// Example: src/routes/+page.svelte
 	const filenameToOpen = filename.replace(srcRootRegex, '$<folderName>/');
-	const url = openInEditorUrl(filenameToOpen); 
+	const url = openInEditorUrl(filenameToOpen);
 
 	// Example: routes/+page.svelte
 	const filenameToDisplay = filename.replace(srcRootRegex, '');
@@ -158,8 +158,8 @@ export function gg(...args: [...unknown[]]) {
 	//console.log({ filename, fileNameToOpen: filenameToOpen, fileNameToDisplay: filenameToDisplay });
 
 	// A callpoint is uniquely identified by the filename plus function name
-	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`
-	maxCallpointLength = Math.max(maxCallpointLength, callpoint.length)
+	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`;
+	maxCallpointLength = Math.max(maxCallpointLength, callpoint.length);
 
 	const namespace = `${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
 	const ggLogFunction =
