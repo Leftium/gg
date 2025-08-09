@@ -161,7 +161,7 @@ export function gg(...args: [...unknown[]]) {
 	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`
 	maxCallpointLength = Math.max(maxCallpointLength, callpoint.length)
 
-	const namespace = `${callpoint.padEnd(maxCallpointLength, ' ')}\t${ggConfig.editorLink ? url : ''}\n`;
+	const namespace = `${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
 		namespaceToLogFunction.set(namespace, ggLog.extend(namespace)).get(namespace);
@@ -176,7 +176,7 @@ export function gg(...args: [...unknown[]]) {
 		};
 	}
 
-	ggLogFunction(...(['', '\t', ...args] as [formatter: unknown, ...args: unknown[]]));
+	ggLogFunction(...args);
 	return args[0];
 }
 
