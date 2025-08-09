@@ -67,7 +67,10 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild"
-		]
+		],
+		"patchedDependencies": {
+			"debug@4.4.1": "patches/debug@4.4.1.patch"
+		}
 	},
 	"dependencies": {
 		"debug": "^4.4.1",
