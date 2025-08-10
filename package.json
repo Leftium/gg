@@ -1,6 +1,6 @@
 {
 	"name": "@leftium/gg",
-	"version": "0.0.8",
+	"version": "0.0.10",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/Leftium/gg.git"
@@ -16,7 +16,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
-		"postinstall": "patch-package"
+		"postinstall": "PATCH_PACKAGE_IGNORE_LOCKFILE=true patch-package --patch-dir ./patches"
 	},
 	"files": [
 		"dist",
