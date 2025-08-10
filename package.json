@@ -1,6 +1,6 @@
 {
 	"name": "@leftium/gg",
-	"version": "0.0.10",
+	"version": "0.0.11",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/Leftium/gg.git"
@@ -69,7 +69,12 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild"
-		]
+		],
+		"peerDependencyRules": {
+			"ignoreMissing": [
+				"debug"
+			]
+		}
 	},
 	"dependencies": {
 		"debug": "^4.4.1",
