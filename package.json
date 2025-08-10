@@ -1,6 +1,6 @@
 {
 	"name": "@leftium/gg",
-	"version": "0.0.7",
+	"version": "0.0.8",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/Leftium/gg.git"
@@ -21,7 +21,8 @@
 	"files": [
 		"dist",
 		"!dist/**/*.test.*",
-		"!dist/**/*.spec.*"
+		"!dist/**/*.spec.*",
+		"patches/"
 	],
 	"sideEffects": [
 		"**/*.css"
