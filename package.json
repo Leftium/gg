@@ -1,6 +1,6 @@
 {
 	"name": "@leftium/gg",
-	"version": "0.0.12",
+	"version": "0.0.13",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/Leftium/gg.git"
@@ -15,8 +15,7 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint .",
-		"postinstall": "PATCH_PACKAGE_IGNORE_LOCKFILE=true patch-package --patch-dir ./patches"
+		"lint": "prettier --check . && eslint ."
 	},
 	"files": [
 		"dist",
@@ -69,19 +68,13 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild"
-		],
-		"peerDependencyRules": {
-			"ignoreMissing": [
-				"debug"
-			]
-		}
+		]
 	},
 	"dependencies": {
 		"debug": "^4.4.1",
 		"dotenv": "^17.2.1",
 		"error-stack-parser": "^2.1.4",
 		"esm-env": "^1.2.2",
-		"launch-editor": "^2.11.1",
-		"patch-package": "^8.0.0"
+		"launch-editor": "^2.11.1"
 	}
 }
