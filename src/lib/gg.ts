@@ -76,12 +76,10 @@ function openInEditorUrl(fileName: string) {
 
 // http://localhost:5173/__open-in-editor?file=src%2Froutes%2F%2Bpage.svelte
 
-const ggLog = debugFactory('gg');
-
 // Log some gg info to the JS console/terminal:
 
 if (ggConfig.showHints) {
-	const ggLogTest = ggLog.extend('TEST');
+	const ggLogTest = debugFactory('gg:TEST');
 
 	let ggMessage = '\n';
 	// Utilities for forming ggMessage:
@@ -164,10 +162,10 @@ export function gg(...args: [...unknown[]]) {
 		maxCallpointLength = callpoint.length;
 	}
 
-	const namespace = `${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
+	const namespace = `gg:${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
-		namespaceToLogFunction.set(namespace, ggLog.extend(namespace)).get(namespace);
+		namespaceToLogFunction.set(namespace, debugFactory(namespace)).get(namespace);
 
 	if (!args.length) {
 		ggLogFunction(`    📝📝 ${url} 👀👀`);
