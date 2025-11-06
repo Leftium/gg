@@ -22,6 +22,36 @@ npm add @leftium/gg
 
 _Coming soon..._
 
+## Technical Details
+
+### Bundled Dependencies
+
+This library includes a **patched version** of the [`debug`](https://www.npmjs.com/package/debug) package. The patch reformats the output to display time diffs **before** the namespace for better readability:
+
+**Standard debug output:**
+```
+  gg:routes/+page.svelte +123ms
+```
+
+**Patched output (this library):**
+```
+ +123ms gg:routes/+page.svelte
+```
+
+The patched `debug` library is bundled directly into the distribution, so consumers automatically get the correct behavior without needing to install or patch `debug` themselves.
+
+### Updating the Bundled debug Library
+
+When a new version of `debug` is released:
+
+1. Update debug in devDependencies: `pnpm add -D debug@x.x.x`
+2. Run the update script: `./scripts/update-debug.sh`
+3. Verify patches still apply: `git diff src/lib/debug/`
+4. Test: `pnpm dev && pnpm prepack`
+5. Commit: `git commit -am "Update bundled debug to x.x.x"`
+
+The patch is maintained in `patches/debug@4.4.3.patch` for reference.
+
 ## Inspirations
 
 ### debug

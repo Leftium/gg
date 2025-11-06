@@ -1,4 +1,4 @@
-import debugFactory from 'debug';
+import debugFactory from './debug.js';
 import ErrorStackParser from 'error-stack-parser';
 import { BROWSER } from 'esm-env';
 

@@ -1,0 +1,35 @@
+diff --git a/src/browser.js b/src/browser.js
+index 5993451b82e6b27d981e202b349641816d867ccf..a2eb7c60fb7f5a8b93b2310acb15d6f89c3a1195 100644
+--- a/src/browser.js
++++ b/src/browser.js
+@@ -148,11 +148,11 @@ function useColors() {
+ 
+ function formatArgs(args) {
+ 	args[0] = (this.useColors ? '%c' : '') +
+-		this.namespace +
++		`${('+' + module.exports.humanize(this.diff)).padStart(6)} ${this.namespace}` +
+ 		(this.useColors ? ' %c' : ' ') +
+ 		args[0] +
+ 		(this.useColors ? '%c ' : ' ') +
+-		'+' + module.exports.humanize(this.diff);
++		'';
+ 
+ 	if (!this.useColors) {
+ 		return;
+diff --git a/src/node.js b/src/node.js
+index 715560a4ca8fb4c8dd6353eafdde6e83af28f05e..3829ba356e038a60408f9f7f0ed742baab527c6b 100644
+--- a/src/node.js
++++ b/src/node.js
+@@ -170,10 +170,10 @@ function formatArgs(args) {
+ 	if (useColors) {
+ 		const c = this.color;
+ 		const colorCode = '\u001B[3' + (c < 8 ? c : '8;5;' + c);
+-		const prefix = `  ${colorCode};1m${name} \u001B[0m`;
++		const prefix = `${colorCode};1m${('+' + module.exports.humanize(this.diff)).padStart(6)} ${name} \u001B[0m`;
+ 
+ 		args[0] = prefix + args[0].split('\n').join('\n' + prefix);
+-		args.push(colorCode + 'm+' + module.exports.humanize(this.diff) + '\u001B[0m');
++		args.push(colorCode + '' + '\u001B[0m');
+ 	} else {
+ 		args[0] = getDate() + name + ' ' + args[0];
+ 	}
