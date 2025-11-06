@@ -21,7 +21,7 @@ fi
 
 # Create directory structure
 mkdir -p src/lib/debug/src
-mkdir -p src/lib/debug/node_modules/ms
+mkdir -p src/lib/debug/ms
 
 # Copy debug files
 echo "📂 Copying debug source files..."
@@ -30,8 +30,8 @@ cp node_modules/debug/package.json src/lib/debug/
 
 # Copy ms dependency
 echo "📂 Copying ms dependency..."
-cp node_modules/ms/index.js src/lib/debug/node_modules/ms/
-cp node_modules/ms/package.json src/lib/debug/node_modules/ms/
+cp node_modules/ms/index.js src/lib/debug/ms/
+cp node_modules/ms/package.json src/lib/debug/ms/
 
 echo "✓ Debug files copied"
 echo ""

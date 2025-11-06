@@ -44,13 +44,17 @@ The patched `debug` library is bundled directly into the distribution, so consum
 
 When a new version of `debug` is released:
 
-1. Update debug in devDependencies: `pnpm add -D debug@x.x.x`
-2. Run the update script: `./scripts/update-debug.sh`
-3. Verify patches still apply: `git diff src/lib/debug/`
-4. Test: `pnpm dev && pnpm prepack`
-5. Commit: `git commit -am "Update bundled debug to x.x.x"`
+1. Update debug: `pnpm add debug@x.x.x`
+2. Update patch: `pnpm patch debug@x.x.x` (apply changes, then `pnpm patch-commit`)
+3. Run the update script: `./scripts/update-debug.sh`
+4. Verify patches are present: `git diff src/lib/debug/src/`
+5. Test dev mode: `pnpm dev`
+6. Test production build: `pnpm prepack`
+7. Commit changes: `git commit -am "Update bundled debug to x.x.x"`
 
 The patch is maintained in `patches/debug@4.4.3.patch` for reference.
+
+**Note:** `debug` is kept in dependencies (not devDependencies) to support both dev and production modes.
 
 ## Inspirations
 
