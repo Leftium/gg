@@ -1,13 +1,17 @@
 /**
- * Re-export patched debug library
+ * Re-export patched debug library  
  * This file bundles the patched version of debug into the library distribution.
  * 
  * The patch moves time diff display before namespace:
  *   Standard: gg:file +123ms
  *   Patched:  +123ms gg:file
+ * 
+ * Note: In dev mode with Vite, this uses the debug from node_modules (with patch applied).
+ * In production (svelte-package build), this bundles the ./debug/ folder into dist/.
  */
 
-// The debug/src/index.js handles browser vs node environment detection
-// Import CommonJS module and re-export as ES module default
-import debugModule from './debug/src/index.js';
-export default debugModule;
+// Import from debug package (works in dev with Vite optimizeDeps)
+// After svelte-package, this will bundle from ./debug/ folder
+import debug from 'debug';
+
+export default debug;
