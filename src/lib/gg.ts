@@ -137,7 +137,23 @@ export function gg(...args: unknown[]) {
 	const url = openInEditorUrl(filenameToOpen);
 
 	// Example: routes/+page.svelte
-	const filenameToDisplay = filename.replace(srcRootRegex, '');
+	let filenameToDisplay = filename.replace(srcRootRegex, '');
+	
+	// In production builds, simplify the built file paths for better readability
+	// e.g., "_app/immutable/nodes/0.CY8nc6EF.js" -> "nodes/0"
+	// e.g., ".svelte-kit/output/server/entries/pages/_layout.svelte.js" -> "pages/_layout"
+	if (filenameToDisplay.includes('_app/immutable/')) {
+		// Client-side production build
+		filenameToDisplay = filenameToDisplay
+			.replace(/.*\/_app\/immutable\//, '') // Remove path prefix
+			.replace(/\.[a-zA-Z0-9]+\.js$/, ''); // Remove hash and .js
+	} else if (filenameToDisplay.includes('.svelte-kit/output/')) {
+		// Server-side production build
+		filenameToDisplay = filenameToDisplay
+			.replace(/.*\.svelte-kit\/output\/server\/entries\//, '') // Remove path prefix
+			.replace(/\.svelte\.js$/, '') // Remove .svelte.js
+			.replace(/\.js$/, ''); // Remove .js
+	}
 
 	const { functionName } = stack[0];
 
