@@ -57,6 +57,7 @@
 		"prettier": "^3.6.2",
 		"prettier-plugin-svelte": "^3.4.0",
 		"publint": "^0.3.15",
+		"supports-color": "^10.2.2",
 		"svelte": "^5.43.3",
 		"svelte-check": "^4.3.3",
 		"terser": "^5.36.0",
