@@ -1,6 +1,6 @@
 import debugFactory from './debug.js';
 import ErrorStackParser from 'error-stack-parser';
-import { BROWSER } from 'esm-env';
+import { BROWSER, DEV } from 'esm-env';
 
 // Helper to detect if we're running in CloudFlare Workers
 const isCloudflareWorker = (): boolean => {
@@ -134,47 +134,40 @@ export function gg(...args: unknown[]) {
 		return args.length ? args[0] : { url: '', stack: [] };
 	}
 
-	// Ignore first stack frame, which is always the call to gg() itself.
-	const stack = ErrorStackParser.parse(new Error()).splice(1);
+	// Initialize return values
+	let fileName = '';
+	let functionName = '';
+	let url = '';
+	let stack: ErrorStackParser.StackFrame[] = [];
+	let namespace = 'gg:';
 
-	// Example: http://localhost:5173/src/routes/+page.svelte
-	const filename = stack[0].fileName?.replace(timestampRegex, '') || '';
+	// In development: calculate detailed callpoint information
+	// In production: skip expensive stack parsing and use simple namespace
+	if (DEV) {
+		// Ignore first stack frame, which is always the call to gg() itself.
+		stack = ErrorStackParser.parse(new Error()).splice(1);
 
-	// Example: src/routes/+page.svelte
-	const filenameToOpen = filename.replace(srcRootRegex, '$<folderName>/');
-	const url = openInEditorUrl(filenameToOpen);
+		// Example: http://localhost:5173/src/routes/+page.svelte
+		const filename = stack[0].fileName?.replace(timestampRegex, '') || '';
 
-	// Example: routes/+page.svelte
-	let filenameToDisplay = filename.replace(srcRootRegex, '');
+		// Example: src/routes/+page.svelte
+		const filenameToOpen = filename.replace(srcRootRegex, '$<folderName>/');
+		url = openInEditorUrl(filenameToOpen);
 
-	// In production builds, simplify the built file paths for better readability
-	// e.g., "_app/immutable/nodes/0.CY8nc6EF.js" -> "nodes/0"
-	// e.g., ".svelte-kit/output/server/entries/pages/_layout.svelte.js" -> "pages/_layout"
-	if (filenameToDisplay.includes('_app/immutable/')) {
-		// Client-side production build
-		filenameToDisplay = filenameToDisplay
-			.replace(/.*\/_app\/immutable\//, '') // Remove path prefix
-			.replace(/\.[a-zA-Z0-9]+\.js$/, ''); // Remove hash and .js
-	} else if (filenameToDisplay.includes('.svelte-kit/output/')) {
-		// Server-side production build
-		filenameToDisplay = filenameToDisplay
-			.replace(/.*\.svelte-kit\/output\/server\/entries\//, '') // Remove path prefix
-			.replace(/\.svelte\.js$/, '') // Remove .svelte.js
-			.replace(/\.js$/, ''); // Remove .js
+		// Example: routes/+page.svelte
+		fileName = filename.replace(srcRootRegex, '');
+		functionName = stack[0].functionName || '';
+
+		// A callpoint is uniquely identified by the filename plus function name
+		const callpoint = `${fileName}${functionName ? `@${functionName}` : ''}`;
+
+		if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
+			maxCallpointLength = callpoint.length;
+		}
+
+		namespace = `gg:${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
 	}
 
-	const { functionName } = stack[0];
-
-	//console.log({ filename, fileNameToOpen: filenameToOpen, fileNameToDisplay: filenameToDisplay });
-
-	// A callpoint is uniquely identified by the filename plus function name
-	const callpoint = `${filenameToDisplay}${functionName ? `@${functionName}` : ''}`;
-
-	if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
-		maxCallpointLength = callpoint.length;
-	}
-
-	const namespace = `gg:${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
 		namespaceToLogFunction.set(namespace, debugFactory(namespace)).get(namespace)!;
@@ -182,7 +175,7 @@ export function gg(...args: unknown[]) {
 	if (!args.length) {
 		ggLogFunction(`    📝📝 ${url} 👀👀`);
 		return {
-			fileName: filenameToDisplay,
+			fileName,
 			functionName,
 			url,
 			stack
