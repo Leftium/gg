@@ -1,17 +1,15 @@
 /**
- * Re-export patched debug library  
+ * Re-export patched debug library
  * This file bundles the patched version of debug into the library distribution.
- * 
+ *
  * The patch moves time diff display before namespace:
  *   Standard: gg:file +123ms
  *   Patched:  +123ms gg:file
- * 
- * Note: In dev mode with Vite, this uses the debug from node_modules (with patch applied).
- * In production (svelte-package build), this bundles the ./debug/ folder into dist/.
  */
 
-// Import from debug package (works in dev with Vite optimizeDeps)
-// After svelte-package, this will bundle from ./debug/ folder
+// In dev mode: use debug from node_modules (with patch applied via pnpm)
+// After build: this file is replaced by a direct import of the bundled version
+// See: scripts/bundle-debug.js which creates dist/debug-bundled.js
 import debug from 'debug';
 
 export default debug;
