@@ -103,6 +103,14 @@ const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 const namespaceToLogFunction = new Map<string, debug.Debugger>();
 let maxCallpointLength = 0;
 
+/**
+ * Reset the namespace width tracking.
+ * Useful after configuration checks that may have long callpoint paths.
+ */
+function resetNamespaceWidth() {
+	maxCallpointLength = 0;
+}
+
 function openInEditorUrl(fileName: string) {
 	return ggConfig.openInEditorUrlTemplate.replace(
 		'$FILENAME',
@@ -138,7 +146,7 @@ export function gg(...args: unknown[]) {
 
 	// Example: routes/+page.svelte
 	let filenameToDisplay = filename.replace(srcRootRegex, '');
-	
+
 	// In production builds, simplify the built file paths for better readability
 	// e.g., "_app/immutable/nodes/0.CY8nc6EF.js" -> "nodes/0"
 	// e.g., ".svelte-kit/output/server/entries/pages/_layout.svelte.js" -> "pages/_layout"
@@ -242,4 +250,8 @@ if (ggConfig.showHints && !isCloudflareWorker()) {
 	}
 
 	console.log(ggMessage);
+
+	// Reset namespace width after configuration check
+	// This prevents the long callpoint from the config check from affecting subsequent logs
+	resetNamespaceWidth();
 }
