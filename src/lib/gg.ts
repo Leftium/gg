@@ -226,14 +226,16 @@ if (ggConfig.showHints && !isCloudflareWorker()) {
 		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");
 		message(`${checkbox(ggLogTest.enabled)} localStorage.debug: ${localStorage?.debug}${hint}`);
 
-		const { status } = await fetch('/__open-in-editor?file=+');
-		message(
-			makeHint(
-				status === 222,
-				`✅ (optional) open-in-editor vite plugin detected! (status code: ${status})`,
-				`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}.) Add plugin in vite.config.ts`
-			)
-		);
+		if (DEV) {
+			const { status } = await fetch('/__open-in-editor?file=+');
+			message(
+				makeHint(
+					status === 222,
+					`✅ (optional) open-in-editor vite plugin detected! (status code: ${status})`,
+					`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}.) Add plugin in vite.config.ts`
+				)
+			);
+		}
 	} else {
 		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm dev`)');
 		if (dotenvModule) {
