@@ -348,6 +348,178 @@ gg.clearPersist = () => {
 };
 
 /**
+ * ANSI Color Helpers for gg()
+ *
+ * Create reusable color schemes with foreground (fg) and background (bg) colors.
+ * Works in both native console and Eruda plugin.
+ *
+ * @example
+ * // Method chaining (order doesn't matter)
+ * gg(fg('white').bg('red')`Critical error!`);
+ * gg(bg('green').fg('white')`Success!`);
+ *
+ * @example
+ * // Define color schemes once, reuse everywhere
+ * const input = fg('blue').bg('yellow');
+ * const transcript = bg('green').fg('white');
+ * const error = fg('white').bg('red');
+ *
+ * gg(input`User said: hello`);
+ * gg(transcript`AI responded: hi`);
+ * gg(error`Something broke!`);
+ *
+ * @example
+ * // Mix colored and normal text inline
+ * gg(fg('red')`Error: ` + bg('yellow')`warning` + ' normal text');
+ *
+ * @example
+ * // Custom colors (hex, rgb, or named)
+ * gg(fg('#ff6347').bg('#98fb98')`Custom colors`);
+ *
+ * @example
+ * // Just foreground or background
+ * gg(fg('cyan')`Cyan text`);
+ * gg(bg('magenta')`Magenta background`);
+ */
+
+type ColorTagFunction = (strings: TemplateStringsArray, ...values: unknown[]) => string;
+
+interface ChainableColorFn extends ColorTagFunction {
+	// Method chaining: fg('red').bg('green')
+	fg: (color: string) => ChainableColorFn;
+	bg: (color: string) => ChainableColorFn;
+}
+
+/**
+ * Parse color string to RGB values
+ * Accepts: named colors, hex (#rgb, #rrggbb), rgb(r,g,b), rgba(r,g,b,a)
+ */
+function parseColor(color: string): { r: number; g: number; b: number } | null {
+	// Named colors map (basic ANSI colors + common web colors)
+	const namedColors: Record<string, string> = {
+		black: '#000000',
+		red: '#ff0000',
+		green: '#00ff00',
+		yellow: '#ffff00',
+		blue: '#0000ff',
+		magenta: '#ff00ff',
+		cyan: '#00ffff',
+		white: '#ffffff',
+		// Bright variants
+		brightBlack: '#808080',
+		brightRed: '#ff6666',
+		brightGreen: '#66ff66',
+		brightYellow: '#ffff66',
+		brightBlue: '#6666ff',
+		brightMagenta: '#ff66ff',
+		brightCyan: '#66ffff',
+		brightWhite: '#ffffff',
+		// Common aliases
+		gray: '#808080',
+		grey: '#808080',
+		orange: '#ffa500',
+		purple: '#800080',
+		pink: '#ffc0cb'
+	};
+
+	// Check named colors first
+	const normalized = color.toLowerCase().trim();
+	if (namedColors[normalized]) {
+		color = namedColors[normalized];
+	}
+
+	// Parse hex color
+	const hexMatch = color.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+	if (hexMatch) {
+		return {
+			r: parseInt(hexMatch[1], 16),
+			g: parseInt(hexMatch[2], 16),
+			b: parseInt(hexMatch[3], 16)
+		};
+	}
+
+	// Parse short hex (#rgb)
+	const shortHexMatch = color.match(/^#?([a-f\d])([a-f\d])([a-f\d])$/i);
+	if (shortHexMatch) {
+		return {
+			r: parseInt(shortHexMatch[1] + shortHexMatch[1], 16),
+			g: parseInt(shortHexMatch[2] + shortHexMatch[2], 16),
+			b: parseInt(shortHexMatch[3] + shortHexMatch[3], 16)
+		};
+	}
+
+	// Parse rgb(r,g,b) or rgba(r,g,b,a)
+	const rgbMatch = color.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+	if (rgbMatch) {
+		return {
+			r: parseInt(rgbMatch[1]),
+			g: parseInt(rgbMatch[2]),
+			b: parseInt(rgbMatch[3])
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Internal helper to create chainable color function with method chaining
+ */
+function createColorFunction(fgCode: string = '', bgCode: string = ''): ChainableColorFn {
+	const tagFn = function (strings: TemplateStringsArray, ...values: unknown[]): string {
+		const text = strings.reduce(
+			(acc, str, i) => acc + str + (values[i] !== undefined ? String(values[i]) : ''),
+			''
+		);
+		return fgCode + bgCode + text + '\x1b[0m';
+	};
+
+	// Add method chaining
+	tagFn.fg = (color: string) => {
+		const rgb = parseColor(color);
+		const newFgCode = rgb ? `\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
+		return createColorFunction(newFgCode, bgCode);
+	};
+
+	tagFn.bg = (color: string) => {
+		const rgb = parseColor(color);
+		const newBgCode = rgb ? `\x1b[48;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
+		return createColorFunction(fgCode, newBgCode);
+	};
+
+	return tagFn as ChainableColorFn;
+}
+
+/**
+ * Foreground (text) color helper
+ * Can be used directly or chained with .bg()
+ *
+ * @param color - Named color, hex (#rrggbb), or rgb(r,g,b)
+ * @example
+ * gg(fg('red')`Error`);
+ * gg(fg('white').bg('red')`Critical!`);
+ */
+export function fg(color: string): ChainableColorFn {
+	const rgb = parseColor(color);
+	const fgCode = rgb ? `\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
+	return createColorFunction(fgCode, '');
+}
+
+/**
+ * Background color helper
+ * Can be used directly or chained with .fg()
+ *
+ * @param color - Named color, hex (#rrggbb), or rgb(r,g,b)
+ * @example
+ * gg(bg('yellow')`Warning`);
+ * gg(bg('green').fg('white')`Success!`);
+ */
+export function bg(color: string): ChainableColorFn {
+	const rgb = parseColor(color);
+	const bgCode = rgb ? `\x1b[48;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
+	return createColorFunction('', bgCode);
+}
+
+/**
  * Hook for capturing gg() output (used by Eruda plugin)
  * Set this to a callback function to receive log entries
  */

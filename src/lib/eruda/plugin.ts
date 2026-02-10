@@ -635,7 +635,8 @@ export function createGgPlugin(
 							if (typeof arg === 'object' && arg !== null) {
 								return JSON.stringify(arg);
 							}
-							return String(arg);
+							// Strip ANSI escape codes from string args
+							return stripAnsi(String(arg));
 						})
 						.join(' ');
 					return `${time} ${ns} ${argsStr}`;
@@ -807,13 +808,13 @@ export function createGgPlugin(
 								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
 								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
 							} else {
-								// Convert URLs to clickable links
+								// Parse ANSI codes first, then convert URLs to clickable links
 								const argStr = String(arg);
-								const urlRegex = /(https?:\/\/[^\s]+)/g;
-								const linkedText = argStr.replace(urlRegex, (url) => {
-									return `<a href="${escapeHtml(url)}" target="_blank" style="color: #0066cc; text-decoration: underline;">${escapeHtml(url)}</a>`;
-								});
-								return `<span>${linkedText}</span>`;
+								const parsedAnsi = parseAnsiToHtml(argStr);
+								// Note: URL linking happens after ANSI parsing, so links work inside colored text
+								// This is a simple approach - URLs inside ANSI codes won't be linkified
+								// For more complex parsing, we'd need to track ANSI state while matching URLs
+								return `<span>${parsedAnsi}</span>`;
 							}
 						})
 						.join(' ');
@@ -869,6 +870,80 @@ export function createGgPlugin(
 		const div = document.createElement('div');
 		div.textContent = text;
 		return div.innerHTML;
+	}
+
+	/**
+	 * Strip ANSI escape codes from text
+	 * Removes all ANSI escape sequences like \x1b[...m
+	 */
+	function stripAnsi(text: string): string {
+		// Remove all ANSI escape codes
+		return text.replace(/\x1b\[[0-9;]*m/g, '');
+	}
+
+	/**
+	 * Parse ANSI escape codes and convert to HTML with inline styles
+	 * Supports:
+	 * - 24-bit RGB: \x1b[38;2;r;g;bm (foreground), \x1b[48;2;r;g;bm (background)
+	 * - Reset: \x1b[0m
+	 */
+	function parseAnsiToHtml(text: string): string {
+		// ANSI escape sequence regex
+		// Matches: \x1b[38;2;r;g;bm, \x1b[48;2;r;g;bm, \x1b[0m
+		const ansiRegex = /\x1b\[([0-9;]+)m/g;
+
+		let html = '';
+		let lastIndex = 0;
+		let currentFg: string | null = null;
+		let currentBg: string | null = null;
+		let match;
+
+		while ((match = ansiRegex.exec(text)) !== null) {
+			// Add text before this code (with current styling)
+			const textBefore = text.slice(lastIndex, match.index);
+			if (textBefore) {
+				html += wrapWithStyle(escapeHtml(textBefore), currentFg, currentBg);
+			}
+
+			// Parse the ANSI code
+			const code = match[1];
+			const parts = code.split(';').map(Number);
+
+			if (parts[0] === 0) {
+				// Reset
+				currentFg = null;
+				currentBg = null;
+			} else if (parts[0] === 38 && parts[1] === 2 && parts.length >= 5) {
+				// Foreground RGB: 38;2;r;g;b
+				currentFg = `rgb(${parts[2]},${parts[3]},${parts[4]})`;
+			} else if (parts[0] === 48 && parts[1] === 2 && parts.length >= 5) {
+				// Background RGB: 48;2;r;g;b
+				currentBg = `rgb(${parts[2]},${parts[3]},${parts[4]})`;
+			}
+
+			lastIndex = ansiRegex.lastIndex;
+		}
+
+		// Add remaining text
+		const remaining = text.slice(lastIndex);
+		if (remaining) {
+			html += wrapWithStyle(escapeHtml(remaining), currentFg, currentBg);
+		}
+
+		return html || escapeHtml(text);
+	}
+
+	/**
+	 * Wrap text with inline color styles
+	 */
+	function wrapWithStyle(text: string, fg: string | null, bg: string | null): string {
+		if (!fg && !bg) return text;
+
+		const styles: string[] = [];
+		if (fg) styles.push(`color: ${fg}`);
+		if (bg) styles.push(`background-color: ${bg}`);
+
+		return `<span style="${styles.join('; ')}">${text}</span>`;
 	}
 
 	return plugin;

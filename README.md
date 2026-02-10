@@ -20,7 +20,67 @@ npm add @leftium/gg
 
 ## Usage
 
-_Coming soon..._
+### Basic Logging
+
+```javascript
+import { gg } from '@leftium/gg';
+
+// Simple logging
+gg('Hello world');
+
+// Log expressions (returns first argument)
+const result = gg(someFunction());
+
+// Multiple arguments
+gg('User:', user, 'Status:', status);
+```
+
+### Color Support (ANSI)
+
+Color your logs for better visual distinction using `fg()` (foreground/text) and `bg()` (background):
+
+```javascript
+import { gg, fg, bg } from '@leftium/gg';
+
+// Simple foreground/background colors
+gg(fg('red')`Error occurred`);
+gg(bg('yellow')`Warning message`);
+
+// Method chaining (order doesn't matter!)
+gg(fg('white').bg('red')`Critical error!`);
+gg(bg('green').fg('white')`Success message`);
+
+// Define reusable color schemes
+const input = fg('blue').bg('yellow');
+const transcript = bg('green').fg('white');
+const error = fg('white').bg('red');
+
+gg(input`User input message`);
+gg(transcript`AI transcript response`);
+gg(error`Something went wrong`);
+
+// Mix colored and normal text
+gg(fg('red')`Error: ` + bg('yellow')`warning` + ' normal text');
+
+// Custom hex colors with chaining
+gg(fg('#ff6347').bg('#98fb98')`Custom colors`);
+
+// RGB colors
+gg(fg('rgb(255,99,71)')`Tomato text`);
+```
+
+**Supported color formats:**
+
+- Named colors: `'red'`, `'green'`, `'blue'`, `'cyan'`, `'magenta'`, `'yellow'`, `'white'`, `'black'`, `'gray'`, `'orange'`, `'purple'`, `'pink'`
+- Hex codes: `'#ff0000'`, `'#f00'`
+- RGB: `'rgb(255,0,0)'`, `'rgba(255,0,0,0.5)'`
+
+**Where colors work:**
+
+- ✅ Native browser console (Chrome DevTools, Firefox, etc.)
+- ✅ Eruda GG panel (mobile debugging)
+- ✅ Node.js terminal
+- ✅ All environments that support ANSI escape codes
 
 ## Technical Details
 

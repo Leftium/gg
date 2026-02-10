@@ -3,7 +3,7 @@
 
 	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
-	import { gg } from '$lib/index.js';
+	import { gg, fg, bg } from '$lib/index.js';
 	import { initGgEruda } from '$lib/eruda/index.js';
 	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
 	import type ErrorStackParser from 'error-stack-parser';
@@ -44,6 +44,34 @@
 	function testApi() {
 		gg('API call started', { endpoint: '/api/users' });
 	}
+
+	function testAnsiColors() {
+		// Test raw ANSI codes
+		gg('\x1b[41mRaw ANSI red\x1b[0m normal text');
+
+		// Test new fg/bg helpers - simple usage
+		gg(bg('yellow')`Yellow background`);
+		gg(fg('cyan')`Cyan text`);
+
+		// Test method chaining fg + bg (order doesn't matter)
+		gg(fg('white').bg('red')`Critical error!`);
+		gg(bg('green').fg('white')`Success message`);
+
+		// Define reusable color schemes with chaining
+		const input = fg('blue').bg('yellow');
+		const transcript = bg('green').fg('white');
+		const error = fg('white').bg('red');
+
+		gg(input`User input message`);
+		gg(transcript`AI transcript response`);
+		gg(error`Error message!`);
+
+		// Test mixing inline
+		gg(fg('red')`Error: ` + bg('yellow')`warning` + ' normal text');
+
+		// Test custom hex colors with chaining
+		gg(fg('#ff6347').bg('#98fb98')`Tomato on pale green`);
+	}
 </script>
 
 <main class="container">
@@ -51,6 +79,7 @@
 		<button onclick={testLog}>🧪 Test gg() Log</button>
 		<button onclick={testVerbose}>📝 Verbose Log</button>
 		<button onclick={testApi}>🌐 API Log</button>
+		<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
 	</div>
 
 	<OpenInEditorLink {ggResult} />
