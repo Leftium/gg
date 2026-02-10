@@ -179,6 +179,20 @@ function openInEditorUrl(fileName: string) {
 
 // http://localhost:5173/__open-in-editor?file=src%2Froutes%2F%2Bpage.svelte
 
+/**
+ * Hook for capturing gg() output (used by Eruda plugin)
+ */
+interface CapturedEntry {
+	namespace: string;
+	color: string;
+	diff: number; // Millisecond diff like +0ms, +123ms
+	message: string;
+	args: unknown[];
+	timestamp: number;
+}
+
+type OnLogCallback = (entry: CapturedEntry) => void;
+
 // Overload signatures
 export function gg(): {
 	fileName: string;
@@ -247,6 +261,21 @@ export function gg(...args: unknown[]) {
 	} else {
 		ggLogFunction(args[0], ...args.slice(1));
 	}
+
+	// Call capture hook if registered (for Eruda plugin)
+	if (gg._onLog) {
+		// Don't stringify args - keep them as-is for expandable objects
+		const message = args.length === 1 ? String(args[0]) : args.map(String).join(' ');
+		gg._onLog({
+			namespace,
+			color: ggLogFunction.color,
+			diff: ggLogFunction.diff || 0, // Millisecond diff from debug library
+			message,
+			args, // Keep raw args for object inspection
+			timestamp: Date.now()
+		});
+	}
+
 	return args[0];
 }
 
@@ -268,6 +297,12 @@ gg.clearPersist = () => {
 		}
 	}
 };
+
+/**
+ * Hook for capturing gg() output (used by Eruda plugin)
+ * Set this to a callback function to receive log entries
+ */
+gg._onLog = null as OnLogCallback | null;
 
 // Log some gg info to the JS console/terminal:
 

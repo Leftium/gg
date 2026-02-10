@@ -32,6 +32,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"default": "./dist/index.js"
+		},
+		"./eruda": {
+			"types": "./dist/eruda/index.d.ts",
+			"default": "./dist/eruda/index.js"
 		}
 	},
 	"peerDependencies": {
@@ -52,6 +56,7 @@
 		"@types/node": "^25.0.8",
 		"add": "^2.0.6",
 		"debug": "^4.4.3",
+		"eruda": "^3.4.3",
 		"eslint": "^9.39.2",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.14.0",
