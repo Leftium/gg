@@ -70,6 +70,17 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 		const erudaModule = await import('eruda');
 		const eruda = erudaModule.default;
 
+		// Clear Eruda position state to prevent icon from being stuck in wrong position
+		// Eruda stores draggable icon position in localStorage which can get corrupted
+		// This ensures the icon always appears in the default bottom-right corner
+		try {
+			// Eruda uses keys like 'eruda-entry-button' for position state
+			const positionKeys = ['eruda-entry-button', 'eruda-position'];
+			positionKeys.forEach((key) => localStorage.removeItem(key));
+		} catch {
+			// localStorage might not be available
+		}
+
 		// Initialize Eruda
 		eruda.init({
 			...options.erudaOptions,
