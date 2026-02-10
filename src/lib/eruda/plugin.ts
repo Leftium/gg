@@ -657,7 +657,13 @@ export function createGgPlugin(
 								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; grid-column: 1 / -1; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
 								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
 							} else {
-								return `<span>${escapeHtml(String(arg))}</span>`;
+								// Convert URLs to clickable links
+								const argStr = String(arg);
+								const urlRegex = /(https?:\/\/[^\s]+)/g;
+								const linkedText = argStr.replace(urlRegex, (url) => {
+									return `<a href="${escapeHtml(url)}" target="_blank" style="color: #0066cc; text-decoration: underline;">${escapeHtml(url)}</a>`;
+								});
+								return `<span>${linkedText}</span>`;
 							}
 						})
 						.join(' ');

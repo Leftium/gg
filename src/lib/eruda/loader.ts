@@ -90,7 +90,7 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 
 		// Register gg plugin
 		// Import gg and pass it to the plugin directly
-		const { gg } = await import('../gg.js');
+		const { gg, runGgDiagnostics } = await import('../gg.js');
 		const { createGgPlugin } = await import('./plugin.js');
 		const ggPlugin = createGgPlugin(options, gg);
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,6 +98,9 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 
 		// Make GG tab the default selected tab
 		eruda.show('GG');
+
+		// Run diagnostics after Eruda is ready so they appear in Console tab
+		await runGgDiagnostics();
 	} catch (error) {
 		console.error('[gg] Failed to load Eruda:', error);
 	}

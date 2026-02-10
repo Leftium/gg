@@ -280,40 +280,52 @@ export function gg(...args: unknown[]) {
 		namespaceToLogFunction.get(namespace) ||
 		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 
+	// Prepare args for logging
+	let logArgs: unknown[];
+	let returnValue: unknown;
+
 	if (!args.length) {
-		ggLogFunction(`    📝📝 ${url} 👀👀`);
-		return {
+		// No arguments: log editor link
+		logArgs = [`    📝📝 ${url} 👀👀`];
+		returnValue = {
 			fileName,
 			functionName,
 			url,
 			stack
 		};
+	} else if (args.length === 1) {
+		logArgs = [args[0]];
+		returnValue = args[0];
+	} else {
+		logArgs = [args[0], ...args.slice(1)];
+		returnValue = args[0];
 	}
 
-	// Handle the case where args might be empty or have any number of arguments
-	if (args.length === 1) {
-		ggLogFunction(args[0]);
+	// Log to console via debug
+	if (logArgs.length === 1) {
+		ggLogFunction(logArgs[0]);
 	} else {
-		ggLogFunction(args[0], ...args.slice(1));
+		ggLogFunction(logArgs[0], ...logArgs.slice(1));
 	}
 
 	// Call capture hook if registered (for Eruda plugin)
-	if (gg._onLog) {
-		// Don't stringify args - keep them as-is for expandable objects
-		const message = args.length === 1 ? String(args[0]) : args.map(String).join(' ');
+	const entry: CapturedEntry = {
+		namespace,
+		color: ggLogFunction.color,
+		diff: ggLogFunction.diff || 0, // Millisecond diff from debug library
+		message: logArgs.length === 1 ? String(logArgs[0]) : logArgs.map(String).join(' '),
+		args: logArgs, // Keep raw args for object inspection
+		timestamp: Date.now()
+	};
 
-		// Use debug's native color (now deterministic since namespace has no padding)
-		gg._onLog({
-			namespace,
-			color: ggLogFunction.color,
-			diff: ggLogFunction.diff || 0, // Millisecond diff from debug library
-			message,
-			args, // Keep raw args for object inspection
-			timestamp: Date.now()
-		});
+	if (_onLogCallback) {
+		_onLogCallback(entry);
+	} else {
+		// Buffer early logs before Eruda initializes
+		earlyLogBuffer.push(entry);
 	}
 
-	return args[0];
+	return returnValue;
 }
 
 gg.disable = isCloudflareWorker() ? () => {} : debugFactory.disable;
@@ -339,11 +351,38 @@ gg.clearPersist = () => {
  * Hook for capturing gg() output (used by Eruda plugin)
  * Set this to a callback function to receive log entries
  */
-gg._onLog = null as OnLogCallback | null;
+// Buffer for capturing early logs before Eruda initializes
+const earlyLogBuffer: CapturedEntry[] = [];
+let _onLogCallback: OnLogCallback | null = null;
 
-// Log some gg info to the JS console/terminal:
+// Proxy property that replays buffered logs when hook is registered
+Object.defineProperty(gg, '_onLog', {
+	get() {
+		return _onLogCallback;
+	},
+	set(callback: OnLogCallback | null) {
+		_onLogCallback = callback;
+		// Replay buffered logs when callback is first registered
+		if (callback && earlyLogBuffer.length > 0) {
+			earlyLogBuffer.forEach((entry) => callback(entry));
+			earlyLogBuffer.length = 0; // Clear buffer after replay
+		}
+	}
+});
 
-if (ggConfig.showHints && !isCloudflareWorker()) {
+// Namespace for adding properties to the gg function
+// eslint-disable-next-line @typescript-eslint/no-namespace
+export namespace gg {
+	export let _onLog: OnLogCallback | null;
+}
+
+/**
+ * Run gg diagnostics and log configuration status
+ * Can be called immediately or delayed (e.g., after Eruda loads)
+ */
+export async function runGgDiagnostics() {
+	if (!ggConfig.showHints || isCloudflareWorker()) return;
+
 	const ggLogTest = debugFactory('gg:TEST');
 
 	let ggMessage = '\n';
@@ -352,13 +391,14 @@ if (ggConfig.showHints && !isCloudflareWorker()) {
 	const checkbox = (test: boolean) => (test ? '✅' : '❌');
 	const makeHint = (test: boolean, ifTrue: string, ifFalse = '') => (test ? ifTrue : ifFalse);
 
+	// Use plain console.log for diagnostics - appears in Eruda's Console tab
 	console.log(`Loaded gg module. Checking configuration...`);
 	if (ggConfig.enabled && ggLogTest.enabled) {
 		gg('If you can see this logg, gg configured correctly!');
 		message(`No problems detected:`);
 		if (BROWSER) {
 			message(
-				`ℹ️ If gg output still not visible above, enable "Verbose" log level in browser DevTools.`
+				`ℹ️ If gg output not visible: enable "Verbose" log level in DevTools, or check Eruda's GG tab.`
 			);
 		}
 	} else {
@@ -397,9 +437,20 @@ if (ggConfig.showHints && !isCloudflareWorker()) {
 		message(`${checkbox(ggLogTest.enabled)} DEBUG env variable: ${process?.env?.DEBUG}${hint}`);
 	}
 
+	// Use plain console.log for diagnostics - appears in Eruda's Console tab
 	console.log(ggMessage);
 
 	// Reset namespace width after configuration check
 	// This prevents the long callpoint from the config check from affecting subsequent logs
 	resetNamespaceWidth();
+}
+
+// Run diagnostics immediately on module load if Eruda is not being used
+// (If Eruda will load, the loader will call runGgDiagnostics after Eruda is ready)
+if (ggConfig.showHints && !isCloudflareWorker()) {
+	// Only run immediately if we're not in a context where Eruda might load
+	// In browser dev mode, assume Eruda might load and skip immediate diagnostics
+	if (!BROWSER || !DEV) {
+		runGgDiagnostics();
+	}
 }
