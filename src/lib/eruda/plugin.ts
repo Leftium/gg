@@ -472,7 +472,12 @@ export function createGgPlugin(
 		});
 
 		$el.find('.gg-copy-btn').on('click', async () => {
-			const entries = buffer.getEntries();
+			const allEntries = buffer.getEntries();
+			// Apply same filtering as renderLogs() - only copy visible entries
+			const entries = allEntries.filter((entry: CapturedEntry) =>
+				enabledNamespaces.has(entry.namespace)
+			);
+
 			const text = entries
 				.map((e: CapturedEntry) => {
 					const timestamp = new Date(e.timestamp).toISOString();
