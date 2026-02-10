@@ -21,6 +21,7 @@
 		"dist",
 		"!dist/**/*.test.*",
 		"!dist/**/*.spec.*",
+		"!dist/debug/",
 		"patches/"
 	],
 	"sideEffects": [
