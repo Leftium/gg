@@ -36,13 +36,8 @@
 		});
 	}
 
-	function testVerbose() {
-		// This would use a different namespace in practice
-		gg('Verbose log entry', { detail: 'lots of detail here' });
-	}
-
-	function testApi() {
-		gg('API call started', { endpoint: '/api/users' });
+	function testManualNs() {
+		gg.ns('my-app', 'Custom namespace log', { source: 'manual', timestamp: Date.now() });
 	}
 
 	function testAnsiColors() {
@@ -77,8 +72,7 @@
 <main class="container">
 	<div style="margin-bottom: 1rem;">
 		<button onclick={testLog}>🧪 Test gg() Log</button>
-		<button onclick={testVerbose}>📝 Verbose Log</button>
-		<button onclick={testApi}>🌐 API Log</button>
+		<button onclick={testManualNs}>🏷️ gg.ns('my-app')</button>
 		<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
 	</div>
 

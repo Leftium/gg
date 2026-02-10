@@ -125,6 +125,23 @@ export function createGgPlugin(
 		});
 	}
 
+	function soloNamespace(namespace: string) {
+		const ns = namespace.trim();
+
+		// Toggle: if already soloed on this namespace, restore all
+		if (filterPattern === ns) {
+			filterPattern = 'gg:*';
+			enabledNamespaces.clear();
+			getAllCapturedNamespaces().forEach((n) => enabledNamespaces.add(n));
+			return;
+		}
+
+		// Solo: show only this namespace
+		filterPattern = ns;
+		enabledNamespaces.clear();
+		enabledNamespaces.add(ns);
+	}
+
 	function simplifyPattern(pattern: string): string {
 		if (!pattern) return '';
 
@@ -214,7 +231,11 @@ export function createGgPlugin(
 
 	function gridColumns(): string {
 		const ns = nsColWidth !== null ? `${nsColWidth}px` : 'auto';
-		// diff | ns | handle | content (× is now inside ns)
+		// When filter expanded: icons | diff | ns | handle | content
+		// When collapsed:               diff | ns | handle | content
+		if (filterExpanded) {
+			return `auto auto ${ns} 4px 1fr`;
+		}
 		return `auto ${ns} 4px 1fr`;
 	}
 
@@ -234,6 +255,7 @@ export function createGgPlugin(
 			.gg-log-header {
 				display: contents;
 			}
+			.gg-log-icons,
 			.gg-log-diff,
 			.gg-log-ns,
 			.gg-log-handle,
@@ -241,6 +263,32 @@ export function createGgPlugin(
 				min-width: 0;
 				align-self: start !important;
 				border-top: 1px solid rgba(0,0,0,0.05);
+			}
+			.gg-log-icons {
+				display: flex;
+				gap: 2px;
+				padding: 0 4px 0 0;
+				white-space: nowrap;
+				align-self: stretch !important;
+			}
+			.gg-log-icons button {
+				all: unset;
+				cursor: pointer;
+				opacity: 0.35;
+				padding: 4px 10px;
+				line-height: 1;
+				display: flex;
+				align-items: center;
+			}
+			.gg-log-icons button:hover {
+				opacity: 1;
+				background: rgba(0,0,0,0.05);
+			}
+			.gg-solo-target {
+				cursor: pointer;
+			}
+			.gg-solo-target:hover {
+				background: rgba(0,0,0,0.05);
 			}
 			.gg-details {
 				grid-column: 1 / -1;
@@ -285,15 +333,6 @@ export function createGgPlugin(
 					word-break: break-word;
 					padding: 4px 0;
 				}
-			/* Make header clickable for filtering when filters are expanded */
-			.gg-log-header.clickable {
-				cursor: pointer;
-			}
-			/* Desktop: highlight child elements since header has display: contents */
-			.gg-log-header.clickable:hover .gg-log-diff,
-			.gg-log-header.clickable:hover .gg-log-ns {
-				background: rgba(0,0,0,0.05);
-			}
 				.gg-filter-panel {
 					background: #f5f5f5;
 					padding: 10px;
@@ -376,6 +415,7 @@ export function createGgPlugin(
 					.gg-log-entry:not(:first-child) {
 						border-top: 1px solid rgba(0,0,0,0.05);
 					}
+				.gg-log-icons,
 				.gg-log-diff,
 				.gg-log-ns,
 				.gg-log-handle,
@@ -390,18 +430,6 @@ export function createGgPlugin(
 				margin-bottom: 4px;
 				min-width: 0;
 			}
-			/* Mobile: hover on container since it's not display: contents */
-			.gg-log-header.clickable {
-				padding: 2px 0;
-			}
-			.gg-log-header.clickable:hover {
-				background: rgba(0,0,0,0.05);
-			}
-				/* Override desktop child hover on mobile */
-				.gg-log-header.clickable:hover .gg-log-diff,
-				.gg-log-header.clickable:hover .gg-log-ns {
-					background: transparent;
-				}
 				.gg-log-diff {
 					padding: 0;
 					text-align: left;
@@ -683,20 +711,48 @@ export function createGgPlugin(
 				return;
 			}
 
-			// Handle clickable header (when filters expanded)
-			// Skip if clicking on resize handle
+			// Handle filter icon clicks (hide / solo)
 			if (
-				!target?.classList?.contains('gg-log-handle') &&
-				target?.closest('.gg-log-header.clickable')
+				target?.classList?.contains('gg-icon-hide') ||
+				target?.classList?.contains('gg-icon-solo')
 			) {
-				const header = target.closest('.gg-log-header.clickable') as HTMLElement;
-				const namespace = header.getAttribute('data-namespace');
+				const iconsDiv = target.closest('.gg-log-icons') as HTMLElement;
+				const namespace = iconsDiv?.getAttribute('data-namespace');
 				if (!namespace) return;
 
-				// Toggle this namespace off
-				toggleNamespace(namespace, false);
+				if (target.classList.contains('gg-icon-hide')) {
+					toggleNamespace(namespace, false);
+				} else {
+					soloNamespace(namespace);
+				}
 
-				// Save to localStorage and re-render
+				localStorage.setItem('debug', filterPattern);
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
+			// Handle clicking diff/ns cells to solo (same as 🎯)
+			if (target?.classList?.contains('gg-solo-target')) {
+				const namespace = target.getAttribute('data-namespace');
+				if (!namespace) return;
+
+				soloNamespace(namespace);
+				localStorage.setItem('debug', filterPattern);
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
+			// Clicking background (container or grid, not a log element) restores all
+			if (
+				filterExpanded &&
+				filterPattern !== 'gg:*' &&
+				(target === containerEl || target?.classList?.contains('gg-log-grid'))
+			) {
+				filterPattern = 'gg:*';
+				enabledNamespaces.clear();
+				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				localStorage.setItem('debug', filterPattern);
 				renderFilterUI();
 				renderLogs();
@@ -820,23 +876,25 @@ export function createGgPlugin(
 						.join(' ');
 				}
 
-				// Make header clickable when filters expanded
-				const headerClass = filterExpanded ? 'gg-log-header clickable' : 'gg-log-header';
-				const headerAttrs = filterExpanded
-					? ` data-namespace="${ns}" title="Click to hide this namespace"`
+				// Filter icons column (only when expanded)
+				const iconsCol = filterExpanded
+					? `<div class="gg-log-icons" data-namespace="${ns}">` +
+						`<button class="gg-icon-hide" title="Hide this namespace">🗑</button>` +
+						`<button class="gg-icon-solo" title="Show only this namespace">🎯</button>` +
+						`</div>`
 					: '';
 
-				// Add × at start of diff when filters expanded (bold, darker)
-				const filterIcon = filterExpanded
-					? '<span style="font-weight: bold; color: #000; opacity: 0.6;">× </span>'
-					: '';
+				// When filter expanded, diff+ns are clickable (solo) with data-namespace
+				const soloAttr = filterExpanded ? ` data-namespace="${ns}"` : '';
+				const soloClass = filterExpanded ? ' gg-solo-target' : '';
 
 				// Desktop: grid layout, Mobile: stacked layout
 				return (
 					`<div class="gg-log-entry">` +
-					`<div class="${headerClass}"${headerAttrs}>` +
-					`<div class="gg-log-diff" style="color: ${color};">${filterIcon}${diff}</div>` +
-					`<div class="gg-log-ns" style="color: ${color};">${ns}</div>` +
+					`<div class="gg-log-header">` +
+					iconsCol +
+					`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
+					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}>${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
 					`<div class="gg-log-content">${argsHTML}</div>` +
