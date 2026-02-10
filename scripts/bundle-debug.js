@@ -7,7 +7,7 @@ const execAsync = promisify(exec);
 console.log('📦 Bundling patched debug library...');
 
 try {
-	const { stdout, stderr } = await execAsync('npx rollup -c rollup.config.debug.js');
+	const { stdout, stderr } = await execAsync('rollup -c rollup.config.debug.js');
 
 	if (stdout) console.log(stdout);
 	if (stderr) console.error(stderr);
