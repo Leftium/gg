@@ -226,15 +226,21 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					display: grid;
 					grid-template-columns: ${gridColumns()};
 					column-gap: 0;
-					align-items: baseline;
+					align-items: start !important;
 				}
 				.gg-log-grid > * {
 					min-width: 0;
-					border-bottom: 1px solid rgba(0,0,0,0.05);
+					border-top: 1px solid rgba(0,0,0,0.05);
+					align-self: start !important;
+				}
+				.gg-details {
+					align-self: stretch !important;
+					border-bottom: none;
 				}
 				.gg-log-diff {
 					text-align: right;
 					padding: 4px 8px 4px 0;
+					white-space: pre;
 				}
 				.gg-log-ns {
 					font-weight: bold;
@@ -246,7 +252,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 				.gg-log-handle {
 					width: 4px;
 					cursor: col-resize;
-					align-self: stretch;
+					align-self: stretch !important;
 					background: transparent;
 					position: relative;
 					padding: 0 8px 0 0;
@@ -273,6 +279,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					user-select: none;
 					opacity: 0.6;
 					font-size: 14px;
+					align-self: start;
 				}
 				.gg-row-filter:hover {
 					opacity: 1;
@@ -631,6 +638,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 
 				// Format each arg individually - objects are expandable
 				let argsHTML = '';
+				let detailsHTML = '';
 				if (entry.args.length === 0) {
 					argsHTML = '';
 				} else {
@@ -641,10 +649,9 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 								const preview = Array.isArray(arg) ? `Array(${arg.length})` : 'Object';
 								const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
 								const uniqueId = `${index}-${argIdx}`;
-								return (
-									`<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>` +
-									`<div class="gg-details" data-index="${uniqueId}" style="display: none; grid-column: 1 / -1; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`
-								);
+								// Store details separately to render after the row
+								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; grid-column: 1 / -1; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
+								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
 							} else {
 								return `<span>${escapeHtml(String(arg))}</span>`;
 							}
@@ -662,7 +669,8 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					`<div class="gg-log-diff" style="color: ${color};">${diff}</div>` +
 					`<div class="gg-log-ns" style="color: ${color};">${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
-					`<div class="gg-log-content">${argsHTML}</div>`
+					`<div class="gg-log-content">${argsHTML}</div>` +
+					detailsHTML
 				);
 			})
 			.join('')}</div>`;
@@ -680,10 +688,10 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 	/** Format ms like debug's `ms` package: 0ms, 500ms, 5s, 2m, 1h, 3d */
 	function humanize(ms: number): string {
 		const abs = Math.abs(ms);
-		if (abs >= 86400000) return Math.round(ms / 86400000) + 'd';
-		if (abs >= 3600000) return Math.round(ms / 3600000) + 'h';
-		if (abs >= 60000) return Math.round(ms / 60000) + 'm';
-		if (abs >= 1000) return Math.round(ms / 1000) + 's';
+		if (abs >= 86400000) return Math.round(ms / 86400000) + 'd ';
+		if (abs >= 3600000) return Math.round(ms / 3600000) + 'h ';
+		if (abs >= 60000) return Math.round(ms / 60000) + 'm ';
+		if (abs >= 1000) return Math.round(ms / 1000) + 's ';
 		return ms + 'ms';
 	}
 
