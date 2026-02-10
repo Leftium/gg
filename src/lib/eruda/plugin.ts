@@ -15,6 +15,10 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 	let resizeAttached = false;
 	// null = auto (fit content), number = user-dragged px width
 	let nsColWidth: number | null = null;
+	// Filter UI state
+	let filterExpanded = false;
+	let filterPattern = '';
+	let enabledNamespaces = new Set<string>();
 
 	const plugin = {
 		name: 'GG',
@@ -26,15 +30,28 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 			if (gg) {
 				gg._onLog = (entry: CapturedEntry) => {
 					buffer.push(entry);
+					// Add new namespace to enabledNamespaces if it matches the current pattern
+					const effectivePattern = filterPattern || 'gg:*';
+					if (namespaceMatchesPattern(entry.namespace, effectivePattern)) {
+						enabledNamespaces.add(entry.namespace);
+					}
+					// Update filter header if expanded (new namespace may have appeared)
+					if (filterExpanded) {
+						renderFilterHeader();
+					}
 					renderLogs();
 				};
 			}
+
+			// Load initial filter state
+			filterPattern = localStorage.getItem('debug') || '';
 
 			// Render initial UI
 			$el.html(buildHTML());
 			wireUpButtons();
 			wireUpExpanders();
 			wireUpResize();
+			wireUpFilterUI();
 			renderLogs();
 		},
 
@@ -55,9 +72,151 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 		}
 	};
 
+	function loadFilterState() {
+		filterPattern = localStorage.getItem('debug') || '';
+		// Rebuild enabledNamespaces based on current pattern and captured logs
+		const allNamespaces = getAllCapturedNamespaces();
+		enabledNamespaces.clear();
+
+		// If no pattern, default to 'gg:*' (show all gg logs)
+		const effectivePattern = filterPattern || 'gg:*';
+
+		allNamespaces.forEach((ns) => {
+			if (namespaceMatchesPattern(ns, effectivePattern)) {
+				enabledNamespaces.add(ns);
+			}
+		});
+	}
+
+	function toggleNamespace(namespace: string, enable: boolean) {
+		const currentPattern = filterPattern || 'gg:*';
+		const ns = namespace.trim();
+		// Split into parts, manipulate, rejoin (avoids fragile regex on complex namespace strings)
+		const parts = currentPattern
+			.split(',')
+			.map((p) => p.trim())
+			.filter(Boolean);
+
+		if (enable) {
+			// Remove any exclusion for this namespace
+			const filtered = parts.filter((p) => p !== `-${ns}`);
+			filterPattern = filtered.join(',');
+		} else {
+			// Add exclusion
+			parts.push(`-${ns}`);
+			filterPattern = parts.join(',');
+		}
+
+		// Simplify pattern
+		filterPattern = simplifyPattern(filterPattern);
+
+		// Sync enabledNamespaces from the NEW pattern (don't re-read localStorage)
+		const allNamespaces = getAllCapturedNamespaces();
+		enabledNamespaces.clear();
+		const effectivePattern = filterPattern || 'gg:*';
+		allNamespaces.forEach((ns) => {
+			if (namespaceMatchesPattern(ns, effectivePattern)) {
+				enabledNamespaces.add(ns);
+			}
+		});
+	}
+
+	function simplifyPattern(pattern: string): string {
+		if (!pattern) return '';
+
+		// Remove empty parts
+		let parts = pattern
+			.split(',')
+			.map((p) => p.trim())
+			.filter(Boolean);
+
+		// Remove duplicates
+		parts = Array.from(new Set(parts));
+
+		// Clean up trailing/leading commas
+		return parts.join(',');
+	}
+
+	function getAllCapturedNamespaces(): string[] {
+		const entries = buffer.getEntries();
+		const nsSet = new Set<string>();
+		entries.forEach((e: CapturedEntry) => nsSet.add(e.namespace));
+		return Array.from(nsSet).sort();
+	}
+
+	function namespaceMatchesPattern(namespace: string, pattern: string): boolean {
+		if (!pattern) return true; // Empty pattern = show all
+
+		// Split by comma for OR logic
+		const parts = pattern.split(',').map((p) => p.trim());
+		let included = false;
+		let excluded = false;
+
+		for (const part of parts) {
+			if (part.startsWith('-')) {
+				// Exclusion pattern
+				const excludePattern = part.slice(1);
+				if (matchesGlob(namespace, excludePattern)) {
+					excluded = true;
+				}
+			} else {
+				// Inclusion pattern
+				if (matchesGlob(namespace, part)) {
+					included = true;
+				}
+			}
+		}
+
+		// If no inclusion patterns, default to included
+		const hasInclusions = parts.some((p) => !p.startsWith('-'));
+		if (!hasInclusions) included = true;
+
+		return included && !excluded;
+	}
+
+	function matchesGlob(str: string, pattern: string): boolean {
+		// Trim both for comparison (namespaces may have trailing spaces from padEnd)
+		const s = str.trim();
+		const p = pattern.trim();
+
+		// Convert glob pattern to regex
+		const regexPattern = p
+			.replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape special chars
+			.replace(/\*/g, '.*'); // * becomes .*
+		const regex = new RegExp(`^${regexPattern}$`);
+		return regex.test(s);
+	}
+
+	function isSimplePattern(pattern: string): boolean {
+		if (!pattern) return true;
+
+		// Simple patterns:
+		// 1. 'gg:*' with optional exclusions
+		// 2. Explicit comma-separated list of exact namespaces
+
+		const parts = pattern.split(',').map((p) => p.trim());
+
+		// Check if it's 'gg:*' based (with exclusions)
+		const hasWildcardBase = parts.some((p) => p === 'gg:*' || p === '*');
+		if (hasWildcardBase) {
+			// All other parts must be exclusions starting with '-gg:'
+			const otherParts = parts.filter((p) => p !== 'gg:*' && p !== '*');
+			return otherParts.every((p) => p.startsWith('-') && !p.includes('*', 1));
+		}
+
+		// Check if it's an explicit list (no wildcards)
+		return parts.every((p) => !p.includes('*') && !p.startsWith('-'));
+	}
+
 	function gridColumns(): string {
 		const ns = nsColWidth !== null ? `${nsColWidth}px` : 'auto';
-		return `auto ${ns} 4px 1fr`;
+		if (filterExpanded) {
+			// [×] | diff | ns | handle | content
+			return `24px auto ${ns} 4px 1fr`;
+		} else {
+			// diff | ns | handle | content
+			return `auto ${ns} 4px 1fr`;
+		}
 	}
 
 	function buildHTML(): string {
@@ -85,7 +244,6 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					padding: 4px 8px 4px 0;
 				}
 				.gg-log-handle {
-					grid-column: 3;
 					width: 4px;
 					cursor: col-resize;
 					align-self: stretch;
@@ -108,6 +266,57 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					word-break: break-word;
 					padding: 4px 0;
 				}
+				.gg-row-filter {
+					text-align: center;
+					padding: 4px 8px 4px 0;
+					cursor: pointer;
+					user-select: none;
+					opacity: 0.6;
+					font-size: 14px;
+				}
+				.gg-row-filter:hover {
+					opacity: 1;
+					background: rgba(0,0,0,0.05);
+				}
+				.gg-filter-header {
+					background: #f5f5f5;
+					padding: 10px;
+					margin-bottom: 8px;
+					border-radius: 4px;
+					flex-shrink: 0;
+				}
+				.gg-filter-collapsed {
+					display: flex;
+					align-items: center;
+					justify-content: space-between;
+					cursor: pointer;
+				}
+				.gg-filter-expanded {
+					/* Content when expanded */
+				}
+				.gg-filter-pattern {
+					width: 100%;
+					padding: 4px 8px;
+					font-family: monospace;
+					font-size: 12px;
+					margin-bottom: 8px;
+				}
+				.gg-filter-checkboxes {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 8px;
+					margin: 8px 0;
+					max-height: 100px;
+					overflow-y: auto;
+				}
+				.gg-filter-checkbox {
+					display: flex;
+					align-items: center;
+					gap: 4px;
+					font-size: 11px;
+					font-family: monospace;
+					white-space: nowrap;
+				}
 			</style>
 			<div class="eruda-gg" style="padding: 10px; height: 100%; display: flex; flex-direction: column; font-size: 14px;">
 				<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0;">
@@ -115,9 +324,138 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					<button class="gg-copy-btn" style="padding: 4px 10px; cursor: pointer;">Copy</button>
 					<span class="gg-count" style="margin-left: auto; opacity: 0.6;"></span>
 				</div>
+				<div class="gg-filter-header"></div>
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
 			</div>
 		`;
+	}
+
+	function applyPatternFromInput(value: string) {
+		filterPattern = value;
+		localStorage.setItem('debug', filterPattern);
+		// Sync enabledNamespaces from the new pattern
+		const allNamespaces = getAllCapturedNamespaces();
+		enabledNamespaces.clear();
+		const effectivePattern = filterPattern || 'gg:*';
+		allNamespaces.forEach((ns) => {
+			if (namespaceMatchesPattern(ns, effectivePattern)) {
+				enabledNamespaces.add(ns);
+			}
+		});
+		renderFilterHeader();
+		renderLogs();
+	}
+
+	function wireUpFilterUI() {
+		if (!$el) return;
+
+		const filterHeader = $el.find('.gg-filter-header').get(0) as HTMLElement;
+		if (!filterHeader) return;
+
+		renderFilterHeader();
+
+		// Wire up toggle
+		filterHeader.addEventListener('click', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+			if (target.closest('.gg-filter-toggle')) {
+				filterExpanded = !filterExpanded;
+				renderFilterHeader();
+				renderLogs(); // Re-render to update grid columns
+			}
+		});
+
+		// Wire up pattern input - apply on blur or Enter
+		filterHeader.addEventListener(
+			'blur',
+			(e: FocusEvent) => {
+				const target = e.target as HTMLInputElement;
+				if (target.classList.contains('gg-filter-pattern')) {
+					applyPatternFromInput(target.value);
+				}
+			},
+			true
+		); // useCapture for blur (doesn't bubble)
+
+		filterHeader.addEventListener('keydown', (e: KeyboardEvent) => {
+			const target = e.target as HTMLInputElement;
+			if (target.classList.contains('gg-filter-pattern') && e.key === 'Enter') {
+				applyPatternFromInput(target.value);
+				target.blur();
+			}
+		});
+
+		// Wire up checkboxes
+		filterHeader.addEventListener('change', (e: Event) => {
+			const target = e.target as HTMLInputElement;
+			if (target.classList.contains('gg-ns-checkbox')) {
+				const namespace = target.getAttribute('data-namespace');
+				if (!namespace) return;
+
+				// Toggle namespace in pattern
+				toggleNamespace(namespace, target.checked);
+
+				// Re-render to update UI
+				renderFilterHeader();
+				renderLogs();
+			}
+		});
+	}
+
+	function renderFilterHeader() {
+		if (!$el) return;
+		const filterHeader = $el.find('.gg-filter-header').get(0) as HTMLElement;
+		if (!filterHeader) return;
+
+		if (!filterExpanded) {
+			// Collapsed view - show current pattern as summary
+			const summary = filterPattern || 'gg:*';
+			filterHeader.innerHTML = `
+				<div class="gg-filter-collapsed gg-filter-toggle" style="font-size: 12px;">
+					<span>⚙️ Filters <code style="opacity: 0.7;">${escapeHtml(summary)}</code></span>
+					<span>▼</span>
+				</div>
+			`;
+		} else {
+			// Expanded view
+			const allNamespaces = getAllCapturedNamespaces();
+			const simple = isSimplePattern(filterPattern);
+			const effectivePattern = filterPattern || 'gg:*';
+
+			let checkboxesHTML = '';
+			if (simple && allNamespaces.length > 0) {
+				checkboxesHTML = `
+					<div class="gg-filter-checkboxes">
+						${allNamespaces
+							.map((ns) => {
+								// Check if namespace matches the current pattern
+								const checked = namespaceMatchesPattern(ns, effectivePattern);
+								return `
+								<label class="gg-filter-checkbox">
+									<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
+									<span>${escapeHtml(ns)}</span>
+								</label>
+							`;
+							})
+							.join('')}
+					</div>
+				`;
+			} else if (!simple) {
+				checkboxesHTML = `<div style="opacity: 0.6; font-size: 11px; margin: 8px 0;">⚠️ Complex pattern - edit manually (quick filters disabled)</div>`;
+			}
+
+			filterHeader.innerHTML = `
+				<div class="gg-filter-collapsed gg-filter-toggle" style="margin-bottom: 8px;">
+					<span>⚙️ Filters</span>
+					<span>▲</span>
+				</div>
+				<div class="gg-filter-expanded">
+					<div style="margin-bottom: 8px;">
+						<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="gg:*" style="width: 100%;">
+					</div>
+					${checkboxesHTML}
+				</div>
+			`;
+		}
 	}
 
 	function wireUpButtons() {
@@ -170,17 +508,34 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 
 		containerEl.addEventListener('click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
-			if (!target?.classList?.contains('gg-expand')) return;
 
-			const index = target.getAttribute('data-index');
-			if (!index) return;
+			// Handle expand/collapse
+			if (target?.classList?.contains('gg-expand')) {
+				const index = target.getAttribute('data-index');
+				if (!index) return;
 
-			const details = containerEl.querySelector(
-				`.gg-details[data-index="${index}"]`
-			) as HTMLElement | null;
+				const details = containerEl.querySelector(
+					`.gg-details[data-index="${index}"]`
+				) as HTMLElement | null;
 
-			if (details) {
-				details.style.display = details.style.display === 'none' ? 'block' : 'none';
+				if (details) {
+					details.style.display = details.style.display === 'none' ? 'block' : 'none';
+				}
+				return;
+			}
+
+			// Handle row filter button
+			if (target?.classList?.contains('gg-row-filter')) {
+				const namespace = target.getAttribute('data-namespace');
+				if (!namespace) return;
+
+				// Toggle this namespace off
+				toggleNamespace(namespace, false);
+
+				// Save to localStorage and re-render
+				localStorage.setItem('debug', filterPattern);
+				renderFilterHeader();
+				renderLogs();
 			}
 		});
 
@@ -248,8 +603,18 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 		const countSpan = $el.find('.gg-count');
 		if (!logContainer.length || !countSpan.length) return;
 
-		const entries = buffer.getEntries();
-		countSpan.html(`${entries.length} entries`);
+		const allEntries = buffer.getEntries();
+
+		// Apply filtering
+		const entries = allEntries.filter((entry: CapturedEntry) =>
+			enabledNamespaces.has(entry.namespace)
+		);
+
+		const countText =
+			entries.length === allEntries.length
+				? `${entries.length} entries`
+				: `${entries.length} / ${allEntries.length} entries`;
+		countSpan.html(countText);
 
 		if (entries.length === 0) {
 			logContainer.html(
@@ -287,7 +652,13 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 						.join(' ');
 				}
 
+				// Add filter button if expanded
+				const filterBtn = filterExpanded
+					? `<div class="gg-row-filter" data-namespace="${ns}" title="Hide this namespace">×</div>`
+					: '';
+
 				return (
+					filterBtn +
 					`<div class="gg-log-diff" style="color: ${color};">${diff}</div>` +
 					`<div class="gg-log-ns" style="color: ${color};">${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +

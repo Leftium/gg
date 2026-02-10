@@ -33,11 +33,22 @@
 	function testLog() {
 		gg('Test log from button click!', { timestamp: Date.now() });
 	}
+
+	function testVerbose() {
+		// This would use a different namespace in practice
+		gg('Verbose log entry', { detail: 'lots of detail here' });
+	}
+
+	function testApi() {
+		gg('API call started', { endpoint: '/api/users' });
+	}
 </script>
 
 <main class="container">
 	<div style="margin-bottom: 1rem;">
 		<button onclick={testLog}>🧪 Test gg() Log</button>
+		<button onclick={testVerbose}>📝 Verbose Log</button>
+		<button onclick={testApi}>🌐 API Log</button>
 	</div>
 
 	<OpenInEditorLink {ggResult} />
