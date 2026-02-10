@@ -328,6 +328,78 @@ export function gg(...args: unknown[]) {
 	return returnValue;
 }
 
+/**
+ * gg.ns() - Log with an explicit namespace (callpoint label).
+ *
+ * In production builds, the ggTagPlugin Vite plugin rewrites bare gg() calls
+ * to gg.ns('callpoint', ...) so each call site gets a unique namespace even
+ * after minification. Users can also call gg.ns() directly to set a meaningful
+ * label that survives across builds.
+ *
+ * @param nsLabel - The namespace label (appears as gg:<nsLabel> in output)
+ * @param args - Same arguments as gg()
+ * @returns Same as gg() - the first arg, or call-site info if no args
+ *
+ * @example
+ * gg.ns("auth", "login failed")   // logs under namespace "gg:auth"
+ * gg.ns("cart", item, quantity)    // logs under namespace "gg:cart"
+ */
+gg.ns = function (nsLabel: string, ...args: unknown[]): unknown {
+	if (!ggConfig.enabled || isCloudflareWorker()) {
+		return args.length ? args[0] : { url: '', stack: [] };
+	}
+
+	const namespace = `gg:${nsLabel}`;
+
+	if (nsLabel.length < 80 && nsLabel.length > maxCallpointLength) {
+		maxCallpointLength = nsLabel.length;
+	}
+
+	const ggLogFunction =
+		namespaceToLogFunction.get(namespace) ||
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
+
+	// Prepare args for logging
+	let logArgs: unknown[];
+	let returnValue: unknown;
+
+	if (!args.length) {
+		logArgs = [`    📝 ${nsLabel}`];
+		returnValue = { fileName: '', functionName: '', url: '', stack: [] };
+	} else if (args.length === 1) {
+		logArgs = [args[0]];
+		returnValue = args[0];
+	} else {
+		logArgs = [args[0], ...args.slice(1)];
+		returnValue = args[0];
+	}
+
+	// Log to console via debug
+	if (logArgs.length === 1) {
+		ggLogFunction(logArgs[0]);
+	} else {
+		ggLogFunction(logArgs[0], ...logArgs.slice(1));
+	}
+
+	// Call capture hook if registered (for Eruda plugin)
+	const entry: CapturedEntry = {
+		namespace,
+		color: ggLogFunction.color,
+		diff: ggLogFunction.diff || 0,
+		message: logArgs.length === 1 ? String(logArgs[0]) : logArgs.map(String).join(' '),
+		args: logArgs,
+		timestamp: Date.now()
+	};
+
+	if (_onLogCallback) {
+		_onLogCallback(entry);
+	} else {
+		earlyLogBuffer.push(entry);
+	}
+
+	return returnValue;
+};
+
 gg.disable = isCloudflareWorker() ? () => {} : debugFactory.disable;
 
 gg.enable = isCloudflareWorker() ? () => {} : debugFactory.enable;
@@ -546,6 +618,7 @@ Object.defineProperty(gg, '_onLog', {
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace gg {
 	export let _onLog: OnLogCallback | null;
+	export let ns: (nsLabel: string, ...args: unknown[]) => unknown;
 }
 
 /**
