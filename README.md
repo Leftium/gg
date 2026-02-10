@@ -29,11 +29,13 @@ _Coming soon..._
 This library includes a **patched version** of the [`debug`](https://www.npmjs.com/package/debug) package. The patch reformats the output to display time diffs **before** the namespace for better readability:
 
 **Standard debug output:**
+
 ```
   gg:routes/+page.svelte +123ms
 ```
 
 **Patched output (this library):**
+
 ```
  +123ms gg:routes/+page.svelte
 ```

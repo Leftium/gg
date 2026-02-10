@@ -11,6 +11,9 @@ const gitignorePath = fileURLToPath(new URL('./.gitignore', import.meta.url));
 
 export default ts.config(
 	includeIgnoreFile(gitignorePath),
+	{
+		ignores: ['src/lib/debug/**']
+	},
 	js.configs.recommended,
 	...ts.configs.recommended,
 	...svelte.configs.recommended,
@@ -32,6 +35,12 @@ export default ts.config(
 				parser: ts.parser,
 				svelteConfig
 			}
+		}
+	},
+	{
+		files: ['src/lib/OpenInEditorLink.svelte'],
+		rules: {
+			'svelte/no-navigation-without-resolve': 'off'
 		}
 	}
 );

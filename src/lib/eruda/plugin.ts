@@ -2,15 +2,31 @@ import type { GgErudaOptions, CapturedEntry } from './types.js';
 import { LogBuffer } from './buffer.js';
 
 /**
+ * Licia jQuery-like wrapper used by Eruda
+ */
+interface LiciaElement {
+	html(content: string): void;
+	show(): void;
+	hide(): void;
+	find(selector: string): LiciaElement;
+	on(event: string, handler: (e: Event) => void): void;
+	get(index: number): HTMLElement | undefined;
+	length: number;
+}
+
+/**
  * Creates the gg Eruda plugin
  *
  * Uses Eruda's plugin API where $el is a jQuery-like (licia) wrapper.
  * Methods: $el.html(), $el.show(), $el.hide(), $el.find(), $el.on()
  */
-export function createGgPlugin(options: GgErudaOptions, gg: any) {
+export function createGgPlugin(
+	options: GgErudaOptions,
+	gg: { _onLog?: ((entry: CapturedEntry) => void) | null }
+) {
 	const buffer = new LogBuffer(options.maxEntries ?? 2000);
 	// The licia jQuery-like wrapper Eruda passes to init()
-	let $el: any = null;
+	let $el: LiciaElement | null = null;
 	let expanderAttached = false;
 	let resizeAttached = false;
 	// null = auto (fit content), number = user-dragged px width
@@ -18,12 +34,12 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 	// Filter UI state
 	let filterExpanded = false;
 	let filterPattern = '';
-	let enabledNamespaces = new Set<string>();
+	const enabledNamespaces = new Set<string>();
 
 	const plugin = {
 		name: 'GG',
 
-		init($container: any) {
+		init($container: LiciaElement) {
 			$el = $container;
 
 			// Register the capture hook on gg
@@ -56,12 +72,16 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 		},
 
 		show() {
-			$el.show();
-			renderLogs();
+			if ($el) {
+				$el.show();
+				renderLogs();
+			}
 		},
 
 		hide() {
-			$el.hide();
+			if ($el) {
+				$el.hide();
+			}
 		},
 
 		destroy() {
@@ -71,22 +91,6 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 			buffer.clear();
 		}
 	};
-
-	function loadFilterState() {
-		filterPattern = localStorage.getItem('debug') || '';
-		// Rebuild enabledNamespaces based on current pattern and captured logs
-		const allNamespaces = getAllCapturedNamespaces();
-		enabledNamespaces.clear();
-
-		// If no pattern, default to 'gg:*' (show all gg logs)
-		const effectivePattern = filterPattern || 'gg:*';
-
-		allNamespaces.forEach((ns) => {
-			if (namespaceMatchesPattern(ns, effectivePattern)) {
-				enabledNamespaces.add(ns);
-			}
-		});
-	}
 
 	function toggleNamespace(namespace: string, enable: boolean) {
 		const currentPattern = filterPattern || 'gg:*';
@@ -633,9 +637,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 				// Format each arg individually - objects are expandable
 				let argsHTML = '';
 				let detailsHTML = '';
-				if (entry.args.length === 0) {
-					argsHTML = '';
-				} else {
+				if (entry.args.length > 0) {
 					argsHTML = entry.args
 						.map((arg, argIdx) => {
 							if (typeof arg === 'object' && arg !== null) {

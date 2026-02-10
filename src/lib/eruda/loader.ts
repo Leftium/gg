@@ -93,6 +93,7 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 		const { gg } = await import('../gg.js');
 		const { createGgPlugin } = await import('./plugin.js');
 		const ggPlugin = createGgPlugin(options, gg);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		eruda.add(ggPlugin as any);
 
 		// Make GG tab the default selected tab
