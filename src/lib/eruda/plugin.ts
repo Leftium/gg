@@ -214,29 +214,38 @@ export function createGgPlugin(
 
 	function gridColumns(): string {
 		const ns = nsColWidth !== null ? `${nsColWidth}px` : 'auto';
-		if (filterExpanded) {
-			// [×] | diff | ns | handle | content
-			return `24px auto ${ns} 4px 1fr`;
-		} else {
-			// diff | ns | handle | content
-			return `auto ${ns} 4px 1fr`;
-		}
+		// diff | ns | handle | content (× is now inside ns)
+		return `auto ${ns} 4px 1fr`;
 	}
 
 	function buildHTML(): string {
 		return `
 			<style>
-				.gg-log-grid {
-					display: grid;
-					grid-template-columns: ${gridColumns()};
-					column-gap: 0;
-					align-items: start !important;
-				}
-				.gg-log-grid > * {
-					min-width: 0;
-					border-top: 1px solid rgba(0,0,0,0.05);
-					align-self: start !important;
-				}
+			.gg-log-grid {
+				display: grid;
+				grid-template-columns: ${gridColumns()};
+				column-gap: 0;
+				align-items: start !important;
+			}
+			/* Desktop: hide wrapper divs, show direct children */
+			.gg-log-entry {
+				display: contents;
+			}
+			.gg-log-header {
+				display: contents;
+			}
+			.gg-log-diff,
+			.gg-log-ns,
+			.gg-log-handle,
+			.gg-log-content {
+				min-width: 0;
+				align-self: start !important;
+				border-top: 1px solid rgba(0,0,0,0.05);
+			}
+			.gg-details {
+				grid-column: 1 / -1;
+				border-top: none;
+			}
 				.gg-details {
 					align-self: stretch !important;
 					border-bottom: none;
@@ -276,19 +285,15 @@ export function createGgPlugin(
 					word-break: break-word;
 					padding: 4px 0;
 				}
-				.gg-row-filter {
-					text-align: center;
-					padding: 4px 8px 4px 0;
-					cursor: pointer;
-					user-select: none;
-					opacity: 0.6;
-					font-size: 14px;
-					align-self: start;
-				}
-				.gg-row-filter:hover {
-					opacity: 1;
-					background: rgba(0,0,0,0.05);
-				}
+			/* Make header clickable for filtering when filters are expanded */
+			.gg-log-header.clickable {
+				cursor: pointer;
+			}
+			/* Desktop: highlight child elements since header has display: contents */
+			.gg-log-header.clickable:hover .gg-log-diff,
+			.gg-log-header.clickable:hover .gg-log-ns {
+				background: rgba(0,0,0,0.05);
+			}
 				.gg-filter-panel {
 					background: #f5f5f5;
 					padding: 10px;
@@ -304,7 +309,7 @@ export function createGgPlugin(
 					width: 100%;
 					padding: 4px 8px;
 					font-family: monospace;
-					font-size: 12px;
+					font-size: 16px;
 					margin-bottom: 8px;
 				}
 				.gg-filter-checkboxes {
@@ -323,16 +328,125 @@ export function createGgPlugin(
 					font-family: monospace;
 					white-space: nowrap;
 				}
+				/* Mobile responsive styles */
+				.gg-toolbar {
+					display: flex;
+					align-items: center;
+					gap: 8px;
+					margin-bottom: 8px;
+					flex-shrink: 0;
+					overflow-x: auto;
+					-webkit-overflow-scrolling: touch;
+				}
+				.gg-toolbar button {
+					padding: 4px 10px;
+					cursor: pointer;
+					flex-shrink: 0;
+				}
+				.gg-btn-text {
+					display: inline;
+				}
+				.gg-btn-icon {
+					display: none;
+				}
+				@media (max-width: 640px) {
+					.gg-btn-text {
+						display: none;
+					}
+					.gg-btn-icon {
+						display: inline;
+					}
+					.gg-toolbar button {
+						padding: 4px 8px;
+						min-width: 32px;
+					}
+					.gg-filter-btn {
+						font-family: monospace;
+						font-size: 12px;
+					}
+					/* Stack log entries vertically on mobile */
+					.gg-log-grid {
+						display: block;
+					}
+					.gg-log-entry {
+						display: block;
+						padding: 8px 0;
+					}
+					/* Remove double borders on mobile - only border on entry wrapper */
+					.gg-log-entry:not(:first-child) {
+						border-top: 1px solid rgba(0,0,0,0.05);
+					}
+				.gg-log-diff,
+				.gg-log-ns,
+				.gg-log-handle,
+				.gg-log-content,
+				.gg-details {
+					border-top: none !important;
+				}
+			.gg-log-header {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				margin-bottom: 4px;
+				min-width: 0;
+			}
+			/* Mobile: hover on container since it's not display: contents */
+			.gg-log-header.clickable {
+				padding: 2px 0;
+			}
+			.gg-log-header.clickable:hover {
+				background: rgba(0,0,0,0.05);
+			}
+				/* Override desktop child hover on mobile */
+				.gg-log-header.clickable:hover .gg-log-diff,
+				.gg-log-header.clickable:hover .gg-log-ns {
+					background: transparent;
+				}
+				.gg-log-diff {
+					padding: 0;
+					text-align: left;
+					flex-shrink: 0;
+					white-space: nowrap;
+				}
+				.gg-log-ns {
+					padding: 0;
+					flex: 1;
+					min-width: 0;
+					overflow: hidden;
+					text-overflow: ellipsis;
+					white-space: nowrap;
+				}
+				.gg-log-handle {
+					display: none;
+				}
+				.gg-log-content {
+					padding: 0;
+					padding-left: 0;
+				}
+					.gg-details {
+						margin-top: 4px;
+					}
+				}
 			</style>
-			<div class="eruda-gg" style="padding: 10px; height: 100%; display: flex; flex-direction: column; font-size: 14px;">
-				<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0;">
-					<button class="gg-clear-btn" style="padding: 4px 10px; cursor: pointer;">Clear</button>
-					<button class="gg-copy-btn" style="padding: 4px 10px; cursor: pointer;">Copy</button>
-					<button class="gg-filter-btn" style="padding: 4px 10px; cursor: pointer; flex: 1; min-width: 0; text-align: left; font-family: monospace; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">⚙️ Filters: <span class="gg-filter-summary"></span></button>
-					<span class="gg-count" style="opacity: 0.6; white-space: nowrap;"></span>
-				</div>
+		<div class="eruda-gg" style="padding: 10px; height: 100%; display: flex; flex-direction: column; font-size: 14px; touch-action: none; overscroll-behavior: contain;">
+			<div class="gg-toolbar">
+				<button class="gg-copy-btn">
+					<span class="gg-btn-text">Copy</span>
+					<span class="gg-btn-icon" title="Copy">📋</span>
+				</button>
+			<button class="gg-filter-btn" style="text-align: left; white-space: nowrap;">
+				<span class="gg-btn-text">Namespaces: </span>
+				<span class="gg-btn-icon">NS: </span>
+				<span class="gg-filter-summary"></span>
+			</button>
+				<span class="gg-count" style="opacity: 0.6; white-space: nowrap; flex: 1; text-align: right;"></span>
+				<button class="gg-clear-btn">
+					<span class="gg-btn-text">Clear</span>
+					<span class="gg-btn-icon" title="Clear">⊘</span>
+				</button>
+			</div>
 				<div class="gg-filter-panel"></div>
-				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
 			</div>
 		`;
 	}
@@ -392,6 +506,28 @@ export function createGgPlugin(
 		// Wire up checkboxes
 		filterPanel.addEventListener('change', (e: Event) => {
 			const target = e.target as HTMLInputElement;
+
+			// Handle ALL checkbox
+			if (target.classList.contains('gg-all-checkbox')) {
+				const allNamespaces = getAllCapturedNamespaces();
+				if (target.checked) {
+					// Select all
+					filterPattern = 'gg:*';
+					enabledNamespaces.clear();
+					allNamespaces.forEach((ns) => enabledNamespaces.add(ns));
+				} else {
+					// Deselect all
+					const exclusions = allNamespaces.map((ns) => `-${ns}`).join(',');
+					filterPattern = `gg:*,${exclusions}`;
+					enabledNamespaces.clear();
+				}
+				localStorage.setItem('debug', filterPattern);
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
+			// Handle individual namespace checkboxes
 			if (target.classList.contains('gg-ns-checkbox')) {
 				const namespace = target.getAttribute('data-namespace');
 				if (!namespace) return;
@@ -409,11 +545,14 @@ export function createGgPlugin(
 	function renderFilterUI() {
 		if (!$el) return;
 
-		// Update button summary
+		const allNamespaces = getAllCapturedNamespaces();
+		const enabledCount = enabledNamespaces.size;
+		const totalCount = allNamespaces.length;
+
+		// Update button summary with count of enabled namespaces
 		const filterSummary = $el.find('.gg-filter-summary').get(0) as HTMLElement;
 		if (filterSummary) {
-			const summary = filterPattern || 'gg:*';
-			filterSummary.textContent = summary;
+			filterSummary.textContent = `${enabledCount}/${totalCount}`;
 		}
 
 		// Update panel
@@ -431,32 +570,39 @@ export function createGgPlugin(
 
 			let checkboxesHTML = '';
 			if (simple && allNamespaces.length > 0) {
+				const allChecked = enabledCount === totalCount;
+				const allIndeterminate = enabledCount > 0 && enabledCount < totalCount;
+
 				checkboxesHTML = `
-					<div class="gg-filter-checkboxes">
-						${allNamespaces
-							.map((ns) => {
-								// Check if namespace matches the current pattern
-								const checked = namespaceMatchesPattern(ns, effectivePattern);
-								return `
-								<label class="gg-filter-checkbox">
-									<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
-									<span>${escapeHtml(ns)}</span>
-								</label>
-							`;
-							})
-							.join('')}
-					</div>
-				`;
+				<div class="gg-filter-checkboxes">
+					<label class="gg-filter-checkbox" style="font-weight: bold;">
+						<input type="checkbox" class="gg-all-checkbox" ${allChecked ? 'checked' : ''}>
+						<span>ALL</span>
+					</label>
+					${allNamespaces
+						.map((ns) => {
+							// Check if namespace matches the current pattern
+							const checked = namespaceMatchesPattern(ns, effectivePattern);
+							return `
+							<label class="gg-filter-checkbox">
+								<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
+								<span>${escapeHtml(ns)}</span>
+							</label>
+						`;
+						})
+						.join('')}
+				</div>
+			`;
 			} else if (!simple) {
 				checkboxesHTML = `<div style="opacity: 0.6; font-size: 11px; margin: 8px 0;">⚠️ Complex pattern - edit manually (quick filters disabled)</div>`;
 			}
 
 			filterPanel.innerHTML = `
-				<div style="margin-bottom: 8px;">
-					<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="gg:*" style="width: 100%;">
-				</div>
-				${checkboxesHTML}
-			`;
+			<div style="margin-bottom: 8px;">
+				<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="gg:*" style="width: 100%;">
+			</div>
+			${checkboxesHTML}
+		`;
 		} else {
 			// Hide panel
 			filterPanel.classList.remove('expanded');
@@ -537,9 +683,14 @@ export function createGgPlugin(
 				return;
 			}
 
-			// Handle row filter button
-			if (target?.classList?.contains('gg-row-filter')) {
-				const namespace = target.getAttribute('data-namespace');
+			// Handle clickable header (when filters expanded)
+			// Skip if clicking on resize handle
+			if (
+				!target?.classList?.contains('gg-log-handle') &&
+				target?.closest('.gg-log-header.clickable')
+			) {
+				const header = target.closest('.gg-log-header.clickable') as HTMLElement;
+				const namespace = header.getAttribute('data-namespace');
 				if (!namespace) return;
 
 				// Toggle this namespace off
@@ -654,7 +805,7 @@ export function createGgPlugin(
 								const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
 								const uniqueId = `${index}-${argIdx}`;
 								// Store details separately to render after the row
-								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; grid-column: 1 / -1; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
+								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
 								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
 							} else {
 								// Convert URLs to clickable links
@@ -669,18 +820,28 @@ export function createGgPlugin(
 						.join(' ');
 				}
 
-				// Add filter button if expanded
-				const filterBtn = filterExpanded
-					? `<div class="gg-row-filter" data-namespace="${ns}" title="Hide this namespace">×</div>`
+				// Make header clickable when filters expanded
+				const headerClass = filterExpanded ? 'gg-log-header clickable' : 'gg-log-header';
+				const headerAttrs = filterExpanded
+					? ` data-namespace="${ns}" title="Click to hide this namespace"`
 					: '';
 
+				// Add × at start of diff when filters expanded (bold, darker)
+				const filterIcon = filterExpanded
+					? '<span style="font-weight: bold; color: #000; opacity: 0.6;">× </span>'
+					: '';
+
+				// Desktop: grid layout, Mobile: stacked layout
 				return (
-					filterBtn +
-					`<div class="gg-log-diff" style="color: ${color};">${diff}</div>` +
+					`<div class="gg-log-entry">` +
+					`<div class="${headerClass}"${headerAttrs}>` +
+					`<div class="gg-log-diff" style="color: ${color};">${filterIcon}${diff}</div>` +
 					`<div class="gg-log-ns" style="color: ${color};">${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
+					`</div>` +
 					`<div class="gg-log-content">${argsHTML}</div>` +
-					detailsHTML
+					detailsHTML +
+					`</div>`
 				);
 			})
 			.join('')}</div>`;
