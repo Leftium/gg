@@ -2,6 +2,39 @@ import debugFactory from './debug.js';
 import ErrorStackParser from 'error-stack-parser';
 import { BROWSER, DEV } from 'esm-env';
 
+/**
+ * Creates a debug instance with custom formatArgs to add namespace padding
+ * Padding is done at format time, not in the namespace itself, to keep colors stable
+ */
+function createGgDebugger(namespace: string): debug.Debugger {
+	const dbg = debugFactory(namespace);
+
+	// Store the original formatArgs (if it exists)
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const originalFormatArgs = (dbg as any).formatArgs;
+
+	// Override formatArgs to add padding to the namespace display
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	(dbg as any).formatArgs = function (this: any, args: any[]) {
+		// Call original formatArgs first
+		if (originalFormatArgs) {
+			originalFormatArgs.call(this, args);
+		}
+
+		// Extract the callpoint from namespace (strip 'gg:' prefix and any URL suffix)
+		const nsMatch = this.namespace.match(/^gg:([^h]+?)(?:http|$)/);
+		const callpoint = nsMatch ? nsMatch[1] : this.namespace.replace(/^gg:/, '');
+		const paddedCallpoint = callpoint.padEnd(maxCallpointLength, ' ');
+
+		// Replace the namespace in the formatted string with padded version
+		if (typeof args[0] === 'string') {
+			args[0] = args[0].replace(this.namespace, `gg:${paddedCallpoint}`);
+		}
+	};
+
+	return dbg;
+}
+
 // Helper to detect if we're running in CloudFlare Workers
 const isCloudflareWorker = (): boolean => {
 	// Check for CloudFlare Workers-specific global
@@ -238,12 +271,14 @@ export function gg(...args: unknown[]) {
 			maxCallpointLength = callpoint.length;
 		}
 
-		namespace = `gg:${callpoint.padEnd(maxCallpointLength, ' ')}${ggConfig.editorLink ? url : ''}`;
+		// Namespace without padding - keeps colors stable
+		// Editor link appended if enabled
+		namespace = `gg:${callpoint}${ggConfig.editorLink ? url : ''}`;
 	}
 
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
-		namespaceToLogFunction.set(namespace, debugFactory(namespace)).get(namespace)!;
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 
 	if (!args.length) {
 		ggLogFunction(`    📝📝 ${url} 👀👀`);
@@ -266,6 +301,8 @@ export function gg(...args: unknown[]) {
 	if (gg._onLog) {
 		// Don't stringify args - keep them as-is for expandable objects
 		const message = args.length === 1 ? String(args[0]) : args.map(String).join(' ');
+
+		// Use debug's native color (now deterministic since namespace has no padding)
 		gg._onLog({
 			namespace,
 			color: ggLogFunction.color,
