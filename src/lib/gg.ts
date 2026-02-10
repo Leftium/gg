@@ -82,8 +82,67 @@ const timestampRegex = /(\?t=\d+)?$/;
 
 const port = await getServerPort();
 
+/**
+ * Determines if gg should be enabled based on environment and runtime triggers.
+ *
+ * Priority order:
+ * 1. CloudFlare Workers → always disabled (no stack traces, no filesystem)
+ * 2. ENV hard-disable → absolute override, no runtime enable possible
+ * 3. DEV mode → always enabled
+ * 4. PROD mode → requires runtime trigger (?gg URL param or localStorage)
+ */
+function isGgEnabled(): boolean {
+	// CloudFlare Workers - hard disable (no Error stacks, no filesystem)
+	if (isCloudflareWorker()) return false;
+
+	// ENV hard-disable takes absolute precedence
+	// Allows completely removing gg from production builds
+	if (BROWSER) {
+		if (
+			typeof import.meta.env?.VITE_GG_ENABLED === 'string' &&
+			import.meta.env.VITE_GG_ENABLED === 'false'
+		) {
+			return false;
+		}
+	} else {
+		if (process?.env?.GG_ENABLED === 'false') {
+			return false;
+		}
+	}
+
+	// Development - always enabled (unless ENV explicitly disabled above)
+	if (DEV) return true;
+
+	// Production - requires runtime trigger (similar to Eruda widget loading)
+	if (BROWSER) {
+		// Check URL param (?gg)
+		try {
+			const params = new URLSearchParams(window.location.search);
+			if (params.has('gg')) {
+				// Persist the decision so it survives navigation
+				localStorage.setItem('gg-enabled', 'true');
+				return true;
+			}
+		} catch {
+			// URLSearchParams or localStorage might not be available
+		}
+
+		// Check localStorage persistence
+		try {
+			if (localStorage.getItem('gg-enabled') === 'true') {
+				return true;
+			}
+		} catch {
+			// localStorage might not be available
+		}
+	}
+
+	// Default: disabled in production without trigger
+	return false;
+}
+
 const ggConfig = {
-	enabled: !isCloudflareWorker(), // Disable in CloudFlare Workers
+	enabled: isGgEnabled(),
 	showHints: !isCloudflareWorker(), // Don't show hints in CloudFlare Workers
 	editorLink: false,
 	openInEditorUrlTemplate: `http://localhost:${port}/__open-in-editor?file=$FILENAME`,
@@ -195,6 +254,21 @@ gg.disable = isCloudflareWorker() ? () => {} : debugFactory.disable;
 
 gg.enable = isCloudflareWorker() ? () => {} : debugFactory.enable;
 
+/**
+ * Clear the persisted gg-enabled state from localStorage.
+ * Useful to reset production trigger after testing with ?gg parameter.
+ * Page reload required for change to take effect.
+ */
+gg.clearPersist = () => {
+	if (BROWSER) {
+		try {
+			localStorage.removeItem('gg-enabled');
+		} catch {
+			// localStorage might not be available
+		}
+	}
+};
+
 // Log some gg info to the JS console/terminal:
 
 if (ggConfig.showHints && !isCloudflareWorker()) {
@@ -219,8 +293,15 @@ if (ggConfig.showHints && !isCloudflareWorker()) {
 		message(`Problems detected; fix all ❌:`);
 	}
 
-	const hint = makeHint(!ggConfig.enabled, ' (Update value in gg.ts file.)');
-	message(`${checkbox(ggConfig.enabled)} ggConfig.enabled: ${ggConfig.enabled}${hint}`);
+	let enableHint = '';
+	if (!ggConfig.enabled) {
+		if (DEV) {
+			enableHint = ' (Check GG_ENABLED env variable)';
+		} else if (BROWSER) {
+			enableHint = ' (Add ?gg to URL or set localStorage["gg-enabled"]="true")';
+		}
+	}
+	message(`${checkbox(ggConfig.enabled)} gg enabled: ${ggConfig.enabled}${enableHint}`);
 
 	if (BROWSER) {
 		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");

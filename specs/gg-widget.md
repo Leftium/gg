@@ -127,7 +127,9 @@ Or simply:
 
 ### Production: Async On-Demand Loading
 
-In production, Eruda is heavy (~100kb gzipped). It should only load when explicitly requested. Several trigger options:
+In production, Eruda is heavy (~100kb gzipped). It should only load when explicitly requested.
+
+**Important**: The gg core function uses the **same trigger** as Eruda loading. When you activate Eruda with `?gg`, the gg core function also enables itself. This ensures consistent behavior - no wasted capture when Eruda isn't loaded, and gg output is always available when Eruda is active.
 
 #### Default Trigger: `?gg` URL Parameter
 
@@ -150,18 +152,52 @@ initGgEruda({
 	prod:
 		| ['url-param', 'gesture'] // (default) ?gg OR 5 rapid taps
 		| 'url-param'              // ?gg only
-		| 'localStorage'           // localStorage 'gg-eruda' === 'true'
+		| 'localStorage'           // localStorage 'gg-enabled' === 'true'
 		| 'gesture'                // 5 rapid taps only
 		| false                    // never load in prod
 });
 ```
 
 - **`['url-param', 'gesture']`** (default) - both triggers active. `?gg` in the URL for easy sharing, plus 5 rapid taps for when you can't modify the URL (e.g., in a webview). Whichever fires first wins.
-- **`'url-param'`** - only `?gg` URL parameter.
-- **`'gesture'`** - only 5 rapid taps anywhere on the page.
-- **`'localStorage'`** - checks `localStorage.getItem('gg-eruda') === 'true'`. Persists across navigations. Can be combined with others via array.
+- **`'url-param'`** - only `?gg` URL parameter. Sets `localStorage['gg-enabled'] = 'true'` to persist across navigations.
+- **`'gesture'`** - only 5 rapid taps anywhere on the page. Also persists to localStorage.
+- **`'localStorage'`** - checks `localStorage.getItem('gg-enabled') === 'true'`. Already persists across navigations from other triggers.
 
 `initGgEruda` keeps the import in the code (so it's always available) but defers the heavy Eruda load until the trigger fires. The `@leftium/gg/eruda` entry point itself is tiny - just the trigger logic. Eruda is `import()`'d dynamically only when activated.
+
+#### Environment Variable Hard-Disable
+
+For production builds where gg should **never** be available at runtime (even with triggers), set the environment variable:
+
+```bash
+# Vite/Browser builds
+VITE_GG_ENABLED=false npm run build
+
+# Node.js/SSR
+GG_ENABLED=false npm run build
+```
+
+When `GG_ENABLED=false`, the gg core function is completely disabled and **cannot** be re-enabled at runtime via `?gg` or any other trigger. This takes absolute precedence over all other settings.
+
+### Gating Strategy: gg Core vs Eruda Widget
+
+The gg core function and Eruda widget share the same runtime triggers but have different override capabilities:
+
+| Aspect                | gg Core Function                                            | Eruda Widget                        |
+| --------------------- | ----------------------------------------------------------- | ----------------------------------- |
+| **ENV hard-disable**  | `GG_ENABLED=false` → completely disabled, no runtime enable | N/A - respects gg's enabled state   |
+| **DEV mode**          | Always enabled (unless ENV-disabled)                        | Always loaded                       |
+| **PROD mode default** | Disabled, requires trigger                                  | Not loaded, requires trigger        |
+| **PROD trigger**      | `?gg` URL param → enables + persists to localStorage        | `?gg` OR 5 taps → loads Eruda async |
+| **localStorage key**  | `gg-enabled`                                                | Same - checks `gg-enabled` state    |
+| **Runtime enable**    | Only if not ENV-disabled                                    | Always available (lazy load)        |
+
+This alignment ensures:
+
+- **Consistent activation**: One `?gg` trigger enables both gg core and loads Eruda
+- **No wasted work**: gg doesn't capture logs when Eruda isn't loaded
+- **Security**: ENV disable prevents any gg execution in sensitive prod builds
+- **Flexibility**: Can use gg without Eruda (desktop DevTools), or Eruda without gg (other debug namespaces)
 
 ### Bundle Impact
 
@@ -171,6 +207,7 @@ initGgEruda({
 | Dev with Eruda        | gg + Eruda + gg plugin       | ~105kb gz        |
 | Prod (dormant)        | gg + trigger logic           | ~5.5kb gz        |
 | Prod (activated)      | gg + async Eruda + gg plugin | ~105kb gz (lazy) |
+| Prod (ENV disabled)   | Empty no-op function         | ~0.1kb gz        |
 
 ## How Capture Works
 
