@@ -1,10 +1,10 @@
 import devtoolsJson from 'vite-plugin-devtools-json';
-import { openInEditorPlugin, ggTagPlugin } from './src/lib/index.js';
+import { openInEditorPlugin, ggCallSitesPlugin } from './src/lib/index.js';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-	plugins: [sveltekit(), ggTagPlugin(), openInEditorPlugin(), devtoolsJson()],
+	plugins: [sveltekit(), ggCallSitesPlugin(), openInEditorPlugin(), devtoolsJson()],
 	build: {
 		target: 'es2022' // or 'esnext' for bleeding-edge features
 	},

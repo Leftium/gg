@@ -3,6 +3,14 @@ import ErrorStackParser from 'error-stack-parser';
 import { BROWSER, DEV } from 'esm-env';
 
 /**
+ * Compile-time flag set by ggCallSitesPlugin via Vite's `define` config.
+ * When the plugin is installed, Vite replaces this with `true` at build time.
+ * Without the plugin, it remains `false` (declared here as the default).
+ */
+declare const __GG_TAG_PLUGIN__: boolean;
+const _ggCallSitesPlugin = typeof __GG_TAG_PLUGIN__ !== 'undefined' ? __GG_TAG_PLUGIN__ : false;
+
+/**
  * Creates a debug instance with custom formatArgs to add namespace padding
  * Padding is done at format time, not in the namespace itself, to keep colors stable
  */
@@ -247,9 +255,13 @@ export function gg(...args: unknown[]) {
 	let stack: ErrorStackParser.StackFrame[] = [];
 	let namespace = 'gg:';
 
-	// In development: calculate detailed callpoint information
-	// In production: skip expensive stack parsing and use simple namespace
-	if (DEV) {
+	// When ggCallSitesPlugin is installed, all bare gg() calls are rewritten to gg.ns()
+	// at build time, so this code path only runs for un-transformed calls.
+	// Skip expensive stack parsing if the plugin is handling callpoints.
+
+	// In development without plugin: calculate detailed callpoint information
+	// In production without plugin: skip expensive stack parsing and use simple namespace
+	if (DEV && !_ggCallSitesPlugin) {
 		// Ignore first stack frame, which is always the call to gg() itself.
 		stack = ErrorStackParser.parse(new Error()).splice(1);
 
@@ -331,7 +343,7 @@ export function gg(...args: unknown[]) {
 /**
  * gg.ns() - Log with an explicit namespace (callpoint label).
  *
- * In production builds, the ggTagPlugin Vite plugin rewrites bare gg() calls
+ * In production builds, the ggCallSitesPlugin Vite plugin rewrites bare gg() calls
  * to gg.ns('callpoint', ...) so each call site gets a unique namespace even
  * after minification. Users can also call gg.ns() directly to set a meaningful
  * label that survives across builds.
@@ -663,23 +675,32 @@ export async function runGgDiagnostics() {
 	if (BROWSER) {
 		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");
 		message(`${checkbox(ggLogTest.enabled)} localStorage.debug: ${localStorage?.debug}${hint}`);
-
-		if (DEV) {
-			const { status } = await fetch('/__open-in-editor?file=+');
-			message(
-				makeHint(
-					status === 222,
-					`✅ (optional) open-in-editor vite plugin detected! (status code: ${status})`,
-					`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}.) Add plugin in vite.config.ts`
-				)
-			);
-		}
 	} else {
 		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm dev`)');
 		if (dotenvModule) {
 			dotenvModule.config(); // Load the environment variables
 		}
 		message(`${checkbox(ggLogTest.enabled)} DEBUG env variable: ${process?.env?.DEBUG}${hint}`);
+	}
+
+	// Optional plugin diagnostics listed last
+	message(
+		makeHint(
+			_ggCallSitesPlugin,
+			`✅ (optional) gg-call-sites vite plugin detected! Call-site namespaces baked in at build time.`,
+			`⚠️ (optional) gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for build-time call-site namespaces (needed for useful namespaces in prod, faster/more reliable in dev)`
+		)
+	);
+
+	if (BROWSER && DEV) {
+		const { status } = await fetch('/__open-in-editor?file=+');
+		message(
+			makeHint(
+				status === 222,
+				`✅ (optional) open-in-editor vite plugin detected! (status code: ${status}) Clickable links open source files in editor.`,
+				`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}) Add openInEditorPlugin() to vite.config.ts for clickable links that open source files in editor`
+			)
+		);
 	}
 
 	// Use plain console.log for diagnostics - appears in Eruda's Console tab

@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite';
 
-export interface GgTagPluginOptions {
+export interface GgCallSitesPluginOptions {
 	/**
 	 * Pattern to strip from file paths to produce short callpoints.
 	 * Should match up to and including the source root folder.
@@ -24,18 +24,29 @@ export interface GgTagPluginOptions {
  *
  * @example
  * // vite.config.ts
- * import { ggTagPlugin } from '@leftium/gg';
+ * import { ggCallSitesPlugin } from '@leftium/gg';
  *
  * export default defineConfig({
- *   plugins: [ggTagPlugin()]
+ *   plugins: [ggCallSitesPlugin()]
  * });
  */
-export default function ggTagPlugin(options: GgTagPluginOptions = {}): Plugin {
+export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}): Plugin {
 	const srcRootPattern = options.srcRootPattern ?? '.*?(/(?:src|chunks)/)';
 	const srcRootRegex = new RegExp(srcRootPattern, 'i');
 
 	return {
-		name: 'gg-tag',
+		name: 'gg-call-sites',
+
+		config() {
+			// Set a compile-time flag so gg() can detect the plugin is installed.
+			// Vite replaces all occurrences of __GG_TAG_PLUGIN__ with true at build time,
+			// before any code executes — no ordering issues.
+			return {
+				define: {
+					__GG_TAG_PLUGIN__: 'true'
+				}
+			};
+		},
 
 		transform(code, id) {
 			// Only process JS/TS/Svelte files
