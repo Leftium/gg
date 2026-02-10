@@ -571,7 +571,6 @@ export function createGgPlugin(
 			let checkboxesHTML = '';
 			if (simple && allNamespaces.length > 0) {
 				const allChecked = enabledCount === totalCount;
-				const allIndeterminate = enabledCount > 0 && enabledCount < totalCount;
 
 				checkboxesHTML = `
 				<div class="gg-filter-checkboxes">
