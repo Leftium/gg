@@ -35,9 +35,9 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					if (namespaceMatchesPattern(entry.namespace, effectivePattern)) {
 						enabledNamespaces.add(entry.namespace);
 					}
-					// Update filter header if expanded (new namespace may have appeared)
+					// Update filter UI if expanded (new namespace may have appeared)
 					if (filterExpanded) {
-						renderFilterHeader();
+						renderFilterUI();
 					}
 					renderLogs();
 				};
@@ -285,21 +285,16 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 					opacity: 1;
 					background: rgba(0,0,0,0.05);
 				}
-				.gg-filter-header {
+				.gg-filter-panel {
 					background: #f5f5f5;
 					padding: 10px;
 					margin-bottom: 8px;
 					border-radius: 4px;
 					flex-shrink: 0;
+					display: none;
 				}
-				.gg-filter-collapsed {
-					display: flex;
-					align-items: center;
-					justify-content: space-between;
-					cursor: pointer;
-				}
-				.gg-filter-expanded {
-					/* Content when expanded */
+				.gg-filter-panel.expanded {
+					display: block;
 				}
 				.gg-filter-pattern {
 					width: 100%;
@@ -329,9 +324,10 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 				<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0;">
 					<button class="gg-clear-btn" style="padding: 4px 10px; cursor: pointer;">Clear</button>
 					<button class="gg-copy-btn" style="padding: 4px 10px; cursor: pointer;">Copy</button>
-					<span class="gg-count" style="margin-left: auto; opacity: 0.6;"></span>
+					<button class="gg-filter-btn" style="padding: 4px 10px; cursor: pointer; flex: 1; min-width: 0; text-align: left; font-family: monospace; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">⚙️ Filters: <span class="gg-filter-summary"></span></button>
+					<span class="gg-count" style="opacity: 0.6; white-space: nowrap;"></span>
 				</div>
-				<div class="gg-filter-header"></div>
+				<div class="gg-filter-panel"></div>
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
 			</div>
 		`;
@@ -349,30 +345,28 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 				enabledNamespaces.add(ns);
 			}
 		});
-		renderFilterHeader();
+		renderFilterUI();
 		renderLogs();
 	}
 
 	function wireUpFilterUI() {
 		if (!$el) return;
 
-		const filterHeader = $el.find('.gg-filter-header').get(0) as HTMLElement;
-		if (!filterHeader) return;
+		const filterBtn = $el.find('.gg-filter-btn').get(0) as HTMLElement;
+		const filterPanel = $el.find('.gg-filter-panel').get(0) as HTMLElement;
+		if (!filterBtn || !filterPanel) return;
 
-		renderFilterHeader();
+		renderFilterUI();
 
-		// Wire up toggle
-		filterHeader.addEventListener('click', (e: MouseEvent) => {
-			const target = e.target as HTMLElement;
-			if (target.closest('.gg-filter-toggle')) {
-				filterExpanded = !filterExpanded;
-				renderFilterHeader();
-				renderLogs(); // Re-render to update grid columns
-			}
+		// Wire up button toggle
+		filterBtn.addEventListener('click', () => {
+			filterExpanded = !filterExpanded;
+			renderFilterUI();
+			renderLogs(); // Re-render to update grid columns
 		});
 
 		// Wire up pattern input - apply on blur or Enter
-		filterHeader.addEventListener(
+		filterPanel.addEventListener(
 			'blur',
 			(e: FocusEvent) => {
 				const target = e.target as HTMLInputElement;
@@ -383,7 +377,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 			true
 		); // useCapture for blur (doesn't bubble)
 
-		filterHeader.addEventListener('keydown', (e: KeyboardEvent) => {
+		filterPanel.addEventListener('keydown', (e: KeyboardEvent) => {
 			const target = e.target as HTMLInputElement;
 			if (target.classList.contains('gg-filter-pattern') && e.key === 'Enter') {
 				applyPatternFromInput(target.value);
@@ -392,7 +386,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 		});
 
 		// Wire up checkboxes
-		filterHeader.addEventListener('change', (e: Event) => {
+		filterPanel.addEventListener('change', (e: Event) => {
 			const target = e.target as HTMLInputElement;
 			if (target.classList.contains('gg-ns-checkbox')) {
 				const namespace = target.getAttribute('data-namespace');
@@ -402,28 +396,31 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 				toggleNamespace(namespace, target.checked);
 
 				// Re-render to update UI
-				renderFilterHeader();
+				renderFilterUI();
 				renderLogs();
 			}
 		});
 	}
 
-	function renderFilterHeader() {
+	function renderFilterUI() {
 		if (!$el) return;
-		const filterHeader = $el.find('.gg-filter-header').get(0) as HTMLElement;
-		if (!filterHeader) return;
 
-		if (!filterExpanded) {
-			// Collapsed view - show current pattern as summary
+		// Update button summary
+		const filterSummary = $el.find('.gg-filter-summary').get(0) as HTMLElement;
+		if (filterSummary) {
 			const summary = filterPattern || 'gg:*';
-			filterHeader.innerHTML = `
-				<div class="gg-filter-collapsed gg-filter-toggle" style="font-size: 12px;">
-					<span>⚙️ Filters <code style="opacity: 0.7;">${escapeHtml(summary)}</code></span>
-					<span>▼</span>
-				</div>
-			`;
-		} else {
-			// Expanded view
+			filterSummary.textContent = summary;
+		}
+
+		// Update panel
+		const filterPanel = $el.find('.gg-filter-panel').get(0) as HTMLElement;
+		if (!filterPanel) return;
+
+		if (filterExpanded) {
+			// Show panel
+			filterPanel.classList.add('expanded');
+
+			// Render expanded view
 			const allNamespaces = getAllCapturedNamespaces();
 			const simple = isSimplePattern(filterPattern);
 			const effectivePattern = filterPattern || 'gg:*';
@@ -450,18 +447,15 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 				checkboxesHTML = `<div style="opacity: 0.6; font-size: 11px; margin: 8px 0;">⚠️ Complex pattern - edit manually (quick filters disabled)</div>`;
 			}
 
-			filterHeader.innerHTML = `
-				<div class="gg-filter-collapsed gg-filter-toggle" style="margin-bottom: 8px;">
-					<span>⚙️ Filters</span>
-					<span>▲</span>
+			filterPanel.innerHTML = `
+				<div style="margin-bottom: 8px;">
+					<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="gg:*" style="width: 100%;">
 				</div>
-				<div class="gg-filter-expanded">
-					<div style="margin-bottom: 8px;">
-						<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="gg:*" style="width: 100%;">
-					</div>
-					${checkboxesHTML}
-				</div>
+				${checkboxesHTML}
 			`;
+		} else {
+			// Hide panel
+			filterPanel.classList.remove('expanded');
 		}
 	}
 
@@ -541,7 +535,7 @@ export function createGgPlugin(options: GgErudaOptions, gg: any) {
 
 				// Save to localStorage and re-render
 				localStorage.setItem('debug', filterPattern);
-				renderFilterHeader();
+				renderFilterUI();
 				renderLogs();
 			}
 		});
