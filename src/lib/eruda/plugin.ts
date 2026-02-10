@@ -480,17 +480,20 @@ export function createGgPlugin(
 
 			const text = entries
 				.map((e: CapturedEntry) => {
-					const timestamp = new Date(e.timestamp).toISOString();
-					// Format args: stringify objects, keep primitives as-is
+					// Extract just HH:MM:SS from timestamp (compact for LLMs)
+					const time = new Date(e.timestamp).toISOString().slice(11, 19);
+					// Trim namespace and strip 'gg:' prefix to save tokens
+					const ns = e.namespace.trim().replace(/^gg:/, '');
+					// Format args: compact JSON for objects, primitives as-is
 					const argsStr = e.args
 						.map((arg) => {
 							if (typeof arg === 'object' && arg !== null) {
-								return JSON.stringify(arg, null, 2);
+								return JSON.stringify(arg);
 							}
 							return String(arg);
 						})
 						.join(' ');
-					return `[${timestamp}] ${e.namespace} ${argsStr}`;
+					return `${time} ${ns} ${argsStr}`;
 				})
 				.join('\n');
 
