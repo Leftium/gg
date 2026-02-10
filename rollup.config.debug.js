@@ -7,7 +7,17 @@ export default {
 	output: {
 		file: 'src/lib/debug-bundled.js',
 		format: 'es',
-		sourcemap: false
+		sourcemap: false,
+		banner: '// @ts-nocheck\n// Auto-generated bundled debug library - type checking disabled'
 	},
-	plugins: [nodeResolve(), commonjs(), terser()]
+	plugins: [
+		nodeResolve(),
+		commonjs(),
+		terser({
+			format: {
+				comments: false, // Remove all comments
+				preamble: '// @ts-nocheck\n// Auto-generated bundled debug library - type checking disabled'
+			}
+		})
+	]
 };
