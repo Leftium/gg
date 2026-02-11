@@ -6,15 +6,11 @@
 	import { gg, fg, bg } from '$lib/index.js';
 	import { initGgEruda } from '$lib/eruda/index.js';
 	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
-	import type ErrorStackParser from 'error-stack-parser';
 
 	let { children }: { children: Snippet } = $props();
-	let ggResult = $state<{
-		fileName: string;
-		functionName: string;
-		url: string;
-		stack: ErrorStackParser.StackFrame[];
-	}>({ fileName: '', functionName: '', url: '', stack: [] });
+
+	// gg() with no arguments returns call-site info for open-in-editor
+	const ggResult = gg();
 
 	// Initialize Eruda plugin first
 	initGgEruda();
@@ -25,8 +21,6 @@
 		setTimeout(() => {
 			gg('Hello, gg!!');
 			gg('The colored *callpoint* indicates the location of this logg. (As filename@function)');
-			gg('The link below opens the file containing the callpoint in your editor:');
-			ggResult = gg();
 		}, 100);
 	});
 
@@ -78,7 +72,11 @@
 		<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
 	</div>
 
-	<OpenInEditorLink {ggResult} />
+	<OpenInEditorLink
+		url={ggResult.url}
+		fileName={ggResult.fileName}
+		title={`${ggResult.fileName}@${ggResult.functionName}`}
+	/>
 
 	<div>{@render children()}</div>
 </main>

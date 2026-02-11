@@ -215,11 +215,14 @@ function resetNamespaceWidth() {
 	maxCallpointLength = 0;
 }
 
-function openInEditorUrl(fileName: string) {
-	return ggConfig.openInEditorUrlTemplate.replace(
+function openInEditorUrl(fileName: string, line?: number, col?: number) {
+	let url = ggConfig.openInEditorUrlTemplate.replace(
 		'$FILENAME',
 		encodeURIComponent(fileName).replaceAll('%2F', '/')
 	);
+	if (line != null) url += `&line=${line}`;
+	if (col != null) url += `&col=${col}`;
+	return url;
 }
 
 // http://localhost:5173/__open-in-editor?file=src%2Froutes%2F%2Bpage.svelte
@@ -253,7 +256,7 @@ export function gg<T>(arg: T, ...args: unknown[]): T;
 
 export function gg(...args: unknown[]) {
 	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : { url: '', stack: [] };
+		return args.length ? args[0] : { fileName: '', functionName: '', url: '', stack: [] };
 	}
 
 	// Initialize return values
@@ -412,7 +415,7 @@ gg._ns = function (
 	const { ns: nsLabel, file, line, col, src } = options;
 
 	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : { url: '', stack: [] };
+		return args.length ? args[0] : { fileName: '', functionName: '', url: '', stack: [] };
 	}
 
 	const namespace = `gg:${nsLabel}`;
@@ -431,8 +434,12 @@ gg._ns = function (
 	let returnValue: unknown;
 
 	if (!args.length) {
+		// No arguments: return call-site info for open-in-editor
+		const fileName = file ? file.replace(srcRootRegex, '') : nsLabel;
+		const functionName = nsLabel.includes('@') ? nsLabel.split('@').pop() || '' : '';
+		const url = file ? openInEditorUrl(file, line, col) : '';
 		logArgs = [`    📝 ${nsLabel}`];
-		returnValue = { fileName: '', functionName: '', url: '', stack: [] };
+		returnValue = { fileName, functionName, url, stack: [] };
 	} else if (args.length === 1) {
 		logArgs = [args[0]];
 		returnValue = args[0];

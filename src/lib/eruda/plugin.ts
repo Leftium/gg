@@ -745,7 +745,7 @@ export function createGgPlugin(
 
 	/**
 	 * Open a source file in the editor via the /__open-in-editor Vite middleware.
-	 * Uses a hidden iframe to avoid navigation (same technique as OpenInEditorLink.svelte).
+	 * Uses a hidden iframe to avoid navigation/CORS issues.
 	 */
 	function openInEditor(target: HTMLElement) {
 		if (!$el) return;
