@@ -27,7 +27,7 @@ export default function openInEditorPlugin(
 		name: 'open-in-editor',
 		configureServer(server) {
 			server.middlewares.use('/__open-in-editor', (req, res) => {
-				const { file, line, col } = url.parse(req.url || '', true).query || {};
+				const { file, line, col, editor } = url.parse(req.url || '', true).query || {};
 				if (!file) {
 					res.statusCode = 500;
 					res.end(`open-in-editor-plugin: required query param "file" is missing.`);
@@ -37,7 +37,9 @@ export default function openInEditorPlugin(
 					let fileArg = path.resolve(srcRoot, file as string);
 					if (line) fileArg += `:${line}`;
 					if (line && col) fileArg += `:${col}`;
-					launch(fileArg, specifiedEditor, onErrorCallback);
+					// Use editor from query param if provided, otherwise fall back to plugin config
+					const editorToUse = typeof editor === 'string' && editor ? editor : specifiedEditor;
+					launch(fileArg, editorToUse, onErrorCallback);
 					res.end('<p>You may safely close this window.</p><script>window.close()</script>');
 				}
 			});

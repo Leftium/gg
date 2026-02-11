@@ -39,8 +39,38 @@ export function createGgPlugin(
 
 	// Settings UI state
 	let settingsExpanded = false;
-	const EDITOR_FORMAT_KEY = 'gg-editor-format';
-	const editorPresets: Record<string, string> = {
+
+	// Namespace click action: 'open' uses Vite dev middleware, 'copy' copies formatted string
+	const NS_ACTION_KEY = 'gg-ns-action';
+	const EDITOR_BIN_KEY = 'gg-editor-bin';
+	const COPY_FORMAT_KEY = 'gg-editor-format';
+
+	// Editor bins for launch-editor (common first, then alphabetical)
+	const editorBins: Array<{ label: string; value: string }> = [
+		{ label: 'Auto-detect', value: '' },
+		{ label: 'VS Code', value: 'code' },
+		{ label: 'Cursor', value: 'cursor' },
+		{ label: 'Zed', value: 'zed' },
+		{ label: 'Sublime Text', value: 'sublime' },
+		{ label: 'Vim', value: 'vim' },
+		{ label: 'Emacs', value: 'emacs' },
+		{ label: 'WebStorm', value: 'webstorm' },
+		{ label: 'IDEA', value: 'idea' },
+		{ label: 'Atom', value: 'atom' },
+		{ label: 'AppCode', value: 'appcode' },
+		{ label: 'Brackets', value: 'brackets' },
+		{ label: 'CLion', value: 'clion' },
+		{ label: 'Code Insiders', value: 'code-insiders' },
+		{ label: 'Notepad++', value: 'notepad++' },
+		{ label: 'PhpStorm', value: 'phpstorm' },
+		{ label: 'PyCharm', value: 'pycharm' },
+		{ label: 'Rider', value: 'rider' },
+		{ label: 'RubyMine', value: 'rubymine' },
+		{ label: 'VSCodium', value: 'codium' },
+		{ label: 'Visual Studio', value: 'visualstudio' }
+	];
+
+	const copyPresets: Record<string, string> = {
 		'Raw path': '$FILE:$LINE:$COL',
 		'VS Code': 'code -g $FILE:$LINE:$COL',
 		Cursor: 'cursor -g $FILE:$LINE:$COL',
@@ -49,7 +79,11 @@ export function createGgPlugin(
 		Emacs: 'emacs +$LINE:$COL $FILE',
 		JetBrains: 'idea --line $LINE --column $COL $FILE'
 	};
-	let editorFormat = localStorage.getItem(EDITOR_FORMAT_KEY) || editorPresets['Raw path'];
+
+	let nsClickAction: 'open' | 'copy' =
+		(localStorage.getItem(NS_ACTION_KEY) as 'open' | 'copy') || (DEV ? 'open' : 'copy');
+	let editorBin = localStorage.getItem(EDITOR_BIN_KEY) || '';
+	let copyFormat = localStorage.getItem(COPY_FORMAT_KEY) || copyPresets['Raw path'];
 
 	const plugin = {
 		name: 'GG',
@@ -318,10 +352,13 @@ export function createGgPlugin(
 				background: rgba(0,0,0,0.05);
 			}
 			.gg-log-ns[data-file]::after {
-				content: ' ${DEV ? '\u{1F4DD}' : '\u{1F4CB}'}';
+				content: ' \u{1F4CB}';
 				font-size: 10px;
 				opacity: 0;
 				transition: opacity 0.1s;
+			}
+			.gg-action-open .gg-log-ns[data-file]::after {
+				content: ' \u{1F4DD}';
 			}
 			.gg-log-ns[data-file]:hover::after {
 				opacity: 1;
@@ -488,6 +525,28 @@ export function createGgPlugin(
 			.gg-editor-presets button.active:hover {
 				background: #3a8eef;
 			}
+			.gg-settings-radios {
+				margin-bottom: 8px;
+			}
+			.gg-settings-radios label {
+				display: block;
+				font-size: 12px;
+				padding: 3px 0;
+				cursor: pointer;
+			}
+			.gg-settings-radios label.disabled {
+				opacity: 0.4;
+				cursor: not-allowed;
+			}
+			.gg-settings-sub {
+				margin-left: 20px;
+				margin-top: 4px;
+				margin-bottom: 8px;
+			}
+			.gg-settings-sub select {
+				padding: 2px 4px;
+				font-size: 12px;
+			}
 			/* Mobile responsive styles */
 				.gg-toolbar {
 					display: flex;
@@ -577,7 +636,7 @@ export function createGgPlugin(
 					}
 				}
 			</style>
-		<div class="eruda-gg" style="padding: 10px; height: 100%; display: flex; flex-direction: column; font-size: 14px; touch-action: none; overscroll-behavior: contain;">
+		<div class="eruda-gg${nsClickAction === 'open' ? ' gg-action-open' : ''}" style="padding: 10px; height: 100%; display: flex; flex-direction: column; font-size: 14px; touch-action: none; overscroll-behavior: contain;">
 			<div class="gg-toolbar">
 				<button class="gg-copy-btn">
 					<span class="gg-btn-text">Copy</span>
@@ -631,9 +690,13 @@ export function createGgPlugin(
 
 		renderFilterUI();
 
-		// Wire up button toggle
+		// Wire up button toggle (close settings if opening filter)
 		filterBtn.addEventListener('click', () => {
 			filterExpanded = !filterExpanded;
+			if (filterExpanded) {
+				settingsExpanded = false;
+				renderSettingsUI();
+			}
 			renderFilterUI();
 			renderLogs(); // Re-render to update grid columns
 		});
@@ -769,22 +832,67 @@ export function createGgPlugin(
 		const settingsPanel = $el.find('.gg-settings-panel').get(0) as HTMLElement;
 		if (!settingsPanel) return;
 
+		// Toggle CSS class on container for hover icon (📝 vs 📋)
+		const container = $el.find('.eruda-gg').get(0) as HTMLElement;
+		if (container) {
+			container.classList.toggle('gg-action-open', nsClickAction === 'open');
+		}
+
 		if (settingsExpanded) {
 			settingsPanel.classList.add('expanded');
 
-			const presetButtons = Object.entries(editorPresets)
+			const openDisabled = !DEV;
+			const openLabel = openDisabled ? ' disabled' : '';
+
+			// Editor dropdown
+			const editorOptions = editorBins
+				.map(({ label, value }) => {
+					const selected = value === editorBin ? ' selected' : '';
+					return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(label)}</option>`;
+				})
+				.join('');
+
+			// Copy format presets
+			const presetButtons = Object.entries(copyPresets)
 				.map(([name, fmt]) => {
-					const active = editorFormat === fmt ? ' active' : '';
+					const active = copyFormat === fmt ? ' active' : '';
 					return `<button class="gg-preset-btn${active}" data-format="${escapeHtml(fmt)}">${escapeHtml(name)}</button>`;
 				})
 				.join('');
 
 			settingsPanel.innerHTML = `
-				<div class="gg-settings-label">Editor format</div>
-				<div style="font-size: 11px; opacity: 0.7; margin-bottom: 6px;">Clicking a namespace copies this command to your clipboard. Paste it in a terminal to open the source file. Variables: <code>$FILE</code>, <code>$LINE</code>, <code>$COL</code></div>
-				<input type="text" class="gg-editor-format-input" value="${escapeHtml(editorFormat)}" placeholder="$FILE:$LINE:$COL">
-				<div class="gg-settings-label">Presets:</div>
-				<div class="gg-editor-presets">${presetButtons}</div>
+				<div class="gg-settings-label">When namespace clicked:</div>
+				<div class="gg-settings-radios">
+					<label class="${openLabel}">
+						<input type="radio" name="gg-ns-action" value="open" ${nsClickAction === 'open' ? 'checked' : ''} ${openDisabled ? 'disabled' : ''}>
+						Open in editor (dev mode only)
+					</label>
+					${
+						nsClickAction === 'open' && !openDisabled
+							? `
+					<div class="gg-settings-sub">
+						Editor: <select class="gg-editor-bin-select">${editorOptions}</select>
+					</div>
+					`
+							: ''
+					}
+					<label>
+						<input type="radio" name="gg-ns-action" value="copy" ${nsClickAction === 'copy' ? 'checked' : ''}>
+						Copy to clipboard
+					</label>
+					${
+						nsClickAction === 'copy'
+							? `
+					<div class="gg-settings-sub">
+						<div style="font-size: 11px; opacity: 0.7; margin-bottom: 6px;">Copies a command to your clipboard. Paste in a terminal to open the source file.<br>Variables: <code>$FILE</code>, <code>$LINE</code>, <code>$COL</code></div>
+						<input type="text" class="gg-editor-format-input" value="${escapeHtml(copyFormat)}" placeholder="$FILE:$LINE:$COL">
+						<div class="gg-settings-label" style="margin-top: 4px;">Presets:</div>
+						<div class="gg-editor-presets">${presetButtons}</div>
+					</div>
+					`
+							: ''
+					}
+				</div>
 			`;
 		} else {
 			settingsPanel.classList.remove('expanded');
@@ -798,21 +906,45 @@ export function createGgPlugin(
 		const settingsPanel = $el.find('.gg-settings-panel').get(0) as HTMLElement;
 		if (!settingsBtn || !settingsPanel) return;
 
-		// Toggle settings panel
+		// Toggle settings panel (close filter if opening settings)
 		settingsBtn.addEventListener('click', () => {
 			settingsExpanded = !settingsExpanded;
+			if (settingsExpanded) {
+				filterExpanded = false;
+				renderFilterUI();
+				renderLogs();
+			}
 			renderSettingsUI();
 		});
 
-		// Apply format on blur or Enter
+		// Event delegation on settings panel
+		settingsPanel.addEventListener('change', (e: Event) => {
+			const target = e.target as HTMLInputElement | HTMLSelectElement;
+
+			// Radio buttons: open vs copy
+			if (target.name === 'gg-ns-action') {
+				nsClickAction = target.value as 'open' | 'copy';
+				localStorage.setItem(NS_ACTION_KEY, nsClickAction);
+				renderSettingsUI();
+				renderLogs(); // Re-render tooltips
+			}
+
+			// Editor dropdown
+			if (target.classList.contains('gg-editor-bin-select')) {
+				editorBin = target.value;
+				localStorage.setItem(EDITOR_BIN_KEY, editorBin);
+			}
+		});
+
+		// Copy format input: apply on blur or Enter
 		settingsPanel.addEventListener(
 			'blur',
 			(e: FocusEvent) => {
 				const target = e.target as HTMLInputElement;
 				if (target.classList.contains('gg-editor-format-input')) {
-					editorFormat = target.value;
-					localStorage.setItem(EDITOR_FORMAT_KEY, editorFormat);
-					renderSettingsUI(); // Update active preset highlight
+					copyFormat = target.value;
+					localStorage.setItem(COPY_FORMAT_KEY, copyFormat);
+					renderSettingsUI();
 				}
 			},
 			true
@@ -821,8 +953,8 @@ export function createGgPlugin(
 		settingsPanel.addEventListener('keydown', (e: KeyboardEvent) => {
 			const target = e.target as HTMLInputElement;
 			if (target.classList.contains('gg-editor-format-input') && e.key === 'Enter') {
-				editorFormat = target.value;
-				localStorage.setItem(EDITOR_FORMAT_KEY, editorFormat);
+				copyFormat = target.value;
+				localStorage.setItem(COPY_FORMAT_KEY, copyFormat);
 				target.blur();
 				renderSettingsUI();
 			}
@@ -834,8 +966,8 @@ export function createGgPlugin(
 			if (target.classList.contains('gg-preset-btn')) {
 				const fmt = target.getAttribute('data-format');
 				if (fmt) {
-					editorFormat = fmt;
-					localStorage.setItem(EDITOR_FORMAT_KEY, editorFormat);
+					copyFormat = fmt;
+					localStorage.setItem(COPY_FORMAT_KEY, copyFormat);
 					renderSettingsUI();
 				}
 			}
@@ -892,8 +1024,8 @@ export function createGgPlugin(
 	}
 
 	/**
-	 * Open a source file in the editor via the /__open-in-editor Vite middleware (dev only).
-	 * Outside dev mode, copies the file path to clipboard instead.
+	 * Handle namespace click: open in editor via Vite middleware, or copy to clipboard.
+	 * Behavior is controlled by the nsClickAction setting.
 	 */
 	function openInEditor(target: HTMLElement) {
 		if (!$el) return;
@@ -903,19 +1035,20 @@ export function createGgPlugin(
 		const line = target.getAttribute('data-line');
 		const col = target.getAttribute('data-col');
 
-		if (DEV) {
-			// Dev mode: open in editor via Vite middleware
+		if (nsClickAction === 'open' && DEV) {
+			// Open in editor via Vite dev server middleware
 			let url = `/__open-in-editor?file=${encodeURIComponent(file)}`;
 			if (line) url += `&line=${line}`;
 			if (line && col) url += `&col=${col}`;
+			if (editorBin) url += `&editor=${encodeURIComponent(editorBin)}`;
 
 			const iframe = $el.find('.gg-editor-iframe').get(0) as HTMLIFrameElement | undefined;
 			if (iframe) {
 				iframe.src = url;
 			}
 		} else {
-			// Non-dev: copy formatted file path to clipboard using editor format setting
-			const formatted = editorFormat
+			// Copy formatted file path to clipboard
+			const formatted = copyFormat
 				.replace(/\$FILE/g, file)
 				.replace(/\$LINE/g, line || '1')
 				.replace(/\$COL/g, col || '1');
@@ -923,7 +1056,7 @@ export function createGgPlugin(
 			navigator.clipboard.writeText(formatted).then(() => {
 				// Brief "Copied!" feedback on the namespace cell
 				const original = target.textContent;
-				target.textContent = '📋 Copied!';
+				target.textContent = '\u{1F4CB} Copied!';
 				setTimeout(() => {
 					target.textContent = original;
 				}, 1200);
@@ -1150,10 +1283,10 @@ export function createGgPlugin(
 				const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
 				const fileTitle = entry.file
 					? ` title="${
-							DEV
+							nsClickAction === 'open' && DEV
 								? `Open in editor: ${escapeHtml(entry.file)}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}`
 								: `Copy: ${escapeHtml(
-										editorFormat
+										copyFormat
 											.replace(/\$FILE/g, entry.file)
 											.replace(/\$LINE/g, String(entry.line || 1))
 											.replace(/\$COL/g, String(entry.col || 1))
