@@ -26,6 +26,25 @@ export interface CodeRange {
 }
 
 /**
+ * A function scope range, mapping a byte range to the enclosing function name.
+ * Built from the estree AST during `collectCodeRanges()`.
+ */
+export interface FunctionScope {
+	start: number;
+	end: number;
+	name: string;
+}
+
+/**
+ * Result of `collectCodeRanges()` — code ranges plus function scope info.
+ */
+export interface SvelteCodeInfo {
+	ranges: CodeRange[];
+	/** Function scopes extracted from the estree AST, sorted by start position. */
+	functionScopes: FunctionScope[];
+}
+
+/**
  * Vite plugin that rewrites `gg(...)` and `gg.ns(...)` calls to
  * `gg._ns({ns, file, line, col}, ...)` at build time. This gives each call
  * site a unique namespace plus source location metadata for open-in-editor
@@ -80,35 +99,40 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// $1 captures "/src/" or "/chunks/", so strip the leading slash
 			const filePath = id.replace(srcRootRegex, '$1').replace(/^\//, '');
 
-			// For .svelte files, use svelte.parse() AST to find code ranges.
-			// This distinguishes real JS expressions ({gg()}, onclick, etc.)
-			// from prose text mentioning "gg()".
-			let codeRanges: CodeRange[] | undefined;
+			// For .svelte files, use svelte.parse() AST to find code ranges
+			// and function scopes. This distinguishes real JS expressions
+			// ({gg()}, onclick, etc.) from prose text mentioning "gg()",
+			// and uses estree AST for function name detection (no regex).
+			let svelteInfo: SvelteCodeInfo | undefined;
 			if (/\.svelte(\?.*)?$/.test(id)) {
-				codeRanges = collectCodeRanges(code);
-				if (codeRanges.length === 0) return null;
+				svelteInfo = collectCodeRanges(code);
+				if (svelteInfo.ranges.length === 0) return null;
 			}
 
-			return transformGgCalls(code, shortPath, filePath, codeRanges);
+			return transformGgCalls(code, shortPath, filePath, svelteInfo);
 		}
 	};
 }
 
 /**
- * Use `svelte.parse()` to collect all code ranges in a .svelte file.
- * Returns ranges for:
+ * Use `svelte.parse()` to collect all code ranges and function scopes in a .svelte file.
+ *
+ * Code ranges identify where JS expressions live:
  * - `<script>` blocks (context: 'script')
  * - Template expressions: `{expr}`, `onclick={expr}`, `bind:value={expr}`,
  *   `class:name={expr}`, `{#if expr}`, `{#each expr}`, etc. (context: 'template')
  *
- * Text nodes (prose) are NOT included, so `gg()` in `<p>text gg()</p>` is never transformed.
+ * Function scopes are extracted from the estree AST in script blocks, mapping
+ * byte ranges to enclosing function names. This replaces regex-based function
+ * detection for .svelte files.
  *
- * Falls back to regex-based script detection if `svelte.parse()` throws.
+ * Text nodes (prose) are NOT included, so `gg()` in `<p>text gg()</p>` is never transformed.
  */
-export function collectCodeRanges(code: string): CodeRange[] {
+export function collectCodeRanges(code: string): SvelteCodeInfo {
 	try {
 		const ast = parse(code, { modern: true });
 		const ranges: CodeRange[] = [];
+		const functionScopes: FunctionScope[] = [];
 
 		// Script blocks (instance + module)
 		// The Svelte AST Program node has start/end at runtime but TypeScript's
@@ -116,21 +140,198 @@ export function collectCodeRanges(code: string): CodeRange[] {
 		if (ast.instance) {
 			const content = ast.instance.content as any;
 			ranges.push({ start: content.start, end: content.end, context: 'script' });
+			collectFunctionScopes(ast.instance.content.body, functionScopes);
 		}
 		if (ast.module) {
 			const content = ast.module.content as any;
 			ranges.push({ start: content.start, end: content.end, context: 'script' });
+			collectFunctionScopes(ast.module.content.body, functionScopes);
 		}
 
 		// Walk the template fragment to find all expression positions
 		walkFragment(ast.fragment, ranges);
 
-		return ranges;
+		// Sort function scopes by start position for efficient lookup
+		functionScopes.sort((a, b) => a.start - b.start);
+
+		return { ranges, functionScopes };
 	} catch {
 		// If svelte.parse() fails, the Svelte compiler will also reject this file,
-		// so there's no point transforming gg() calls — return empty ranges.
-		return [];
+		// so there's no point transforming gg() calls — return empty.
+		return { ranges: [], functionScopes: [] };
 	}
+}
+
+/**
+ * Walk an estree AST body to collect function scope ranges.
+ * Extracts function names from:
+ * - FunctionDeclaration: `function foo() {}`
+ * - VariableDeclarator with ArrowFunctionExpression/FunctionExpression: `const foo = () => {}`
+ * - Property with FunctionExpression: `{ method() {} }` or `{ prop: function() {} }`
+ * - MethodDefinition: `class Foo { bar() {} }`
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function collectFunctionScopes(nodes: any[], scopes: FunctionScope[]): void {
+	if (!nodes) return;
+	for (const node of nodes) {
+		collectFunctionScopesFromNode(node, scopes);
+	}
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function collectFunctionScopesFromNode(node: any, scopes: FunctionScope[]): void {
+	if (!node || typeof node !== 'object' || !node.type) return;
+
+	switch (node.type) {
+		case 'FunctionDeclaration':
+			if (node.id?.name && node.body) {
+				scopes.push({ start: node.body.start, end: node.body.end, name: node.id.name });
+			}
+			// Recurse into the function body for nested functions
+			if (node.body?.body) collectFunctionScopes(node.body.body, scopes);
+			return;
+
+		case 'VariableDeclaration':
+			for (const decl of node.declarations || []) {
+				collectFunctionScopesFromNode(decl, scopes);
+			}
+			return;
+
+		case 'VariableDeclarator':
+			// const foo = () => {} or const foo = function() {}
+			if (
+				node.id?.name &&
+				node.init &&
+				(node.init.type === 'ArrowFunctionExpression' || node.init.type === 'FunctionExpression')
+			) {
+				const body = node.init.body;
+				if (body) {
+					// Arrow with block body: () => { ... }
+					// Arrow with expression body: () => expr  (use the arrow's range)
+					const start = body.type === 'BlockStatement' ? body.start : node.init.start;
+					const end = body.type === 'BlockStatement' ? body.end : node.init.end;
+					scopes.push({ start, end, name: node.id.name });
+				}
+				// Recurse into the function body
+				if (body?.body) collectFunctionScopes(body.body, scopes);
+			}
+			// Recurse into object/array initializers for nested functions
+			if (node.init) collectFunctionScopesFromNode(node.init, scopes);
+			return;
+
+		case 'ExpressionStatement':
+			collectFunctionScopesFromNode(node.expression, scopes);
+			return;
+
+		case 'ObjectExpression':
+			for (const prop of node.properties || []) {
+				collectFunctionScopesFromNode(prop, scopes);
+			}
+			return;
+
+		case 'Property':
+			// { method() {} } or { prop: function() {} }
+			if (
+				node.key?.name &&
+				node.value &&
+				(node.value.type === 'FunctionExpression' || node.value.type === 'ArrowFunctionExpression')
+			) {
+				const body = node.value.body;
+				if (body) {
+					const start = body.type === 'BlockStatement' ? body.start : node.value.start;
+					const end = body.type === 'BlockStatement' ? body.end : node.value.end;
+					scopes.push({ start, end, name: node.key.name });
+				}
+				if (body?.body) collectFunctionScopes(body.body, scopes);
+			}
+			return;
+
+		case 'MethodDefinition':
+			// class Foo { bar() {} }
+			if (node.key?.name && node.value?.body) {
+				scopes.push({
+					start: node.value.body.start,
+					end: node.value.body.end,
+					name: node.key.name
+				});
+				if (node.value.body?.body) collectFunctionScopes(node.value.body.body, scopes);
+			}
+			return;
+
+		case 'ClassDeclaration':
+		case 'ClassExpression':
+			if (node.body?.body) {
+				for (const member of node.body.body) {
+					collectFunctionScopesFromNode(member, scopes);
+				}
+			}
+			return;
+
+		case 'IfStatement':
+			if (node.consequent) collectFunctionScopesFromNode(node.consequent, scopes);
+			if (node.alternate) collectFunctionScopesFromNode(node.alternate, scopes);
+			return;
+
+		case 'BlockStatement':
+			if (node.body) collectFunctionScopes(node.body, scopes);
+			return;
+
+		case 'ForStatement':
+		case 'ForInStatement':
+		case 'ForOfStatement':
+		case 'WhileStatement':
+		case 'DoWhileStatement':
+			if (node.body) collectFunctionScopesFromNode(node.body, scopes);
+			return;
+
+		case 'TryStatement':
+			if (node.block) collectFunctionScopesFromNode(node.block, scopes);
+			if (node.handler?.body) collectFunctionScopesFromNode(node.handler.body, scopes);
+			if (node.finalizer) collectFunctionScopesFromNode(node.finalizer, scopes);
+			return;
+
+		case 'SwitchStatement':
+			for (const c of node.cases || []) {
+				if (c.consequent) collectFunctionScopes(c.consequent, scopes);
+			}
+			return;
+
+		case 'ReturnStatement':
+			if (node.argument) collectFunctionScopesFromNode(node.argument, scopes);
+			return;
+
+		case 'CallExpression':
+			// e.g. onMount(() => { gg() })
+			for (const arg of node.arguments || []) {
+				if (arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression') {
+					// Anonymous callback — don't add a scope (no name to show),
+					// but recurse for nested named functions
+					if (arg.body?.body) collectFunctionScopes(arg.body.body, scopes);
+				}
+			}
+			return;
+	}
+}
+
+/**
+ * Find the innermost enclosing function name for a byte position
+ * using the pre-built function scope map.
+ * Returns empty string if not inside any named function.
+ */
+export function findEnclosingFunctionFromScopes(pos: number, scopes: FunctionScope[]): string {
+	// Scopes can be nested; find the innermost (smallest range) that contains pos
+	let bestName = '';
+	let bestSize = Infinity;
+	for (const scope of scopes) {
+		if (pos >= scope.start && pos < scope.end) {
+			const size = scope.end - scope.start;
+			if (size < bestSize) {
+				bestSize = size;
+				bestName = scope.name;
+			}
+		}
+	}
+	return bestName;
 }
 
 /**
@@ -482,16 +683,17 @@ export function escapeForString(s: string): string {
  * - gg.enable, gg.disable, gg.clearPersist, gg._onLog, gg._ns → left untouched
  * - gg inside strings and comments → left untouched
  *
- * For .svelte files, `codeRanges` (from `collectCodeRanges()`) determines which
- * positions contain JS code. Script ranges use `{...}` object literal syntax;
- * template ranges use `gg._o()` function-call syntax (no braces in Svelte markup).
- * Positions outside any code range (e.g. prose text) are skipped.
+ * For .svelte files, `svelteInfo` (from `collectCodeRanges()`) determines which
+ * positions contain JS code and provides AST-based function scope detection.
+ * Script ranges use `{...}` object literal syntax; template ranges use `gg._o()`
+ * function-call syntax (no braces in Svelte markup). Positions outside any code
+ * range (e.g. prose text) are skipped.
  */
 export function transformGgCalls(
 	code: string,
 	shortPath: string,
 	filePath: string,
-	codeRanges?: CodeRange[]
+	svelteInfo?: SvelteCodeInfo
 ): { code: string; map: null } | null {
 	// We use a manual scan approach to correctly handle strings and comments.
 
@@ -502,11 +704,23 @@ export function transformGgCalls(
 
 	/**
 	 * Find the code range containing `pos`, or undefined if outside all ranges.
-	 * For non-.svelte files (no codeRanges), returns a synthetic 'script' range.
+	 * For non-.svelte files (no svelteInfo), returns a synthetic 'script' range.
 	 */
 	function rangeAt(pos: number): CodeRange | undefined {
-		if (!codeRanges) return { start: 0, end: code.length, context: 'script' };
-		return findCodeRange(pos, codeRanges);
+		if (!svelteInfo) return { start: 0, end: code.length, context: 'script' };
+		return findCodeRange(pos, svelteInfo.ranges);
+	}
+
+	/**
+	 * Find the enclosing function name for a position.
+	 * - .svelte files: uses estree AST function scope map (accurate)
+	 * - .js/.ts files: uses regex-based backwards scan (fallback)
+	 * - template code ranges: always returns '' (no enclosing function from script)
+	 */
+	function getFunctionName(pos: number, range: CodeRange): string {
+		if (range.context === 'template') return '';
+		if (svelteInfo) return findEnclosingFunctionFromScopes(pos, svelteInfo.functionScopes);
+		return findEnclosingFunction(code, pos);
 	}
 
 	/**
@@ -613,8 +827,7 @@ export function transformGgCalls(
 			// Case 1: gg.ns('label', ...) → gg._ns({ns: 'label', file, line, col, src}, ...)
 			if (code.slice(i + 2, i + 6) === '.ns(') {
 				const { line, col } = getLineCol(code, i);
-				// For template code, don't search backwards into script context for function names
-				const fnName = range.context === 'template' ? '' : findEnclosingFunction(code, i);
+				const fnName = getFunctionName(i, range);
 				const openParenPos = i + 5; // position of '(' in 'gg.ns('
 
 				// Find matching closing paren for the entire gg.ns(...) call
@@ -696,8 +909,7 @@ export function transformGgCalls(
 			// Case 2: bare gg(...) → gg._ns({ns, file, line, col, src}, ...)
 			if (code[i + 2] === '(') {
 				const { line, col } = getLineCol(code, i);
-				// For template code, don't search backwards into script context for function names
-				const fnName = range.context === 'template' ? '' : findEnclosingFunction(code, i);
+				const fnName = getFunctionName(i, range);
 				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
 				const escapedNs = escapeForString(callpoint);
 				const openParenPos = i + 2; // position of '(' in 'gg('
