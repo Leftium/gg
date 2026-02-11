@@ -36,6 +36,7 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 
 	return {
 		name: 'gg-call-sites',
+		enforce: 'pre' as const,
 
 		config() {
 			// Set a compile-time flag so gg() can detect the plugin is installed.
@@ -67,9 +68,48 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// $1 captures "/src/" or "/chunks/", so strip the leading slash
 			const filePath = id.replace(srcRootRegex, '$1').replace(/^\//, '');
 
-			return transformGgCalls(code, shortPath, filePath);
+			// For .svelte files (with enforce:'pre', we see raw source), restrict
+			// transforms to <script> blocks only — template markup may contain
+			// text like "gg()" that isn't actual code, and object literals in
+			// the transformed output would break Svelte's template parser.
+			let scriptRanges: Array<{ start: number; end: number }> | undefined;
+			if (/\.svelte(\?.*)?$/.test(id)) {
+				scriptRanges = findScriptRanges(code);
+				if (scriptRanges.length === 0) return null;
+			}
+
+			return transformGgCalls(code, shortPath, filePath, scriptRanges);
 		}
 	};
+}
+
+/**
+ * Find the start/end byte offsets of all <script> blocks in a .svelte file.
+ * Returns ranges covering the inner content (after the opening tag, before </script>).
+ */
+function findScriptRanges(code: string): Array<{ start: number; end: number }> {
+	const ranges: Array<{ start: number; end: number }> = [];
+	// Match <script ...> tags (with optional attributes like lang="ts")
+	const openRegex = /<script\b[^>]*>/gi;
+	let match;
+	while ((match = openRegex.exec(code)) !== null) {
+		const contentStart = match.index + match[0].length;
+		const closeIdx = code.indexOf('</script>', contentStart);
+		if (closeIdx !== -1) {
+			ranges.push({ start: contentStart, end: closeIdx });
+		}
+	}
+	return ranges;
+}
+
+/**
+ * Check if a character position falls within any of the given ranges.
+ */
+function isInRanges(pos: number, ranges: Array<{ start: number; end: number }>): boolean {
+	for (const r of ranges) {
+		if (pos >= r.start && pos < r.end) return true;
+	}
+	return false;
 }
 
 /**
@@ -253,7 +293,8 @@ function escapeForString(s: string): string {
 function transformGgCalls(
 	code: string,
 	shortPath: string,
-	filePath: string
+	filePath: string,
+	scriptRanges?: Array<{ start: number; end: number }>
 ): { code: string; map: null } | null {
 	// We use a manual scan approach to correctly handle strings and comments.
 
@@ -327,6 +368,12 @@ function transformGgCalls(
 
 		// Look for 'gg' pattern — could be gg( or gg.ns(
 		if (code[i] === 'g' && code[i + 1] === 'g') {
+			// In .svelte files, skip gg outside <script> blocks
+			if (scriptRanges && !isInRanges(i, scriptRanges)) {
+				i++;
+				continue;
+			}
+
 			// Check preceding character: must not be a word char or dot
 			const prevChar = i > 0 ? code[i - 1] : '';
 			if (prevChar && /[a-zA-Z0-9_$.]/.test(prevChar)) {

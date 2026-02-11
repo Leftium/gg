@@ -290,6 +290,26 @@ export function createGgPlugin(
 			.gg-solo-target:hover {
 				background: rgba(0,0,0,0.05);
 			}
+			/* Clickable namespace cells with file metadata (open-in-editor) */
+			.gg-log-ns[data-file] {
+				cursor: pointer;
+				text-decoration: underline;
+				text-decoration-style: dotted;
+				text-underline-offset: 3px;
+			}
+			.gg-log-ns[data-file]:hover {
+				text-decoration-style: solid;
+				background: rgba(0,0,0,0.05);
+			}
+			.gg-log-ns[data-file]::after {
+				content: ' \u{1F4DD}';
+				font-size: 10px;
+				opacity: 0;
+				transition: opacity 0.1s;
+			}
+			.gg-log-ns[data-file]:hover::after {
+				opacity: 1;
+			}
 			.gg-details {
 				grid-column: 1 / -1;
 				border-top: none;
@@ -512,6 +532,7 @@ export function createGgPlugin(
 			</div>
 				<div class="gg-filter-panel"></div>
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
+				<iframe class="gg-editor-iframe" hidden title="open-in-editor"></iframe>
 			</div>
 		`;
 	}
@@ -722,6 +743,28 @@ export function createGgPlugin(
 		});
 	}
 
+	/**
+	 * Open a source file in the editor via the /__open-in-editor Vite middleware.
+	 * Uses a hidden iframe to avoid navigation (same technique as OpenInEditorLink.svelte).
+	 */
+	function openInEditor(target: HTMLElement) {
+		if (!$el) return;
+		const file = target.getAttribute('data-file');
+		if (!file) return;
+
+		const line = target.getAttribute('data-line');
+		const col = target.getAttribute('data-col');
+
+		let url = `/__open-in-editor?file=${encodeURIComponent(file)}`;
+		if (line) url += `&line=${line}`;
+		if (line && col) url += `&col=${col}`;
+
+		const iframe = $el.find('.gg-editor-iframe').get(0) as HTMLIFrameElement | undefined;
+		if (iframe) {
+			iframe.src = url;
+		}
+	}
+
 	function wireUpExpanders() {
 		if (!$el || expanderAttached) return;
 
@@ -745,6 +788,16 @@ export function createGgPlugin(
 				if (details) {
 					details.style.display = details.style.display === 'none' ? 'block' : 'none';
 				}
+				return;
+			}
+
+			// Handle clicking namespace to open in editor (when filter collapsed)
+			if (
+				target?.classList?.contains('gg-log-ns') &&
+				target.hasAttribute('data-file') &&
+				!target.classList.contains('gg-solo-target')
+			) {
+				openInEditor(target);
 				return;
 			}
 
@@ -925,13 +978,21 @@ export function createGgPlugin(
 				const soloAttr = filterExpanded ? ` data-namespace="${ns}"` : '';
 				const soloClass = filterExpanded ? ' gg-solo-target' : '';
 
+				// Open-in-editor data attributes (file, line, col)
+				const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
+				const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
+				const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
+				const fileTitle = entry.file
+					? ` title="${escapeHtml(entry.file)}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}"`
+					: '';
+
 				// Desktop: grid layout, Mobile: stacked layout
 				return (
 					`<div class="gg-log-entry">` +
 					`<div class="gg-log-header">` +
 					iconsCol +
 					`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
-					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}>${ns}</div>` +
+					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}${fileAttr}${lineAttr}${colAttr}${fileTitle}>${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
 					`<div class="gg-log-content"${entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
