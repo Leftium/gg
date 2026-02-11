@@ -322,8 +322,8 @@ function findEnclosingFunction(code: string, position: number): string {
 	const patterns = [
 		// function declarations: function foo(
 		/function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
-		// const/let/var assignment to arrow or function: const foo =
-		/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/g,
+		// Arrow functions: const foo = (...) =>  or  const foo = async (...) =>
+		/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/g,
 		// object method shorthand: foo() { or async foo() {
 		/(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*\{/g,
 		// object property function: foo: function
