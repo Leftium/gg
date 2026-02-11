@@ -48,6 +48,14 @@ export interface CapturedEntry {
 	args: unknown[];
 	/** Timestamp */
 	timestamp: number;
+	/** Source file path for open-in-editor (e.g., "src/routes/blog/[slug]/+page.svelte") */
+	file?: string;
+	/** Source line number */
+	line?: number;
+	/** Source column number */
+	col?: number;
+	/** Source expression text for icecream-style display (e.g., "user.name") */
+	src?: string;
 }
 
 /**

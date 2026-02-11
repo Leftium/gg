@@ -14,13 +14,13 @@ export interface GgCallSitesPluginOptions {
 }
 
 /**
- * Vite plugin that rewrites bare `gg(...)` calls to `gg.ns('callpoint', ...)`
- * at build time. This gives each call site a unique namespace with zero runtime
- * cost — no stack trace parsing needed.
+ * Vite plugin that rewrites `gg(...)` and `gg.ns(...)` calls to
+ * `gg._ns({ns, file, line, col}, ...)` at build time. This gives each call
+ * site a unique namespace plus source location metadata for open-in-editor
+ * support, with zero runtime cost — no stack trace parsing needed.
  *
- * Works in both dev and prod. When the plugin is installed, `gg.ns()` is called
- * with the callpoint baked in as a string literal. Without the plugin, gg()
- * falls back to runtime stack parsing in dev and bare `gg:` in prod.
+ * Works in both dev and prod. Without the plugin, gg() falls back to runtime
+ * stack parsing in dev and bare `gg:` in prod.
  *
  * @example
  * // vite.config.ts
@@ -53,16 +53,21 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			if (!/\.(js|ts|svelte|jsx|tsx|mjs|mts)(\?.*)?$/.test(id)) return null;
 
 			// Quick bail: no gg calls in this file
-			if (!code.includes('gg(')) return null;
+			if (!code.includes('gg(') && !code.includes('gg.ns(')) return null;
 
 			// Don't transform gg's own source files
 			if (id.includes('/lib/gg.') || id.includes('/lib/debug')) return null;
 
-			// Build the short callpoint from the file path
+			// Build the short callpoint from the file path (strips src/ prefix)
 			// e.g. "/Users/me/project/src/routes/+page.svelte" → "routes/+page.svelte"
 			const shortPath = id.replace(srcRootRegex, '');
 
-			return transformGgCalls(code, shortPath);
+			// Build the file path preserving src/ prefix (for open-in-editor)
+			// e.g. "/Users/me/project/src/routes/+page.svelte" → "src/routes/+page.svelte"
+			// $1 captures "/src/" or "/chunks/", so strip the leading slash
+			const filePath = id.replace(srcRootRegex, '$1').replace(/^\//, '');
+
+			return transformGgCalls(code, shortPath, filePath);
 		}
 	};
 }
@@ -149,25 +154,113 @@ function findEnclosingFunction(code: string, position: number): string {
 }
 
 /**
- * Transform gg() calls in source code to gg.ns('callpoint', ...) calls.
+ * Compute 1-based line number and column for a character offset in source code.
+ */
+function getLineCol(code: string, offset: number): { line: number; col: number } {
+	const line = code.slice(0, offset).split('\n').length;
+	const col = offset - code.lastIndexOf('\n', offset - 1);
+	return { line, col };
+}
+
+/**
+ * Find the matching closing paren for an opening paren at `openPos`.
+ * Handles nested parens, brackets, braces, strings, template literals, and comments.
+ * Returns the index of the closing ')' or -1 if not found.
+ */
+function findMatchingParen(code: string, openPos: number): number {
+	let depth = 1;
+	let j = openPos + 1;
+	while (j < code.length && depth > 0) {
+		const ch = code[j];
+
+		// Skip string literals
+		if (ch === '"' || ch === "'") {
+			j++;
+			while (j < code.length && code[j] !== ch) {
+				if (code[j] === '\\') j++;
+				j++;
+			}
+			j++; // skip closing quote
+			continue;
+		}
+
+		// Skip template literals
+		if (ch === '`') {
+			j++;
+			let tmplDepth = 0;
+			while (j < code.length) {
+				if (code[j] === '\\') {
+					j += 2;
+					continue;
+				}
+				if (code[j] === '$' && code[j + 1] === '{') {
+					tmplDepth++;
+					j += 2;
+					continue;
+				}
+				if (code[j] === '}' && tmplDepth > 0) {
+					tmplDepth--;
+					j++;
+					continue;
+				}
+				if (code[j] === '`' && tmplDepth === 0) {
+					j++;
+					break;
+				}
+				j++;
+			}
+			continue;
+		}
+
+		// Skip single-line comments
+		if (ch === '/' && code[j + 1] === '/') {
+			const end = code.indexOf('\n', j);
+			j = end === -1 ? code.length : end + 1;
+			continue;
+		}
+
+		// Skip multi-line comments
+		if (ch === '/' && code[j + 1] === '*') {
+			const end = code.indexOf('*/', j + 2);
+			j = end === -1 ? code.length : end + 2;
+			continue;
+		}
+
+		if (ch === '(' || ch === '[' || ch === '{') depth++;
+		else if (ch === ')' || ch === ']' || ch === '}') depth--;
+
+		if (depth > 0) j++;
+	}
+	return depth === 0 ? j : -1;
+}
+
+/**
+ * Escape a string for embedding as a single-quoted JS string literal.
+ */
+function escapeForString(s: string): string {
+	return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+}
+
+/**
+ * Transform gg() and gg.ns() calls in source code to gg._ns({ns, file, line, col, src}, ...) calls.
  *
  * Handles:
- * - bare gg(...) → gg.ns('callpoint', ...)
- * - gg.ns(...) → left untouched (user-specified namespace)
- * - gg.enable, gg.disable, gg.clearPersist, gg._onLog → left untouched
+ * - bare gg(expr) → gg._ns({ns, file, line, col, src: 'expr'}, expr)
+ * - gg.ns('label', expr) → gg._ns({ns, file, line, col, src: 'expr'}, expr)
+ * - gg.enable, gg.disable, gg.clearPersist, gg._onLog, gg._ns → left untouched
  * - gg inside strings and comments → left untouched
  */
-function transformGgCalls(code: string, shortPath: string): { code: string; map: null } | null {
-	// Match gg( that is:
-	// - not preceded by a dot (would be obj.gg() — not our function)
-	// - not preceded by a word char (would be dogg() or something)
-	// - not followed by a dot before the paren (gg.ns, gg.enable, etc.)
-	//
+function transformGgCalls(
+	code: string,
+	shortPath: string,
+	filePath: string
+): { code: string; map: null } | null {
 	// We use a manual scan approach to correctly handle strings and comments.
 
 	const result: string[] = [];
 	let lastIndex = 0;
 	let modified = false;
+	const escapedFile = escapeForString(filePath);
 
 	// States for string/comment tracking
 	let i = 0;
@@ -232,8 +325,8 @@ function transformGgCalls(code: string, shortPath: string): { code: string; map:
 			continue;
 		}
 
-		// Look for 'gg(' pattern
-		if (code[i] === 'g' && code[i + 1] === 'g' && code[i + 2] === '(') {
+		// Look for 'gg' pattern — could be gg( or gg.ns(
+		if (code[i] === 'g' && code[i + 1] === 'g') {
 			// Check preceding character: must not be a word char or dot
 			const prevChar = i > 0 ? code[i - 1] : '';
 			if (prevChar && /[a-zA-Z0-9_$.]/.test(prevChar)) {
@@ -241,37 +334,122 @@ function transformGgCalls(code: string, shortPath: string): { code: string; map:
 				continue;
 			}
 
-			// Check it's not gg.something (gg.ns, gg.enable, etc.)
-			// At this point we know code[i..i+2] is "gg(" — it's a bare call
+			// Case 1: gg.ns('label', ...) → gg._ns({ns: 'label', file, line, col, src}, ...)
+			if (code.slice(i + 2, i + 6) === '.ns(') {
+				const { line, col } = getLineCol(code, i);
+				const fnName = findEnclosingFunction(code, i);
+				const openParenPos = i + 5; // position of '(' in 'gg.ns('
 
-			// Find the enclosing function
-			const fnName = findEnclosingFunction(code, i);
-			const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
-			const escaped = callpoint.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+				// Find matching closing paren for the entire gg.ns(...) call
+				const closeParenPos = findMatchingParen(code, openParenPos);
+				if (closeParenPos === -1) {
+					i += 6;
+					continue;
+				}
 
-			// Emit everything before this match
-			result.push(code.slice(lastIndex, i));
-			// Replace gg( with gg.ns('callpoint',
-			// Need to handle gg() with no args → gg.ns('callpoint')
-			// and gg(x) → gg.ns('callpoint', x)
+				// Extract the first argument (the namespace string)
+				// Look for the string literal after 'gg.ns('
+				const afterNsParen = i + 6; // position after 'gg.ns('
+				const quoteChar = code[afterNsParen];
 
-			// Peek ahead to check if it's gg() with no args
-			const afterParen = code.indexOf(')', i + 3);
-			const betweenParens = code.slice(i + 3, afterParen);
-			const isNoArgs = betweenParens.trim() === '';
+				if (quoteChar === "'" || quoteChar === '"') {
+					// Find the closing quote
+					let j = afterNsParen + 1;
+					while (j < code.length && code[j] !== quoteChar) {
+						if (code[j] === '\\') j++; // skip escaped chars
+						j++;
+					}
+					// j now points to closing quote
+					const nsLabelRaw = code.slice(afterNsParen + 1, j);
+					const escapedNs = escapeForString(nsLabelRaw);
 
-			if (isNoArgs && afterParen !== -1 && !betweenParens.includes('(')) {
-				// gg() → gg.ns('callpoint')
-				result.push(`gg.ns('${escaped}')`);
-				lastIndex = afterParen + 1;
-				i = afterParen + 1;
-			} else {
-				// gg(args...) → gg.ns('callpoint', args...)
-				result.push(`gg.ns('${escaped}', `);
-				lastIndex = i + 3; // skip past "gg("
-				i = i + 3;
+					// Build callpoint: use user's ns label + enclosing function
+					const callpoint = `${escapedNs}${fnName ? `@${fnName}` : ''}`;
+
+					// Check if there are more args after the string
+					const afterClosingQuote = j + 1;
+					let k = afterClosingQuote;
+					while (k < code.length && /\s/.test(code[k])) k++;
+
+					if (code[k] === ')') {
+						// gg.ns('label') → gg._ns({...})
+						const optionsObj = `{ns:'${callpoint}',file:'${escapedFile}',line:${line},col:${col}}`;
+						result.push(code.slice(lastIndex, i));
+						result.push(`gg._ns(${optionsObj})`);
+						lastIndex = k + 1;
+						i = k + 1;
+					} else if (code[k] === ',') {
+						// gg.ns('label', args...) → gg._ns({..., src:'args source'}, args...)
+						// Extract source text of remaining args (after the comma)
+						let argsStart = k + 1;
+						while (argsStart < closeParenPos && /\s/.test(code[argsStart])) argsStart++;
+						const argsSrc = code.slice(argsStart, closeParenPos).trim();
+						const escapedSrc = escapeForString(argsSrc);
+						const optionsObj = `{ns:'${callpoint}',file:'${escapedFile}',line:${line},col:${col},src:'${escapedSrc}'}`;
+						result.push(code.slice(lastIndex, i));
+						result.push(`gg._ns(${optionsObj}, `);
+						lastIndex = k + 1; // skip past the comma, keep args as-is
+						i = k + 1;
+					} else {
+						// Unexpected — leave untouched
+						i += 6;
+						continue;
+					}
+
+					modified = true;
+					continue;
+				}
+
+				// Non-string first arg to gg.ns — skip (can't extract ns at build time)
+				i += 6;
+				continue;
 			}
-			modified = true;
+
+			// Skip other gg.* calls (gg.enable, gg.disable, gg._ns, gg._onLog, etc.)
+			if (code[i + 2] === '.') {
+				i += 3;
+				continue;
+			}
+
+			// Case 2: bare gg(...) → gg._ns({ns, file, line, col, src}, ...)
+			if (code[i + 2] === '(') {
+				const { line, col } = getLineCol(code, i);
+				const fnName = findEnclosingFunction(code, i);
+				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+				const escapedNs = escapeForString(callpoint);
+				const openParenPos = i + 2; // position of '(' in 'gg('
+
+				// Find matching closing paren
+				const closeParenPos = findMatchingParen(code, openParenPos);
+				if (closeParenPos === -1) {
+					i += 3;
+					continue;
+				}
+
+				const argsText = code.slice(openParenPos + 1, closeParenPos).trim();
+
+				// Emit everything before this match
+				result.push(code.slice(lastIndex, i));
+
+				if (argsText === '') {
+					// gg() → gg._ns({...})
+					const optionsObj = `{ns:'${escapedNs}',file:'${escapedFile}',line:${line},col:${col}}`;
+					result.push(`gg._ns(${optionsObj})`);
+					lastIndex = closeParenPos + 1;
+					i = closeParenPos + 1;
+				} else {
+					// gg(expr) → gg._ns({..., src:'expr'}, expr)
+					const escapedSrc = escapeForString(argsText);
+					const optionsObj = `{ns:'${escapedNs}',file:'${escapedFile}',line:${line},col:${col},src:'${escapedSrc}'}`;
+					result.push(`gg._ns(${optionsObj}, `);
+					lastIndex = openParenPos + 1; // keep original args
+					i = openParenPos + 1;
+				}
+				modified = true;
+				continue;
+			}
+
+			i++;
 			continue;
 		}
 

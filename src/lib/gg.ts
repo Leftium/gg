@@ -234,6 +234,10 @@ interface CapturedEntry {
 	message: string;
 	args: unknown[];
 	timestamp: number;
+	file?: string; // Source file path for open-in-editor
+	line?: number; // Source line number
+	col?: number; // Source column number
+	src?: string; // Source expression text for icecream-style display
 }
 
 type OnLogCallback = (entry: CapturedEntry) => void;
@@ -259,7 +263,7 @@ export function gg(...args: unknown[]) {
 	let stack: ErrorStackParser.StackFrame[] = [];
 	let namespace = 'gg:';
 
-	// When ggCallSitesPlugin is installed, all bare gg() calls are rewritten to gg.ns()
+	// When ggCallSitesPlugin is installed, all gg() and gg.ns() calls are rewritten to gg._ns()
 	// at build time, so this code path only runs for un-transformed calls.
 	// Skip expensive stack parsing if the plugin is handling callpoints.
 
@@ -373,10 +377,9 @@ export function gg(...args: unknown[]) {
 /**
  * gg.ns() - Log with an explicit namespace (callpoint label).
  *
- * In production builds, the ggCallSitesPlugin Vite plugin rewrites bare gg() calls
- * to gg.ns('callpoint', ...) so each call site gets a unique namespace even
- * after minification. Users can also call gg.ns() directly to set a meaningful
- * label that survives across builds.
+ * Users call gg.ns() directly to set a meaningful label that survives
+ * across builds. For the internal plugin-generated version with file
+ * metadata, see gg._ns().
  *
  * @param nsLabel - The namespace label (appears as gg:<nsLabel> in output)
  * @param args - Same arguments as gg()
@@ -387,6 +390,27 @@ export function gg(...args: unknown[]) {
  * gg.ns("cart", item, quantity)    // logs under namespace "gg:cart"
  */
 gg.ns = function (nsLabel: string, ...args: unknown[]): unknown {
+	return gg._ns({ ns: nsLabel }, ...args);
+};
+
+/**
+ * gg._ns() - Internal: log with namespace and source file metadata.
+ *
+ * Called by the ggCallSitesPlugin Vite plugin, which rewrites both bare gg()
+ * calls and manual gg.ns() calls to gg._ns({ns, file, line, col}, ...) at
+ * build time. This gives each call site a unique namespace plus the source
+ * location for open-in-editor support.
+ *
+ * @param options - { ns: string; file?: string; line?: number; col?: number }
+ * @param args - Same arguments as gg()
+ * @returns Same as gg() - the first arg, or call-site info if no args
+ */
+gg._ns = function (
+	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+	...args: unknown[]
+): unknown {
+	const { ns: nsLabel, file, line, col, src } = options;
+
 	if (!ggConfig.enabled || isCloudflareWorker()) {
 		return args.length ? args[0] : { url: '', stack: [] };
 	}
@@ -402,12 +426,18 @@ gg.ns = function (nsLabel: string, ...args: unknown[]): unknown {
 		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 
 	// Prepare args for logging
+	// When src is available (plugin-injected), use icecream-style "expr: value" format
 	let logArgs: unknown[];
 	let returnValue: unknown;
 
 	if (!args.length) {
 		logArgs = [`    📝 ${nsLabel}`];
 		returnValue = { fileName: '', functionName: '', url: '', stack: [] };
+	} else if (src) {
+		// Icecream-style: prepend source expression to log output
+		// gg(user.name) → "user.name:" "Alice"
+		logArgs = [`${src}:`, ...args];
+		returnValue = args[0];
 	} else if (args.length === 1) {
 		logArgs = [args[0]];
 		returnValue = args[0];
@@ -430,7 +460,11 @@ gg.ns = function (nsLabel: string, ...args: unknown[]): unknown {
 		diff: ggLogFunction.diff || 0,
 		message: logArgs.length === 1 ? String(logArgs[0]) : logArgs.map(String).join(' '),
 		args: logArgs,
-		timestamp: Date.now()
+		timestamp: Date.now(),
+		file,
+		line,
+		col,
+		src
 	};
 
 	if (_onLogCallback) {
@@ -661,6 +695,10 @@ Object.defineProperty(gg, '_onLog', {
 export namespace gg {
 	export let _onLog: OnLogCallback | null;
 	export let ns: (nsLabel: string, ...args: unknown[]) => unknown;
+	export let _ns: (
+		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+		...args: unknown[]
+	) => unknown;
 }
 
 /**
