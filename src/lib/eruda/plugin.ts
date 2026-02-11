@@ -41,6 +41,9 @@ export function createGgPlugin(
 	let filterPattern = '';
 	const enabledNamespaces = new Set<string>();
 
+	// Last rendered entries (for hover tooltip arg lookup)
+	let renderedEntries: CapturedEntry[] = [];
+
 	// Settings UI state
 	let settingsExpanded = false;
 
@@ -476,21 +479,38 @@ export function createGgPlugin(
 					word-break: break-word;
 					padding: 4px 0;
 					position: relative;
+					-webkit-user-select: text !important;
+					user-select: text !important;
+					cursor: text;
 				}
-				/* Fast custom tooltip for src expression (no delay like native title) */
+				.gg-log-content * {
+					-webkit-user-select: text !important;
+					user-select: text !important;
+				}
+				.gg-log-diff, .gg-log-ns {
+					-webkit-user-select: text !important;
+					user-select: text !important;
+				}
+				.gg-details, .gg-details * {
+					-webkit-user-select: text !important;
+					user-select: text !important;
+					cursor: text;
+				}
+				/* Fast custom tooltip for src expression on primitive-only rows (no expandable objects) */
 				.gg-log-content[data-src] {
 					cursor: help;
 				}
-				.gg-log-content[data-src]::before {
-					content: '🔍';
+				/* Show icon only on primitive rows (no .gg-expand child) */
+				.gg-log-content[data-src]:not(:has(.gg-expand))::before {
+					content: '\uD83D\uDD0D';
 					font-size: 10px;
 					margin-right: 4px;
 					opacity: 0.4;
 				}
-				.gg-log-content[data-src]:hover::before {
+				.gg-log-content[data-src]:not(:has(.gg-expand)):hover::before {
 					opacity: 1;
 				}
-				.gg-log-content[data-src]::after {
+				.gg-log-content[data-src]:not(:has(.gg-expand))::after {
 					content: attr(data-src);
 					position: absolute;
 					top: 100%;
@@ -510,8 +530,55 @@ export function createGgPlugin(
 					overflow: hidden;
 					text-overflow: ellipsis;
 				}
-				.gg-log-content[data-src]:hover::after {
+				.gg-log-content[data-src]:not(:has(.gg-expand)):hover::after {
 					opacity: 1;
+				}
+				/* Expression icon inline with expandable object labels */
+				.gg-src-icon {
+					font-size: 10px;
+					margin-right: 2px;
+					opacity: 0.4;
+					cursor: pointer;
+				}
+				.gg-expand:hover .gg-src-icon,
+				.gg-src-icon:hover {
+					opacity: 1;
+				}
+				/* Hover tooltip for expandable objects/arrays */
+				.gg-hover-tooltip {
+					display: none;
+					position: fixed;
+					background: #1e1e1e;
+					color: #d4d4d4;
+					font-size: 11px;
+					font-family: monospace;
+					padding: 8px 10px;
+					border-radius: 4px;
+					white-space: pre;
+					pointer-events: none;
+					z-index: 100000;
+					max-width: min(90vw, 500px);
+					max-height: 300px;
+					overflow: auto;
+					box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+					line-height: 1.4;
+				}
+				.gg-hover-tooltip-src {
+					color: #9cdcfe;
+					font-style: italic;
+					margin-bottom: 4px;
+					padding-bottom: 4px;
+					border-bottom: 1px solid #444;
+				}
+				/* Expression header inside expanded details */
+				.gg-details-src {
+					color: #555;
+					font-style: italic;
+					font-family: monospace;
+					font-size: 11px;
+					margin-bottom: 6px;
+					padding-bottom: 4px;
+					border-bottom: 1px solid #ddd;
 				}
 				.gg-filter-panel {
 					background: #f5f5f5;
@@ -1321,6 +1388,75 @@ export function createGgPlugin(
 			}
 		});
 
+		// Hover tooltip for expandable objects/arrays.
+		// The tooltip div is re-created after each renderLogs() call
+		// since logContainer.html() destroys children. Event listeners query it dynamically.
+
+		containerEl.addEventListener('mouseover', (e: MouseEvent) => {
+			const target = (e.target as HTMLElement)?.closest?.('.gg-expand') as HTMLElement | null;
+			if (!target) return;
+
+			const entryIdx = target.getAttribute('data-entry');
+			const argIdx = target.getAttribute('data-arg');
+			if (entryIdx === null || argIdx === null) return;
+
+			const entry = renderedEntries[Number(entryIdx)];
+			if (!entry) return;
+			const arg = entry.args[Number(argIdx)];
+			if (arg === undefined) return;
+
+			const tip = containerEl!.querySelector('.gg-hover-tooltip') as HTMLElement | null;
+			if (!tip) return;
+
+			const srcExpr = target.getAttribute('data-src');
+
+			// Build tooltip content using DOM API (safe, no HTML injection)
+			tip.textContent = '';
+			if (srcExpr) {
+				const srcDiv = document.createElement('div');
+				srcDiv.className = 'gg-hover-tooltip-src';
+				srcDiv.textContent = srcExpr;
+				tip.appendChild(srcDiv);
+			}
+			const pre = document.createElement('pre');
+			pre.style.margin = '0';
+			pre.textContent = JSON.stringify(arg, null, 2);
+			tip.appendChild(pre);
+
+			tip.style.display = 'block';
+
+			// Position below the hovered element using viewport coords (fixed positioning)
+			const targetRect = target.getBoundingClientRect();
+			let left = targetRect.left;
+			let top = targetRect.bottom + 4;
+
+			// Keep tooltip within viewport
+			const tipRect = tip.getBoundingClientRect();
+			if (left + tipRect.width > window.innerWidth) {
+				left = window.innerWidth - tipRect.width - 8;
+			}
+			if (left < 4) left = 4;
+			// If tooltip would go below viewport, show above instead
+			if (top + tipRect.height > window.innerHeight) {
+				top = targetRect.top - tipRect.height - 4;
+			}
+
+			tip.style.left = `${left}px`;
+			tip.style.top = `${top}px`;
+		});
+
+		containerEl.addEventListener('mouseout', (e: MouseEvent) => {
+			const target = (e.target as HTMLElement)?.closest?.('.gg-expand') as HTMLElement | null;
+			if (!target) return;
+
+			// Only hide if we're not moving to another child of the same .gg-expand
+			const related = e.relatedTarget as HTMLElement | null;
+			if (related?.closest?.('.gg-expand') === target) return;
+
+			const tip = containerEl!.querySelector('.gg-hover-tooltip') as HTMLElement | null;
+			if (tip) tip.style.display = 'none';
+		});
+
 		expanderAttached = true;
 	}
 
@@ -1391,6 +1527,7 @@ export function createGgPlugin(
 		const entries = allEntries.filter((entry: CapturedEntry) =>
 			enabledNamespaces.has(entry.namespace)
 		);
+		renderedEntries = entries;
 
 		const countText =
 			entries.length === allEntries.length
@@ -1414,6 +1551,8 @@ export function createGgPlugin(
 				// Format each arg individually - objects are expandable
 				let argsHTML = '';
 				let detailsHTML = '';
+				// Source expression for this entry (used in hover tooltips and expanded details)
+				const srcExpr = entry.src?.trim() && !/^['"`]/.test(entry.src) ? escapeHtml(entry.src) : '';
 				if (entry.args.length > 0) {
 					argsHTML = entry.args
 						.map((arg, argIdx) => {
@@ -1422,9 +1561,14 @@ export function createGgPlugin(
 								const preview = Array.isArray(arg) ? `Array(${arg.length})` : 'Object';
 								const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
 								const uniqueId = `${index}-${argIdx}`;
+								// Expression header inside expanded details
+								const srcHeader = srcExpr ? `<div class="gg-details-src">${srcExpr}</div>` : '';
 								// Store details separately to render after the row
-								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
-								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
+								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;">${srcHeader}<pre style="margin: 0;">${jsonStr}</pre></div>`;
+								// data-entry/data-arg for hover tooltip lookup, data-src for expression context
+								const srcAttr = srcExpr ? ` data-src="${srcExpr}"` : '';
+								const srcIcon = srcExpr ? `<span class="gg-src-icon">\uD83D\uDD0D</span>` : '';
+								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}</span>`;
 							} else {
 								// Parse ANSI codes first, then convert URLs to clickable links
 								const argStr = String(arg);
@@ -1483,6 +1627,14 @@ export function createGgPlugin(
 			.join('')}</div>`;
 
 		logContainer.html(logsHTML);
+
+		// Append hover tooltip div (destroyed by .html() each render, so re-create)
+		const containerDom = logContainer.get(0) as HTMLElement | undefined;
+		if (containerDom) {
+			const tip = document.createElement('div');
+			tip.className = 'gg-hover-tooltip';
+			containerDom.appendChild(tip);
+		}
 
 		// Re-wire expanders after rendering
 		wireUpExpanders();
