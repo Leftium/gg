@@ -613,7 +613,8 @@ export function transformGgCalls(
 			// Case 1: gg.ns('label', ...) → gg._ns({ns: 'label', file, line, col, src}, ...)
 			if (code.slice(i + 2, i + 6) === '.ns(') {
 				const { line, col } = getLineCol(code, i);
-				const fnName = findEnclosingFunction(code, i);
+				// For template code, don't search backwards into script context for function names
+				const fnName = range.context === 'template' ? '' : findEnclosingFunction(code, i);
 				const openParenPos = i + 5; // position of '(' in 'gg.ns('
 
 				// Find matching closing paren for the entire gg.ns(...) call
@@ -695,7 +696,8 @@ export function transformGgCalls(
 			// Case 2: bare gg(...) → gg._ns({ns, file, line, col, src}, ...)
 			if (code[i + 2] === '(') {
 				const { line, col } = getLineCol(code, i);
-				const fnName = findEnclosingFunction(code, i);
+				// For template code, don't search backwards into script context for function names
+				const fnName = range.context === 'template' ? '' : findEnclosingFunction(code, i);
 				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
 				const escapedNs = escapeForString(callpoint);
 				const openParenPos = i + 2; // position of '(' in 'gg('
