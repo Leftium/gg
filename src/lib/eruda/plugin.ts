@@ -1,4 +1,5 @@
 import type { GgErudaOptions, CapturedEntry } from './types.js';
+import { DEV } from 'esm-env';
 import { LogBuffer } from './buffer.js';
 
 /**
@@ -302,7 +303,7 @@ export function createGgPlugin(
 				background: rgba(0,0,0,0.05);
 			}
 			.gg-log-ns[data-file]::after {
-				content: ' \u{1F4DD}';
+				content: ' ${DEV ? '\u{1F4DD}' : '\u{1F4CB}'}';
 				font-size: 10px;
 				opacity: 0;
 				transition: opacity 0.1s;
@@ -744,8 +745,8 @@ export function createGgPlugin(
 	}
 
 	/**
-	 * Open a source file in the editor via the /__open-in-editor Vite middleware.
-	 * Uses a hidden iframe to avoid navigation/CORS issues.
+	 * Open a source file in the editor via the /__open-in-editor Vite middleware (dev only).
+	 * Outside dev mode, copies the file path to clipboard instead.
 	 */
 	function openInEditor(target: HTMLElement) {
 		if (!$el) return;
@@ -755,13 +756,30 @@ export function createGgPlugin(
 		const line = target.getAttribute('data-line');
 		const col = target.getAttribute('data-col');
 
-		let url = `/__open-in-editor?file=${encodeURIComponent(file)}`;
-		if (line) url += `&line=${line}`;
-		if (line && col) url += `&col=${col}`;
+		if (DEV) {
+			// Dev mode: open in editor via Vite middleware
+			let url = `/__open-in-editor?file=${encodeURIComponent(file)}`;
+			if (line) url += `&line=${line}`;
+			if (line && col) url += `&col=${col}`;
 
-		const iframe = $el.find('.gg-editor-iframe').get(0) as HTMLIFrameElement | undefined;
-		if (iframe) {
-			iframe.src = url;
+			const iframe = $el.find('.gg-editor-iframe').get(0) as HTMLIFrameElement | undefined;
+			if (iframe) {
+				iframe.src = url;
+			}
+		} else {
+			// Non-dev: copy file path to clipboard
+			let path = file;
+			if (line) path += `:${line}`;
+			if (line && col) path += `:${col}`;
+
+			navigator.clipboard.writeText(path).then(() => {
+				// Brief "Copied!" feedback on the namespace cell
+				const original = target.textContent;
+				target.textContent = '📋 Copied!';
+				setTimeout(() => {
+					target.textContent = original;
+				}, 1200);
+			});
 		}
 	}
 
