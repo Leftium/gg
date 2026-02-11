@@ -81,6 +81,7 @@
 		<button onclick={testLog}>🧪 Test gg() Log</button>
 		<button onclick={testManualNs}>🏷️ gg.ns() Templates</button>
 		<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
+		<button onclick={() => gg.ns('$NS:click', 'template event handler')}>🔬 Template gg()</button>
 	</div>
 
 	<OpenInEditorLink
@@ -88,6 +89,8 @@
 		fileName={ggResult.fileName}
 		title={`${ggResult.fileName}@${ggResult.functionName}`}
 	/>
+
+	<p><small>Template expression: {gg('inline template gg()')}</small></p>
 
 	<div>{@render children()}</div>
 </main>

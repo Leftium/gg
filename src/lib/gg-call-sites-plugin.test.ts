@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { transformGgCalls } from './gg-call-sites-plugin.js';
+import { transformGgCalls, collectCodeRanges } from './gg-call-sites-plugin.js';
 
 /** Helper: run transform and return the output code (or null if unchanged). */
 function transform(
@@ -188,19 +188,19 @@ describe('edge cases', () => {
 		expect(out).toContain('col:');
 	});
 
-	it('handles .svelte file with script ranges', () => {
+	it('handles .svelte file with AST-based code ranges', () => {
 		const code = `<script>\nfunction test() { gg.ns('$FN:tag', x) }\n</script>\n<p>gg.ns("label")</p>`;
-		const scriptRanges = [{ start: 8, end: code.indexOf('</script>') }];
+		const codeRanges = collectCodeRanges(code);
 		const result = transformGgCalls(
 			code,
 			'routes/+page.svelte',
 			'src/routes/+page.svelte',
-			scriptRanges
+			codeRanges
 		);
 		const out = result!.code;
 		// Script: transformed with object literal syntax
 		expect(out).toContain("{ns:'test:tag'");
-		// Template: left untouched (skipped until AST-based detection)
+		// Template prose: left untouched (prose text, not a code expression)
 		expect(out).toContain('gg.ns("label")');
 	});
 });
