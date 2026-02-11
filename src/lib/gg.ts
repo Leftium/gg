@@ -425,19 +425,14 @@ gg._ns = function (
 		namespaceToLogFunction.get(namespace) ||
 		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 
-	// Prepare args for logging
-	// When src is available (plugin-injected), use icecream-style "expr: value" format
+	// Prepare args for logging (console output is value-only; src is carried
+	// on CapturedEntry for the Eruda UI to display on hover)
 	let logArgs: unknown[];
 	let returnValue: unknown;
 
 	if (!args.length) {
 		logArgs = [`    📝 ${nsLabel}`];
 		returnValue = { fileName: '', functionName: '', url: '', stack: [] };
-	} else if (src) {
-		// Icecream-style: prepend source expression to log output
-		// gg(user.name) → "user.name:" "Alice"
-		logArgs = [`${src}:`, ...args];
-		returnValue = args[0];
 	} else if (args.length === 1) {
 		logArgs = [args[0]];
 		returnValue = args[0];

@@ -332,6 +332,34 @@ export function createGgPlugin(
 				.gg-log-content {
 					word-break: break-word;
 					padding: 4px 0;
+					position: relative;
+				}
+				/* Fast custom tooltip for src expression (no delay like native title) */
+				.gg-log-content[data-src] {
+					cursor: default;
+				}
+				.gg-log-content[data-src]::after {
+					content: attr(data-src);
+					position: absolute;
+					bottom: 100%;
+					left: 0;
+					background: #333;
+					color: #fff;
+					font-size: 11px;
+					font-family: monospace;
+					padding: 3px 8px;
+					border-radius: 3px;
+					white-space: nowrap;
+					pointer-events: none;
+					opacity: 0;
+					transition: opacity 0.1s;
+					z-index: 1000;
+					max-width: 90vw;
+					overflow: hidden;
+					text-overflow: ellipsis;
+				}
+				.gg-log-content[data-src]:hover::after {
+					opacity: 1;
 				}
 				.gg-filter-panel {
 					background: #f5f5f5;
@@ -897,7 +925,7 @@ export function createGgPlugin(
 					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}>${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
-					`<div class="gg-log-content">${argsHTML}</div>` +
+					`<div class="gg-log-content"${entry.src ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
 					detailsHTML +
 					`</div>`
 				);
