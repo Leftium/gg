@@ -659,13 +659,19 @@ export namespace gg {
 	) => unknown;
 }
 
+// Track if diagnostics have already run to prevent double execution
+let diagnosticsRan = false;
+
 /**
  * Run gg diagnostics and log configuration status
  * Can be called immediately or delayed (e.g., after Eruda loads)
  */
 export async function runGgDiagnostics() {
-	if (!ggConfig.showHints || isCloudflareWorker()) return;
+	if (!ggConfig.showHints || isCloudflareWorker() || diagnosticsRan) return;
+	diagnosticsRan = true;
 
+	// Create test debugger INSIDE this function (not at module level) so it picks up
+	// the current localStorage.debug value, which may have been set by autoEnable
 	const ggLogTest = debugFactory('gg:TEST');
 
 	let ggMessage = '\n';
@@ -676,8 +682,19 @@ export async function runGgDiagnostics() {
 
 	// Use plain console.log for diagnostics - appears in Eruda's Console tab
 	console.log(`Loaded gg module. Checking configuration...`);
-	if (ggConfig.enabled && ggLogTest.enabled) {
-		gg('If you can see this logg, gg configured correctly!');
+
+	// Check current state (including autoEnable changes)
+	let configOk = ggConfig.enabled;
+	if (BROWSER && configOk) {
+		const debugValue = localStorage?.debug || '';
+		const includesGg = debugValue.includes('gg:') || debugValue === '*';
+		configOk = includesGg;
+	} else if (configOk) {
+		configOk = ggLogTest.enabled;
+	}
+
+	if (configOk) {
+		console.log(`gg:TEST If you can see this logg, gg configured correctly!`);
 		message(`No problems detected:`);
 		if (BROWSER) {
 			message(
@@ -699,8 +716,17 @@ export async function runGgDiagnostics() {
 	message(`${checkbox(ggConfig.enabled)} gg enabled: ${ggConfig.enabled}${enableHint}`);
 
 	if (BROWSER) {
-		const hint = makeHint(!ggLogTest.enabled, " (Try `localStorage.debug = 'gg:*'`)");
-		message(`${checkbox(ggLogTest.enabled)} localStorage.debug: ${localStorage?.debug}${hint}`);
+		// Re-check if debug pattern includes gg:* (in case it was just set by autoEnable)
+		const debugValue = localStorage?.debug || '';
+		const includesGg = debugValue.includes('gg:') || debugValue === '*';
+		const hint = makeHint(
+			!includesGg,
+			" (Try `localStorage.debug = 'gg:*'`)",
+			includesGg && !ggLogTest.enabled
+				? ' (Reload page to apply; or call debugFactory.enable("gg:*"))'
+				: ''
+		);
+		message(`${checkbox(includesGg)} localStorage.debug: ${debugValue}${hint}`);
 	} else {
 		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm dev`)');
 		if (dotenvModule) {
@@ -737,12 +763,10 @@ export async function runGgDiagnostics() {
 	resetNamespaceWidth();
 }
 
-// Run diagnostics immediately on module load if Eruda is not being used
-// (If Eruda will load, the loader will call runGgDiagnostics after Eruda is ready)
-if (ggConfig.showHints && !isCloudflareWorker()) {
-	// Only run immediately if we're not in a context where Eruda might load
-	// In browser dev mode, assume Eruda might load and skip immediate diagnostics
-	if (!BROWSER || !DEV) {
-		runGgDiagnostics();
-	}
+// Run diagnostics immediately on module load ONLY in Node.js environments
+// In browser, the Eruda loader (if configured) will call runGgDiagnostics()
+// after Eruda is ready. If Eruda is not configured, diagnostics won't run
+// in browser (user must manually check console or call runGgDiagnostics()).
+if (ggConfig.showHints && !isCloudflareWorker() && !BROWSER) {
+	runGgDiagnostics();
 }

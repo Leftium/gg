@@ -88,11 +88,23 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 			tool: ['console', 'elements', 'network', 'resources', 'info', 'snippets', 'sources']
 		});
 
-		// Auto-enable localStorage.debug if requested and unset
+		// Auto-enable localStorage.debug if requested and user hasn't opted out.
+		// The sentinel 'DISABLED BY GG,-*' is a valid debug pattern (disables all)
+		// that also signals "don't auto-set again". We can't use '' because the
+		// debug npm package's save() removes the key when given a falsy value.
+		const GG_DEBUG_SENTINEL = 'DISABLED BY GG,-*';
+		let autoSetDebug = false;
 		if (options.autoEnable !== false) {
 			try {
-				if (!localStorage.getItem('debug')) {
+				const currentValue = localStorage.getItem('debug');
+				if (currentValue === null) {
+					// Key doesn't exist: auto-set
 					localStorage.setItem('debug', 'gg:*');
+					autoSetDebug = true;
+					console.log('[gg] Auto-set localStorage.debug = "gg:*" (disable with autoEnable: false)');
+				} else if (currentValue === GG_DEBUG_SENTINEL) {
+					// Sentinel: user explicitly opted out of auto-set
+					console.log('[gg] localStorage.debug opt-out detected, skipping auto-set');
 				}
 			} catch {
 				// localStorage might not be available
@@ -103,7 +115,7 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 		// Import gg and pass it to the plugin directly
 		const { gg, runGgDiagnostics } = await import('../gg.js');
 		const { createGgPlugin } = await import('./plugin.js');
-		const ggPlugin = createGgPlugin(options, gg);
+		const ggPlugin = createGgPlugin({ ...options, _autoSetDebug: autoSetDebug }, gg);
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		eruda.add(ggPlugin as any);
 

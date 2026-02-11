@@ -30,6 +30,12 @@ export interface GgErudaOptions {
 	 * @default {}
 	 */
 	erudaOptions?: Record<string, unknown>;
+
+	/**
+	 * Internal flag set by loader to indicate debug was auto-set
+	 * @internal
+	 */
+	_autoSetDebug?: boolean;
 }
 
 /**
