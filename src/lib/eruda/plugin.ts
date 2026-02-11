@@ -1470,6 +1470,7 @@ export function createGgPlugin(
 	 */
 	function stripAnsi(text: string): string {
 		// Remove all ANSI escape codes
+		// eslint-disable-next-line no-control-regex
 		return text.replace(/\x1b\[[0-9;]*m/g, '');
 	}
 
@@ -1522,6 +1523,7 @@ export function createGgPlugin(
 	 */
 	function parseAnsiToHtml(text: string): string {
 		// ANSI escape sequence regex
+		// eslint-disable-next-line no-control-regex
 		const ansiRegex = /\x1b\[([0-9;]+)m/g;
 
 		let html = '';
