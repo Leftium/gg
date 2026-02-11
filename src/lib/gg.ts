@@ -1,12 +1,12 @@
 import debugFactory from './debug.js';
-import ErrorStackParser from 'error-stack-parser';
 import { BROWSER, DEV } from 'esm-env';
 import { toWordTuple } from './words.js';
 
 /**
  * Compile-time flag set by ggCallSitesPlugin via Vite's `define` config.
- * When the plugin is installed, Vite replaces this with `true` at build time.
- * Without the plugin, it remains `false` (declared here as the default).
+ * When the plugin is installed, Vite replaces this with `true` at build time,
+ * and all gg() calls are rewritten to gg._ns() with baked-in metadata.
+ * Without the plugin, gg() falls back to word-tuple callpoint names.
  */
 declare const __GG_TAG_PLUGIN__: boolean;
 const _ggCallSitesPlugin = typeof __GG_TAG_PLUGIN__ !== 'undefined' ? __GG_TAG_PLUGIN__ : false;
@@ -119,8 +119,6 @@ function getServerPort(): Promise<string | number> {
 		}
 	});
 }
-
-const timestampRegex = /(\?t=\d+)?$/;
 
 const port = await getServerPort();
 
@@ -250,80 +248,39 @@ export function gg(): {
 	fileName: string;
 	functionName: string;
 	url: string;
-	stack: ErrorStackParser.StackFrame[];
 };
 export function gg<T>(arg: T, ...args: unknown[]): T;
 
 export function gg(...args: unknown[]) {
 	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : { fileName: '', functionName: '', url: '', stack: [] };
+		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
 	}
 
-	// Initialize return values
-	let fileName = '';
-	let functionName = '';
-	let url = '';
-	let stack: ErrorStackParser.StackFrame[] = [];
-	let namespace = 'gg:';
+	// Without the call-sites plugin, use cheap stack hash → deterministic word tuple.
+	// When the plugin IS installed, all gg() calls are rewritten to gg._ns() at build time,
+	// so this code path only runs for un-transformed calls (i.e. plugin not installed).
+	// Same call site always produces the same word pair (e.g. "calm-fox").
+	const rawStack = new Error().stack || '';
+	// Stack line [2]: skip "Error" header [0] and gg() frame [1]
+	const callerLine = rawStack.split('\n')[2] || rawStack;
 
-	// When ggCallSitesPlugin is installed, all gg() and gg.ns() calls are rewritten to gg._ns()
-	// at build time, so this code path only runs for un-transformed calls.
-	// Skip expensive stack parsing if the plugin is handling callpoints.
+	// Strip line:col numbers so all gg() calls within the same function
+	// hash to the same word tuple. In minified builds, multiple gg() calls
+	// in one function differ only by column offset — we want them grouped.
+	// Chrome: "at handleClick (chunk-abc.js:1:45892)" → "at handleClick (chunk-abc.js)"
+	// Firefox: "handleClick@https://...:1:45892" → "handleClick@https://..."
+	const callerKey = callerLine.replace(/:\d+:\d+\)?$/, '').trim();
 
-	if (!_ggCallSitesPlugin) {
-		if (DEV) {
-			// Development without plugin: full stack parsing for detailed callpoint info
-			// Ignore first stack frame, which is always the call to gg() itself.
-			stack = ErrorStackParser.parse(new Error()).splice(1);
-
-			// Example: http://localhost:5173/src/routes/+page.svelte
-			const filename = stack[0].fileName?.replace(timestampRegex, '') || '';
-
-			// Example: src/routes/+page.svelte
-			const filenameToOpen = filename.replace(srcRootRegex, '$<folderName>/');
-			url = openInEditorUrl(filenameToOpen);
-
-			// Example: routes/+page.svelte
-			fileName = filename.replace(srcRootRegex, '');
-			functionName = stack[0].functionName || '';
-
-			// A callpoint is uniquely identified by the filename plus function name
-			const callpoint = `${fileName}${functionName ? `@${functionName}` : ''}`;
-
-			if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
-				maxCallpointLength = callpoint.length;
-			}
-
-			// Namespace without padding - keeps colors stable
-			// Editor link appended if enabled
-			namespace = `gg:${callpoint}${ggConfig.editorLink ? url : ''}`;
-		} else {
-			// Production without plugin: cheap stack hash → deterministic word tuple
-			// Avoids expensive ErrorStackParser; just grabs the raw stack line and hashes it.
-			// Same call site always produces the same word pair (e.g. "calm-fox").
-			const rawStack = new Error().stack || '';
-			// Stack line [2]: skip "Error" header [0] and gg() frame [1]
-			const callerLine = rawStack.split('\n')[2] || rawStack;
-
-			// Strip line:col numbers so all gg() calls within the same function
-			// hash to the same word tuple. In minified builds, multiple gg() calls
-			// in one function differ only by column offset — we want them grouped.
-			// Chrome: "at handleClick (chunk-abc.js:1:45892)" → "at handleClick (chunk-abc.js)"
-			// Firefox: "handleClick@https://...:1:45892" → "handleClick@https://..."
-			const callerKey = callerLine.replace(/:\d+:\d+\)?$/, '').trim();
-
-			const callpoint = stackLineCache.get(callerKey) ?? toWordTuple(callerKey);
-			if (!stackLineCache.has(callerKey)) {
-				stackLineCache.set(callerKey, callpoint);
-			}
-
-			if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
-				maxCallpointLength = callpoint.length;
-			}
-
-			namespace = `gg:${callpoint}`;
-		}
+	const callpoint = stackLineCache.get(callerKey) ?? toWordTuple(callerKey);
+	if (!stackLineCache.has(callerKey)) {
+		stackLineCache.set(callerKey, callpoint);
 	}
+
+	if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
+		maxCallpointLength = callpoint.length;
+	}
+
+	const namespace = `gg:${callpoint}`;
 
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
@@ -334,13 +291,12 @@ export function gg(...args: unknown[]) {
 	let returnValue: unknown;
 
 	if (!args.length) {
-		// No arguments: log editor link
-		logArgs = [`    📝📝 ${url} 👀👀`];
+		// No arguments: return stub call-site info (no open-in-editor without plugin)
+		logArgs = [`    📝 ${callpoint} (install gg-call-sites-plugin for editor links)`];
 		returnValue = {
-			fileName,
-			functionName,
-			url,
-			stack
+			fileName: callpoint,
+			functionName: '',
+			url: ''
 		};
 	} else if (args.length === 1) {
 		logArgs = [args[0]];
@@ -415,7 +371,7 @@ gg._ns = function (
 	const { ns: nsLabel, file, line, col, src } = options;
 
 	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : { fileName: '', functionName: '', url: '', stack: [] };
+		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
 	}
 
 	const namespace = `gg:${nsLabel}`;
@@ -439,7 +395,7 @@ gg._ns = function (
 		const functionName = nsLabel.includes('@') ? nsLabel.split('@').pop() || '' : '';
 		const url = file ? openInEditorUrl(file, line, col) : '';
 		logArgs = [`    📝 ${nsLabel}`];
-		returnValue = { fileName, functionName, url, stack: [] };
+		returnValue = { fileName, functionName, url };
 	} else if (args.length === 1) {
 		logArgs = [args[0]];
 		returnValue = args[0];
@@ -757,8 +713,8 @@ export async function runGgDiagnostics() {
 	message(
 		makeHint(
 			_ggCallSitesPlugin,
-			`✅ (optional) gg-call-sites vite plugin detected! Call-site namespaces baked in at build time.`,
-			`⚠️ (optional) gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for build-time call-site namespaces (faster/more reliable). Without plugin, prod uses word-tuple names (e.g. calm-fox) as unique call-site identifiers.`
+			`✅ gg-call-sites vite plugin detected! Call-site namespaces and open-in-editor links baked in at build time.`,
+			`⚠️ gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for file:line call-site namespaces and open-in-editor links. Without plugin, using word-tuple names (e.g. calm-fox) as call-site identifiers.`
 		)
 	);
 
