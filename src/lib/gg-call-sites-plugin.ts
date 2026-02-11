@@ -277,7 +277,7 @@ function findMatchingParen(code: string, openPos: number): number {
 /**
  * Escape a string for embedding as a single-quoted JS string literal.
  */
-function escapeForString(s: string): string {
+export function escapeForString(s: string): string {
 	return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
 
@@ -287,10 +287,12 @@ function escapeForString(s: string): string {
  * Handles:
  * - bare gg(expr) → gg._ns({ns, file, line, col, src: 'expr'}, expr)
  * - gg.ns('label', expr) → gg._ns({ns, file, line, col, src: 'expr'}, expr)
+ *   - label supports template variables: $NS, $FN, $FILE, $LINE, $COL
+ *   - plain label (no variables) is used as-is (no auto @fn append)
  * - gg.enable, gg.disable, gg.clearPersist, gg._onLog, gg._ns → left untouched
  * - gg inside strings and comments → left untouched
  */
-function transformGgCalls(
+export function transformGgCalls(
 	code: string,
 	shortPath: string,
 	filePath: string,
@@ -408,10 +410,18 @@ function transformGgCalls(
 					}
 					// j now points to closing quote
 					const nsLabelRaw = code.slice(afterNsParen + 1, j);
-					const escapedNs = escapeForString(nsLabelRaw);
 
-					// Build callpoint: use user's ns label + enclosing function
-					const callpoint = `${escapedNs}${fnName ? `@${fnName}` : ''}`;
+					// Build callpoint: substitute $NS/$FN/$FILE/$LINE/$COL template variables.
+					// The auto-generated callpoint (file@fn) is what bare gg() would produce.
+					const autoCallpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+					const callpoint = escapeForString(
+						nsLabelRaw
+							.replace(/\$NS/g, autoCallpoint)
+							.replace(/\$FN/g, fnName)
+							.replace(/\$FILE/g, shortPath)
+							.replace(/\$LINE/g, String(line))
+							.replace(/\$COL/g, String(col))
+					);
 
 					// Check if there are more args after the string
 					const afterClosingQuote = j + 1;

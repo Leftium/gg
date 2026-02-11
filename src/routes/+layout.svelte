@@ -33,7 +33,18 @@
 	}
 
 	function testManualNs() {
-		gg.ns('my-app', 'Custom namespace log', { source: 'manual', timestamp: Date.now() });
+		// Plain label (no template variables) - used as-is
+		gg.ns('CUSTOM_NAMESPACE', 'Plain custom namespace - no @functionName appended');
+
+		// Template variables demo
+		gg.ns('ERROR:$NS', 'Error with auto-generated callpoint suffix');
+		gg.ns('$FILE:validation', 'File path with custom tag');
+		gg.ns('TRACE:$FN', 'Custom prefix with just function name');
+		gg.ns('$NS:debug', 'Full callpoint with custom suffix');
+
+		// Multiple calls with same custom namespace (grouped by color)
+		gg.ns('CUSTOM_NAMESPACE', 'Message 1');
+		gg.ns('CUSTOM_NAMESPACE', 'Message 2', { data: Date.now() });
 	}
 
 	function testAnsiColors() {
@@ -68,7 +79,7 @@
 <main class="container">
 	<div style="margin-bottom: 1rem;">
 		<button onclick={testLog}>🧪 Test gg() Log</button>
-		<button onclick={testManualNs}>🏷️ gg.ns('my-app')</button>
+		<button onclick={testManualNs}>🏷️ gg.ns() Templates</button>
 		<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
 	</div>
 

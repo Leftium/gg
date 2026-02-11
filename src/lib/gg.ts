@@ -204,6 +204,27 @@ let maxCallpointLength = 0;
 const stackLineCache = new Map<string, string>();
 
 /**
+ * Resolve the callpoint for the caller at the given stack depth.
+ * depth=2 → caller of gg(), depth=3 → caller of gg.ns() (extra frame).
+ */
+function resolveCallpoint(depth: number): string {
+	const rawStack = new Error().stack || '';
+	const callerLine = rawStack.split('\n')[depth] || rawStack;
+	const callerKey = callerLine.replace(/:\d+:\d+\)?$/, '').trim();
+
+	const callpoint = stackLineCache.get(callerKey) ?? toWordTuple(callerKey);
+	if (!stackLineCache.has(callerKey)) {
+		stackLineCache.set(callerKey, callpoint);
+	}
+
+	if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
+		maxCallpointLength = callpoint.length;
+	}
+
+	return callpoint;
+}
+
+/**
  * Reset the namespace width tracking.
  * Useful after configuration checks that may have long callpoint paths.
  */
@@ -258,26 +279,8 @@ export function gg(...args: unknown[]) {
 	// When the plugin IS installed, all gg() calls are rewritten to gg._ns() at build time,
 	// so this code path only runs for un-transformed calls (i.e. plugin not installed).
 	// Same call site always produces the same word pair (e.g. "calm-fox").
-	const rawStack = new Error().stack || '';
-	// Stack line [2]: skip "Error" header [0] and gg() frame [1]
-	const callerLine = rawStack.split('\n')[2] || rawStack;
-
-	// Strip line:col numbers so all gg() calls within the same function
-	// hash to the same word tuple. In minified builds, multiple gg() calls
-	// in one function differ only by column offset — we want them grouped.
-	// Chrome: "at handleClick (chunk-abc.js:1:45892)" → "at handleClick (chunk-abc.js)"
-	// Firefox: "handleClick@https://...:1:45892" → "handleClick@https://..."
-	const callerKey = callerLine.replace(/:\d+:\d+\)?$/, '').trim();
-
-	const callpoint = stackLineCache.get(callerKey) ?? toWordTuple(callerKey);
-	if (!stackLineCache.has(callerKey)) {
-		stackLineCache.set(callerKey, callpoint);
-	}
-
-	if (callpoint.length < 80 && callpoint.length > maxCallpointLength) {
-		maxCallpointLength = callpoint.length;
-	}
-
+	// depth=2: skip "Error" header [0] and gg() frame [1]
+	const callpoint = resolveCallpoint(2);
 	const namespace = `gg:${callpoint}`;
 
 	const ggLogFunction =
@@ -338,15 +341,32 @@ export function gg(...args: unknown[]) {
  * across builds. For the internal plugin-generated version with file
  * metadata, see gg._ns().
  *
+ * The label supports template variables (substituted by the vite plugin
+ * at build time, or at runtime for $NS):
+ *   $NS   - auto-generated callpoint (file@fn with plugin, word-tuple without)
+ *   $FN   - enclosing function name (plugin only, empty without)
+ *   $FILE - short file path (plugin only, empty without)
+ *   $LINE - line number (plugin only, empty without)
+ *   $COL  - column number (plugin only, empty without)
+ *
  * @param nsLabel - The namespace label (appears as gg:<nsLabel> in output)
  * @param args - Same arguments as gg()
  * @returns Same as gg() - the first arg, or call-site info if no args
  *
  * @example
- * gg.ns("auth", "login failed")   // logs under namespace "gg:auth"
- * gg.ns("cart", item, quantity)    // logs under namespace "gg:cart"
+ * gg.ns("auth", "login failed")        // → gg:auth
+ * gg.ns("ERROR:$NS", msg)              // → gg:ERROR:routes/+page.svelte@handleClick (with plugin)
+ *                                       // → gg:ERROR:calm-fox (without plugin)
+ * gg.ns("$NS:validation", fieldName)   // → gg:routes/+page.svelte@handleClick:validation
  */
 gg.ns = function (nsLabel: string, ...args: unknown[]): unknown {
+	// Resolve $NS at runtime (word-tuple fallback when plugin isn't installed).
+	// With the plugin, $NS is already substituted at build time before this runs.
+	// depth=3: skip "Error" [0], resolveCallpoint [1], gg.ns [2] → caller [3]
+	if (nsLabel.includes('$NS')) {
+		const callpoint = resolveCallpoint(3);
+		nsLabel = nsLabel.replace(/\$NS/g, callpoint);
+	}
 	return gg._ns({ ns: nsLabel }, ...args);
 };
 
