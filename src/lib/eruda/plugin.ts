@@ -336,12 +336,21 @@ export function createGgPlugin(
 				}
 				/* Fast custom tooltip for src expression (no delay like native title) */
 				.gg-log-content[data-src] {
-					cursor: default;
+					cursor: help;
+				}
+				.gg-log-content[data-src]::before {
+					content: '🔍';
+					font-size: 10px;
+					margin-right: 4px;
+					opacity: 0.4;
+				}
+				.gg-log-content[data-src]:hover::before {
+					opacity: 1;
 				}
 				.gg-log-content[data-src]::after {
 					content: attr(data-src);
 					position: absolute;
-					bottom: 100%;
+					top: 100%;
 					left: 0;
 					background: #333;
 					color: #fff;
@@ -925,7 +934,7 @@ export function createGgPlugin(
 					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}>${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
-					`<div class="gg-log-content"${entry.src ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
+					`<div class="gg-log-content"${entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
 					detailsHTML +
 					`</div>`
 				);
@@ -967,15 +976,55 @@ export function createGgPlugin(
 		return text.replace(/\x1b\[[0-9;]*m/g, '');
 	}
 
+	// Standard ANSI 3/4-bit color palette
+	const ANSI_COLORS: Record<number, string> = {
+		// Normal foreground (30-37)
+		30: '#000000',
+		31: '#cc0000',
+		32: '#00cc00',
+		33: '#cccc00',
+		34: '#0000cc',
+		35: '#cc00cc',
+		36: '#00cccc',
+		37: '#cccccc',
+		// Normal background (40-47)
+		40: '#000000',
+		41: '#cc0000',
+		42: '#00cc00',
+		43: '#cccc00',
+		44: '#0000cc',
+		45: '#cc00cc',
+		46: '#00cccc',
+		47: '#cccccc',
+		// Bright foreground (90-97)
+		90: '#555555',
+		91: '#ff5555',
+		92: '#55ff55',
+		93: '#ffff55',
+		94: '#5555ff',
+		95: '#ff55ff',
+		96: '#55ffff',
+		97: '#ffffff',
+		// Bright background (100-107)
+		100: '#555555',
+		101: '#ff5555',
+		102: '#55ff55',
+		103: '#ffff55',
+		104: '#5555ff',
+		105: '#ff55ff',
+		106: '#55ffff',
+		107: '#ffffff'
+	};
+
 	/**
 	 * Parse ANSI escape codes and convert to HTML with inline styles
 	 * Supports:
+	 * - Basic 3/4-bit colors: \x1b[31m (fg red), \x1b[41m (bg red), \x1b[91m (bright fg), etc.
 	 * - 24-bit RGB: \x1b[38;2;r;g;bm (foreground), \x1b[48;2;r;g;bm (background)
 	 * - Reset: \x1b[0m
 	 */
 	function parseAnsiToHtml(text: string): string {
 		// ANSI escape sequence regex
-		// Matches: \x1b[38;2;r;g;bm, \x1b[48;2;r;g;bm, \x1b[0m
 		const ansiRegex = /\x1b\[([0-9;]+)m/g;
 
 		let html = '';
@@ -1005,6 +1054,21 @@ export function createGgPlugin(
 			} else if (parts[0] === 48 && parts[1] === 2 && parts.length >= 5) {
 				// Background RGB: 48;2;r;g;b
 				currentBg = `rgb(${parts[2]},${parts[3]},${parts[4]})`;
+			} else if (parts[0] === 39) {
+				// Default foreground
+				currentFg = null;
+			} else if (parts[0] === 49) {
+				// Default background
+				currentBg = null;
+			} else {
+				// Basic 3/4-bit colors
+				for (const p of parts) {
+					if ((p >= 30 && p <= 37) || (p >= 90 && p <= 97)) {
+						currentFg = ANSI_COLORS[p] || null;
+					} else if ((p >= 40 && p <= 47) || (p >= 100 && p <= 107)) {
+						currentBg = ANSI_COLORS[p] || null;
+					}
+				}
 			}
 
 			lastIndex = ansiRegex.lastIndex;

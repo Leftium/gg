@@ -31,6 +31,8 @@
 	});
 
 	function testLog() {
+		const data = { count: 42, active: true };
+		gg(data);
 		gg('Test log from button click!', { timestamp: Date.now() }, ['item1', 'item2', 'item3'], {
 			nested: { data: { value: 42 } }
 		});
