@@ -452,6 +452,25 @@ gg._ns = function (
 	return returnValue;
 };
 
+/**
+ * gg._o() - Internal: build options object for gg._ns() without object literal syntax.
+ *
+ * Used by the vite plugin to transform gg() calls in Svelte template markup,
+ * where object literals ({...}) would break Svelte's template parser.
+ *
+ * In <script> blocks:  gg._ns({ns:'...', file:'...', line:1, col:1}, args)
+ * In template markup:  gg._ns(gg._o('...','...',1,1), args)
+ */
+gg._o = function (
+	ns: string,
+	file?: string,
+	line?: number,
+	col?: number,
+	src?: string
+): { ns: string; file?: string; line?: number; col?: number; src?: string } {
+	return { ns, file, line, col, src };
+};
+
 gg.disable = isCloudflareWorker() ? () => {} : debugFactory.disable;
 
 gg.enable = isCloudflareWorker() ? () => {} : debugFactory.enable;
@@ -675,6 +694,13 @@ export namespace gg {
 		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 		...args: unknown[]
 	) => unknown;
+	export let _o: (
+		ns: string,
+		file?: string,
+		line?: number,
+		col?: number,
+		src?: string
+	) => { ns: string; file?: string; line?: number; col?: number; src?: string };
 }
 
 // Track if diagnostics have already run to prevent double execution

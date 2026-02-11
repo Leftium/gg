@@ -189,7 +189,7 @@ describe('edge cases', () => {
 	});
 
 	it('handles .svelte file with script ranges', () => {
-		const code = `<script>\nfunction test() { gg.ns('$FN:tag', x) }\n</script>\n<p>gg.ns("not code")</p>`;
+		const code = `<script>\nfunction test() { gg.ns('$FN:tag', x) }\n</script>\n<p>gg.ns("label")</p>`;
 		const scriptRanges = [{ start: 8, end: code.indexOf('</script>') }];
 		const result = transformGgCalls(
 			code,
@@ -198,8 +198,9 @@ describe('edge cases', () => {
 			scriptRanges
 		);
 		const out = result!.code;
-		expect(out).toContain("ns:'test:tag'");
-		// The template markup gg.ns should be untouched
-		expect(out).toContain('gg.ns("not code")');
+		// Script: transformed with object literal syntax
+		expect(out).toContain("{ns:'test:tag'");
+		// Template: left untouched (skipped until AST-based detection)
+		expect(out).toContain('gg.ns("label")');
 	});
 });

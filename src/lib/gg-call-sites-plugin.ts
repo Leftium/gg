@@ -68,10 +68,11 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// $1 captures "/src/" or "/chunks/", so strip the leading slash
 			const filePath = id.replace(srcRootRegex, '$1').replace(/^\//, '');
 
-			// For .svelte files (with enforce:'pre', we see raw source), restrict
-			// transforms to <script> blocks only — template markup may contain
-			// text like "gg()" that isn't actual code, and object literals in
-			// the transformed output would break Svelte's template parser.
+			// For .svelte files (with enforce:'pre', we see raw source), detect
+			// <script> blocks. Currently only transforms inside <script>.
+			// Template expressions (e.g. {gg()}, onclick={() => gg()}) are
+			// skipped — they use the runtime fallback. gg._o() helper exists
+			// for future AST-based template transform (svelte.parse).
 			let scriptRanges: Array<{ start: number; end: number }> | undefined;
 			if (/\.svelte(\?.*)?$/.test(id)) {
 				scriptRanges = findScriptRanges(code);
@@ -305,6 +306,25 @@ export function transformGgCalls(
 	let modified = false;
 	const escapedFile = escapeForString(filePath);
 
+	/** Check if position is inside a <script> block (or not in a .svelte file) */
+	const inScript = (pos: number): boolean => !scriptRanges || isInRanges(pos, scriptRanges);
+
+	/**
+	 * Build the options argument for gg._ns().
+	 * Inside <script>:  {ns:'...',file:'...',line:N,col:N}           (object literal)
+	 * In template:      gg._o('...','...',N,N)                       (function call — no braces)
+	 */
+	function buildOptions(pos: number, ns: string, line: number, col: number, src?: string): string {
+		if (inScript(pos)) {
+			return src
+				? `{ns:'${ns}',file:'${escapedFile}',line:${line},col:${col},src:'${src}'}`
+				: `{ns:'${ns}',file:'${escapedFile}',line:${line},col:${col}}`;
+		}
+		return src
+			? `gg._o('${ns}','${escapedFile}',${line},${col},'${src}')`
+			: `gg._o('${ns}','${escapedFile}',${line},${col})`;
+	}
+
 	// States for string/comment tracking
 	let i = 0;
 	while (i < code.length) {
@@ -370,8 +390,12 @@ export function transformGgCalls(
 
 		// Look for 'gg' pattern — could be gg( or gg.ns(
 		if (code[i] === 'g' && code[i + 1] === 'g') {
-			// In .svelte files, skip gg outside <script> blocks
-			if (scriptRanges && !isInRanges(i, scriptRanges)) {
+			// In .svelte files, skip gg outside <script> blocks for now.
+			// Template expressions like {gg()} would need AST-based detection
+			// (svelte.parse) to distinguish from plain text like "gg() demo".
+			// TODO: use svelte.parse() AST to find ExpressionTag nodes and
+			// transform those with gg._o() syntax.
+			if (scriptRanges && !inScript(i)) {
 				i++;
 				continue;
 			}
@@ -429,22 +453,19 @@ export function transformGgCalls(
 					while (k < code.length && /\s/.test(code[k])) k++;
 
 					if (code[k] === ')') {
-						// gg.ns('label') → gg._ns({...})
-						const optionsObj = `{ns:'${callpoint}',file:'${escapedFile}',line:${line},col:${col}}`;
+						// gg.ns('label') → gg._ns(opts)
 						result.push(code.slice(lastIndex, i));
-						result.push(`gg._ns(${optionsObj})`);
+						result.push(`gg._ns(${buildOptions(i, callpoint, line, col)})`);
 						lastIndex = k + 1;
 						i = k + 1;
 					} else if (code[k] === ',') {
-						// gg.ns('label', args...) → gg._ns({..., src:'args source'}, args...)
-						// Extract source text of remaining args (after the comma)
+						// gg.ns('label', args...) → gg._ns(opts, args...)
 						let argsStart = k + 1;
 						while (argsStart < closeParenPos && /\s/.test(code[argsStart])) argsStart++;
 						const argsSrc = code.slice(argsStart, closeParenPos).trim();
 						const escapedSrc = escapeForString(argsSrc);
-						const optionsObj = `{ns:'${callpoint}',file:'${escapedFile}',line:${line},col:${col},src:'${escapedSrc}'}`;
 						result.push(code.slice(lastIndex, i));
-						result.push(`gg._ns(${optionsObj}, `);
+						result.push(`gg._ns(${buildOptions(i, callpoint, line, col, escapedSrc)}, `);
 						lastIndex = k + 1; // skip past the comma, keep args as-is
 						i = k + 1;
 					} else {
@@ -489,16 +510,14 @@ export function transformGgCalls(
 				result.push(code.slice(lastIndex, i));
 
 				if (argsText === '') {
-					// gg() → gg._ns({...})
-					const optionsObj = `{ns:'${escapedNs}',file:'${escapedFile}',line:${line},col:${col}}`;
-					result.push(`gg._ns(${optionsObj})`);
+					// gg() → gg._ns(opts)
+					result.push(`gg._ns(${buildOptions(i, escapedNs, line, col)})`);
 					lastIndex = closeParenPos + 1;
 					i = closeParenPos + 1;
 				} else {
-					// gg(expr) → gg._ns({..., src:'expr'}, expr)
+					// gg(expr) → gg._ns(opts, expr)
 					const escapedSrc = escapeForString(argsText);
-					const optionsObj = `{ns:'${escapedNs}',file:'${escapedFile}',line:${line},col:${col},src:'${escapedSrc}'}`;
-					result.push(`gg._ns(${optionsObj}, `);
+					result.push(`gg._ns(${buildOptions(i, escapedNs, line, col, escapedSrc)}, `);
 					lastIndex = openParenPos + 1; // keep original args
 					i = openParenPos + 1;
 				}
