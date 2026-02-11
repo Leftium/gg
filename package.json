@@ -78,6 +78,9 @@
 		]
 	},
 	"dependencies": {
+		"@sveltejs/acorn-typescript": "^1.0.9",
+		"@types/estree": "^1.0.8",
+		"acorn": "^8.15.0",
 		"dotenv": "^17.2.4",
 		"esm-env": "^1.2.2",
 		"launch-editor": "^2.12.0"

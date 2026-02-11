@@ -11,7 +11,8 @@ import { describe, it, expect } from 'vitest';
 import {
 	transformGgCalls,
 	collectCodeRanges,
-	findEnclosingFunctionFromScopes
+	findEnclosingFunctionFromScopes,
+	parseJavaScript
 } from './gg-call-sites-plugin.js';
 
 describe('collectCodeRanges()', () => {
@@ -212,9 +213,10 @@ describe('gg() in svelte template markup (AST-based)', () => {
 	});
 
 	it('does not use gg._o() in non-svelte files', () => {
-		// No svelteInfo → all calls use object literal syntax
+		// Plain JS/TS files use parseJavaScript for function scopes
 		const code = 'function test() { gg("hello") }';
-		const result = transformGgCalls(code, 'test.ts', 'src/test.ts');
+		const jsFunctionScopes = parseJavaScript(code);
+		const result = transformGgCalls(code, 'test.ts', 'src/test.ts', undefined, jsFunctionScopes);
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
@@ -261,5 +263,124 @@ function testLog() {
 		expect(out).toContain("ns:'test.svelte@testLog'");
 		expect(out).not.toContain('@data');
 		expect(out).not.toContain('@error');
+	});
+});
+
+describe('parseJavaScript() - AST-based function detection for .js/.ts files', () => {
+	it('detects function declarations', () => {
+		const code = `function handleClick() {\n    gg('test');\n}`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('handleClick');
+	});
+
+	it('detects arrow function assignments', () => {
+		const code = `const handleClick = () => {\n    gg('test');\n};`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('handleClick');
+	});
+
+	it('detects object method shorthand', () => {
+		const code = `const obj = { method() { gg('test'); } };`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('method');
+	});
+
+	it('returns empty string for top-level code', () => {
+		const code = `gg('top level');`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('');
+	});
+
+	it('does NOT match variable names as function names', () => {
+		const code = `function testLog() {\n    const data = { count: 42 };\n    gg(data);\n}`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		// Should be testLog, NOT data
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('testLog');
+	});
+
+	it('finds innermost function for nested scopes', () => {
+		const code = `function outer() {\n    function inner() {\n        gg('test');\n    }\n}`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('inner');
+	});
+
+	it('detects class methods', () => {
+		const code = `class Foo {\n    bar() {\n        gg('test');\n    }\n}`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('bar');
+	});
+
+	it('detects async arrow functions', () => {
+		const code = `const fetchData = async () => {\n    gg('test');\n};`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('fetchData');
+	});
+
+	it('works with import statements', () => {
+		const code = `import { foo } from 'bar';\nfunction test() { gg('x'); }`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('test');
+	});
+
+	it('works with export statements', () => {
+		const code = `export function test() { gg('x'); }`;
+		const scopes = parseJavaScript(code);
+		const ggPos = code.indexOf('gg(');
+		expect(findEnclosingFunctionFromScopes(ggPos, scopes)).toBe('test');
+	});
+});
+
+describe('transformGgCalls() - JS/TS files with AST', () => {
+	it('transforms gg() in .js file using AST function detection', () => {
+		const code = `function handleClick() {\n    gg('from js');\n}`;
+		const scopes = parseJavaScript(code);
+		const result = transformGgCalls(code, 'test.js', 'src/test.js', undefined, scopes);
+
+		expect(result).not.toBeNull();
+		const out = result!.code;
+		expect(out).toContain("gg._ns({ns:'test.js@handleClick'");
+		expect(out).not.toContain('gg._o('); // No gg._o() in plain JS
+	});
+
+	it('transforms gg() in .ts file using AST function detection', () => {
+		const code = `const fetchData = async (): Promise<void> => {\n    gg('from ts');\n};`;
+		const scopes = parseJavaScript(code);
+		const result = transformGgCalls(code, 'test.ts', 'src/test.ts', undefined, scopes);
+
+		expect(result).not.toBeNull();
+		const out = result!.code;
+		expect(out).toContain("gg._ns({ns:'test.ts@fetchData'");
+	});
+
+	it('avoids @data/@error bugs in plain JS files', () => {
+		const code = `function testLog() {\n    const data = { count: 42 };\n    const error = new Error('test');\n    gg(data);\n}`;
+		const scopes = parseJavaScript(code);
+		const result = transformGgCalls(code, 'test.js', 'src/test.js', undefined, scopes);
+
+		expect(result).not.toBeNull();
+		const out = result!.code;
+		// Should be @testLog, NOT @data or @error
+		expect(out).toContain("ns:'test.js@testLog'");
+		expect(out).not.toContain('@data');
+		expect(out).not.toContain('@error');
+	});
+
+	it('transforms top-level gg() without function name', () => {
+		const code = `gg('top level');`;
+		const scopes = parseJavaScript(code);
+		const result = transformGgCalls(code, 'test.js', 'src/test.js', undefined, scopes);
+
+		expect(result).not.toBeNull();
+		const out = result!.code;
+		expect(out).toContain("ns:'test.js'"); // No @fn for top-level
 	});
 });

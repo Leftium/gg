@@ -1,5 +1,8 @@
 import type { Plugin } from 'vite';
 import { parse } from 'svelte/compiler';
+import * as acorn from 'acorn';
+import { tsPlugin } from '@sveltejs/acorn-typescript';
+import type { Program } from 'estree';
 
 export interface GgCallSitesPluginOptions {
 	/**
@@ -104,14 +107,51 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// ({gg()}, onclick, etc.) from prose text mentioning "gg()",
 			// and uses estree AST for function name detection (no regex).
 			let svelteInfo: SvelteCodeInfo | undefined;
+			let jsFunctionScopes: FunctionScope[] | undefined;
+
 			if (/\.svelte(\?.*)?$/.test(id)) {
 				svelteInfo = collectCodeRanges(code);
 				if (svelteInfo.ranges.length === 0) return null;
+			} else {
+				// For .js/.ts files, parse with acorn to extract function scopes
+				jsFunctionScopes = parseJavaScript(code);
 			}
 
-			return transformGgCalls(code, shortPath, filePath, svelteInfo);
+			return transformGgCalls(code, shortPath, filePath, svelteInfo, jsFunctionScopes);
 		}
 	};
+}
+
+/**
+ * Parse JavaScript/TypeScript code using acorn to extract function scopes.
+ * Returns function scope ranges for accurate function name detection in .js/.ts files.
+ * Uses @sveltejs/acorn-typescript plugin to handle TypeScript syntax.
+ *
+ * For .svelte files, use `collectCodeRanges()` instead (which uses svelte.parse()).
+ */
+export function parseJavaScript(code: string): FunctionScope[] {
+	try {
+		// Parse as ES2022+ with TypeScript support
+		// sourceType: 'module' allows import/export, 'script' for regular scripts
+		// NOTE: @sveltejs/acorn-typescript REQUIRES locations: true
+		const parser = acorn.Parser.extend(tsPlugin());
+		const ast = parser.parse(code, {
+			ecmaVersion: 'latest',
+			sourceType: 'module',
+			locations: true, // Required by @sveltejs/acorn-typescript
+			ranges: true // Enable byte ranges for AST nodes
+		}) as unknown as Program & { start: number; end: number };
+
+		const scopes: FunctionScope[] = [];
+		// Reuse the same AST walker we built for Svelte
+		collectFunctionScopes(ast.body as any[], scopes);
+		scopes.sort((a, b) => a.start - b.start);
+		return scopes;
+	} catch {
+		// If acorn can't parse it, fall back to empty scopes.
+		// The file might be malformed or use syntax we don't support yet.
+		return [];
+	}
 }
 
 /**
@@ -183,6 +223,14 @@ function collectFunctionScopesFromNode(node: any, scopes: FunctionScope[]): void
 	if (!node || typeof node !== 'object' || !node.type) return;
 
 	switch (node.type) {
+		case 'ExportNamedDeclaration':
+		case 'ExportDefaultDeclaration':
+			// export function foo() {} or export default function foo() {}
+			if (node.declaration) {
+				collectFunctionScopesFromNode(node.declaration, scopes);
+			}
+			return;
+
 		case 'FunctionDeclaration':
 			if (node.id?.name && node.body) {
 				scopes.push({ start: node.body.start, end: node.body.end, name: node.id.name });
@@ -504,87 +552,6 @@ function findCodeRange(pos: number, ranges: CodeRange[]): CodeRange | undefined 
 }
 
 /**
- * Find the enclosing function name for a given position in source code.
- * Scans backwards from the position looking for function/method declarations.
- */
-function findEnclosingFunction(code: string, position: number): string {
-	// Look backwards from the gg( call for the nearest function declaration
-	const before = code.slice(0, position);
-
-	// Try several patterns, take the closest (last) match
-
-	// Named function: function handleClick(
-	// Arrow in variable: const handleClick = (...) =>
-	// Arrow in variable: let handleClick = (...) =>
-	// Method shorthand: handleClick() {
-	// Method: handleClick: function(
-	// Class method: async handleClick(
-
-	const patterns = [
-		// function declarations: function foo(
-		/function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
-		// Arrow functions: const foo = (...) =>  or  const foo = async (...) =>
-		/(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/g,
-		// object method shorthand: foo() { or async foo() {
-		/(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*\{/g,
-		// object property function: foo: function
-		/([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*(?:async\s+)?function/g
-	];
-
-	let closestName = '';
-	let closestPos = -1;
-
-	for (const pattern of patterns) {
-		let match;
-		while ((match = pattern.exec(before)) !== null) {
-			const name = match[1];
-			// Skip common false positives
-			if (
-				[
-					'if',
-					'for',
-					'while',
-					'switch',
-					'catch',
-					'return',
-					'import',
-					'export',
-					'from',
-					'new',
-					'typeof',
-					'instanceof',
-					'void',
-					'delete',
-					'throw',
-					'case',
-					'else',
-					'in',
-					'of',
-					'do',
-					'try',
-					'class',
-					'super',
-					'this',
-					'with',
-					'yield',
-					'await',
-					'debugger',
-					'default'
-				].includes(name)
-			) {
-				continue;
-			}
-			if (match.index > closestPos) {
-				closestPos = match.index;
-				closestName = name;
-			}
-		}
-	}
-
-	return closestName;
-}
-
-/**
  * Compute 1-based line number and column for a character offset in source code.
  */
 function getLineCol(code: string, offset: number): { line: number; col: number } {
@@ -688,12 +655,16 @@ export function escapeForString(s: string): string {
  * Script ranges use `{...}` object literal syntax; template ranges use `gg._o()`
  * function-call syntax (no braces in Svelte markup). Positions outside any code
  * range (e.g. prose text) are skipped.
+ *
+ * For .js/.ts files, `jsFunctionScopes` (from `parseJavaScript()`) provides
+ * AST-based function scope detection (no regex fallback).
  */
 export function transformGgCalls(
 	code: string,
 	shortPath: string,
 	filePath: string,
-	svelteInfo?: SvelteCodeInfo
+	svelteInfo?: SvelteCodeInfo,
+	jsFunctionScopes?: FunctionScope[]
 ): { code: string; map: null } | null {
 	// We use a manual scan approach to correctly handle strings and comments.
 
@@ -713,14 +684,15 @@ export function transformGgCalls(
 
 	/**
 	 * Find the enclosing function name for a position.
-	 * - .svelte files: uses estree AST function scope map (accurate)
-	 * - .js/.ts files: uses regex-based backwards scan (fallback)
+	 * - .svelte files: uses estree AST function scope map from svelte.parse()
+	 * - .js/.ts files: uses estree AST function scope map from acorn.parse()
 	 * - template code ranges: always returns '' (no enclosing function from script)
 	 */
 	function getFunctionName(pos: number, range: CodeRange): string {
 		if (range.context === 'template') return '';
 		if (svelteInfo) return findEnclosingFunctionFromScopes(pos, svelteInfo.functionScopes);
-		return findEnclosingFunction(code, pos);
+		if (jsFunctionScopes) return findEnclosingFunctionFromScopes(pos, jsFunctionScopes);
+		return ''; // Should not reach here unless both svelteInfo and jsFunctionScopes are undefined
 	}
 
 	/**

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { transformGgCalls, collectCodeRanges } from './gg-call-sites-plugin.js';
+import { transformGgCalls, collectCodeRanges, parseJavaScript } from './gg-call-sites-plugin.js';
 
 /** Helper: run transform and return the output code (or null if unchanged). */
 function transform(
@@ -14,8 +14,17 @@ function transform(
 	shortPath = 'routes/+page.svelte',
 	filePath = 'src/routes/+page.svelte'
 ) {
-	const result = transformGgCalls(code, shortPath, filePath);
-	return result?.code ?? null;
+	// If the code contains <script> tags, treat as Svelte; otherwise treat as plain JS
+	if (code.includes('<script')) {
+		const svelteInfo = collectCodeRanges(code);
+		const result = transformGgCalls(code, shortPath, filePath, svelteInfo);
+		return result?.code ?? null;
+	} else {
+		// Plain JS/TS code
+		const jsFunctionScopes = parseJavaScript(code);
+		const result = transformGgCalls(code, shortPath, filePath, undefined, jsFunctionScopes);
+		return result?.code ?? null;
+	}
 }
 
 // ── bare gg() transforms (unchanged behavior) ─────────────────────────
