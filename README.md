@@ -84,39 +84,25 @@ gg(fg('rgb(255,99,71)')`Tomato text`);
 
 ## Technical Details
 
-### Bundled Dependencies
+### Internal Debug Implementation
 
-This library includes a **patched version** of the [`debug`](https://www.npmjs.com/package/debug) package. The patch reformats the output to display time diffs **before** the namespace for better readability:
+This library includes an **internal TypeScript implementation** inspired by the [`debug`](https://www.npmjs.com/package/debug) package. The output format displays time diffs **before** the namespace for better readability:
 
-**Standard debug output:**
-
-```
-  gg:routes/+page.svelte +123ms
-```
-
-**Patched output (this library):**
+**Output format:**
 
 ```
  +123ms gg:routes/+page.svelte
 ```
 
-The patched `debug` library is bundled directly into the distribution, so consumers automatically get the correct behavior without needing to install or patch `debug` themselves.
+Features implemented internally (~290 lines of TypeScript):
 
-### Updating the Bundled debug Library
+- Color hashing algorithm for consistent namespace colors
+- Millisecond diff formatting (e.g., `+123ms`, `+2s`, `+5m`)
+- Namespace wildcard matching (`gg:*`, `gg:routes/*`, `-gg:test`)
+- localStorage.debug / process.env.DEBUG persistence
+- Browser and Node.js environments
 
-When a new version of `debug` is released:
-
-1. Update debug: `pnpm add debug@x.x.x`
-2. Update patch: `pnpm patch debug@x.x.x` (apply changes, then `pnpm patch-commit`)
-3. Run the update script: `./scripts/update-debug.sh`
-4. Verify patches are present: `git diff src/lib/debug/src/`
-5. Test dev mode: `pnpm dev`
-6. Test production build: `pnpm prepack`
-7. Commit changes: `git commit -am "Update bundled debug to x.x.x"`
-
-The patch is maintained in `patches/debug@4.4.3.patch` for reference.
-
-**Note:** `debug` is kept in dependencies (not devDependencies) to support both dev and production modes.
+This approach eliminates the need for vendoring, patching, and bundling third-party code, resulting in better type safety and simpler maintenance.
 
 ## Inspirations
 
