@@ -37,6 +37,20 @@ export function createGgPlugin(
 	let filterPattern = '';
 	const enabledNamespaces = new Set<string>();
 
+	// Settings UI state
+	let settingsExpanded = false;
+	const EDITOR_FORMAT_KEY = 'gg-editor-format';
+	const editorPresets: Record<string, string> = {
+		'Raw path': '$FILE:$LINE:$COL',
+		'VS Code': 'code -g $FILE:$LINE:$COL',
+		Cursor: 'cursor -g $FILE:$LINE:$COL',
+		Zed: 'zed $FILE:$LINE:$COL',
+		Vim: 'vim +$LINE $FILE',
+		Emacs: 'emacs +$LINE:$COL $FILE',
+		JetBrains: 'idea --line $LINE --column $COL $FILE'
+	};
+	let editorFormat = localStorage.getItem(EDITOR_FORMAT_KEY) || editorPresets['Raw path'];
+
 	const plugin = {
 		name: 'GG',
 
@@ -69,6 +83,7 @@ export function createGgPlugin(
 			wireUpExpanders();
 			wireUpResize();
 			wireUpFilterUI();
+			wireUpSettingsUI();
 			renderLogs();
 		},
 
@@ -417,15 +432,63 @@ export function createGgPlugin(
 					max-height: 100px;
 					overflow-y: auto;
 				}
-				.gg-filter-checkbox {
-					display: flex;
-					align-items: center;
-					gap: 4px;
-					font-size: 11px;
-					font-family: monospace;
-					white-space: nowrap;
-				}
-				/* Mobile responsive styles */
+			.gg-filter-checkbox {
+				display: flex;
+				align-items: center;
+				gap: 4px;
+				font-size: 11px;
+				font-family: monospace;
+				white-space: nowrap;
+			}
+			.gg-settings-panel {
+				background: #f5f5f5;
+				padding: 10px;
+				margin-bottom: 8px;
+				border-radius: 4px;
+				flex-shrink: 0;
+				display: none;
+			}
+			.gg-settings-panel.expanded {
+				display: block;
+			}
+			.gg-settings-label {
+				font-size: 11px;
+				font-weight: bold;
+				margin-bottom: 4px;
+			}
+			.gg-editor-format-input {
+				width: 100%;
+				padding: 4px 8px;
+				font-family: monospace;
+				font-size: 14px;
+				margin-bottom: 8px;
+				box-sizing: border-box;
+			}
+			.gg-editor-presets {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+			}
+			.gg-editor-presets button {
+				padding: 2px 8px;
+				font-size: 11px;
+				cursor: pointer;
+				border: 1px solid #ccc;
+				border-radius: 3px;
+				background: #fff;
+			}
+			.gg-editor-presets button.active {
+				background: #4a9eff;
+				color: #fff;
+				border-color: #4a9eff;
+			}
+			.gg-editor-presets button:hover {
+				background: #e0e0e0;
+			}
+			.gg-editor-presets button.active:hover {
+				background: #3a8eef;
+			}
+			/* Mobile responsive styles */
 				.gg-toolbar {
 					display: flex;
 					align-items: center;
@@ -525,6 +588,10 @@ export function createGgPlugin(
 				<span class="gg-btn-icon">NS: </span>
 				<span class="gg-filter-summary"></span>
 			</button>
+				<button class="gg-settings-btn">
+					<span class="gg-btn-text">⚙️ Settings</span>
+					<span class="gg-btn-icon" title="Settings">⚙️</span>
+				</button>
 				<span class="gg-count" style="opacity: 0.6; white-space: nowrap; flex: 1; text-align: right;"></span>
 				<button class="gg-clear-btn">
 					<span class="gg-btn-text">Clear</span>
@@ -532,6 +599,7 @@ export function createGgPlugin(
 				</button>
 			</div>
 				<div class="gg-filter-panel"></div>
+				<div class="gg-settings-panel"></div>
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
 				<iframe class="gg-editor-iframe" hidden title="open-in-editor"></iframe>
 			</div>
@@ -695,6 +763,85 @@ export function createGgPlugin(
 		}
 	}
 
+	function renderSettingsUI() {
+		if (!$el) return;
+
+		const settingsPanel = $el.find('.gg-settings-panel').get(0) as HTMLElement;
+		if (!settingsPanel) return;
+
+		if (settingsExpanded) {
+			settingsPanel.classList.add('expanded');
+
+			const presetButtons = Object.entries(editorPresets)
+				.map(([name, fmt]) => {
+					const active = editorFormat === fmt ? ' active' : '';
+					return `<button class="gg-preset-btn${active}" data-format="${escapeHtml(fmt)}">${escapeHtml(name)}</button>`;
+				})
+				.join('');
+
+			settingsPanel.innerHTML = `
+				<div class="gg-settings-label">Editor format</div>
+				<div style="font-size: 11px; opacity: 0.7; margin-bottom: 6px;">Clicking a namespace copies this command to your clipboard. Paste it in a terminal to open the source file. Variables: <code>$FILE</code>, <code>$LINE</code>, <code>$COL</code></div>
+				<input type="text" class="gg-editor-format-input" value="${escapeHtml(editorFormat)}" placeholder="$FILE:$LINE:$COL">
+				<div class="gg-settings-label">Presets:</div>
+				<div class="gg-editor-presets">${presetButtons}</div>
+			`;
+		} else {
+			settingsPanel.classList.remove('expanded');
+		}
+	}
+
+	function wireUpSettingsUI() {
+		if (!$el) return;
+
+		const settingsBtn = $el.find('.gg-settings-btn').get(0) as HTMLElement;
+		const settingsPanel = $el.find('.gg-settings-panel').get(0) as HTMLElement;
+		if (!settingsBtn || !settingsPanel) return;
+
+		// Toggle settings panel
+		settingsBtn.addEventListener('click', () => {
+			settingsExpanded = !settingsExpanded;
+			renderSettingsUI();
+		});
+
+		// Apply format on blur or Enter
+		settingsPanel.addEventListener(
+			'blur',
+			(e: FocusEvent) => {
+				const target = e.target as HTMLInputElement;
+				if (target.classList.contains('gg-editor-format-input')) {
+					editorFormat = target.value;
+					localStorage.setItem(EDITOR_FORMAT_KEY, editorFormat);
+					renderSettingsUI(); // Update active preset highlight
+				}
+			},
+			true
+		);
+
+		settingsPanel.addEventListener('keydown', (e: KeyboardEvent) => {
+			const target = e.target as HTMLInputElement;
+			if (target.classList.contains('gg-editor-format-input') && e.key === 'Enter') {
+				editorFormat = target.value;
+				localStorage.setItem(EDITOR_FORMAT_KEY, editorFormat);
+				target.blur();
+				renderSettingsUI();
+			}
+		});
+
+		// Preset button clicks
+		settingsPanel.addEventListener('click', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+			if (target.classList.contains('gg-preset-btn')) {
+				const fmt = target.getAttribute('data-format');
+				if (fmt) {
+					editorFormat = fmt;
+					localStorage.setItem(EDITOR_FORMAT_KEY, editorFormat);
+					renderSettingsUI();
+				}
+			}
+		});
+	}
+
 	function wireUpButtons() {
 		if (!$el) return;
 
@@ -767,12 +914,13 @@ export function createGgPlugin(
 				iframe.src = url;
 			}
 		} else {
-			// Non-dev: copy file path to clipboard
-			let path = file;
-			if (line) path += `:${line}`;
-			if (line && col) path += `:${col}`;
+			// Non-dev: copy formatted file path to clipboard using editor format setting
+			const formatted = editorFormat
+				.replace(/\$FILE/g, file)
+				.replace(/\$LINE/g, line || '1')
+				.replace(/\$COL/g, col || '1');
 
-			navigator.clipboard.writeText(path).then(() => {
+			navigator.clipboard.writeText(formatted).then(() => {
 				// Brief "Copied!" feedback on the namespace cell
 				const original = target.textContent;
 				target.textContent = '📋 Copied!';
@@ -1001,7 +1149,16 @@ export function createGgPlugin(
 				const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
 				const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
 				const fileTitle = entry.file
-					? ` title="${escapeHtml(entry.file)}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}"`
+					? ` title="${
+							DEV
+								? `Open in editor: ${escapeHtml(entry.file)}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}`
+								: `Copy: ${escapeHtml(
+										editorFormat
+											.replace(/\$FILE/g, entry.file)
+											.replace(/\$LINE/g, String(entry.line || 1))
+											.replace(/\$COL/g, String(entry.col || 1))
+									)}`
+						}"`
 					: '';
 
 				// Desktop: grid layout, Mobile: stacked layout
