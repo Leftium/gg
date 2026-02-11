@@ -1,4 +1,4 @@
-import debugFactory from './debug.js';
+import debugFactory, { type Debugger } from './debug/index.js';
 import { BROWSER, DEV } from 'esm-env';
 import { toWordTuple } from './words.js';
 
@@ -15,29 +15,27 @@ const _ggCallSitesPlugin = typeof __GG_TAG_PLUGIN__ !== 'undefined' ? __GG_TAG_P
  * Creates a debug instance with custom formatArgs to add namespace padding
  * Padding is done at format time, not in the namespace itself, to keep colors stable
  */
-function createGgDebugger(namespace: string): debug.Debugger {
+function createGgDebugger(namespace: string): Debugger {
 	const dbg = debugFactory(namespace);
 
-	// Store the original formatArgs (if it exists)
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const originalFormatArgs = (dbg as any).formatArgs;
+	// Store the original formatArgs
+	const originalFormatArgs = dbg.formatArgs;
 
 	// Override formatArgs to add padding to the namespace display
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	(dbg as any).formatArgs = function (this: any, args: any[]) {
+	dbg.formatArgs = function (args: unknown[]) {
 		// Call original formatArgs first
 		if (originalFormatArgs) {
-			originalFormatArgs.call(this, args);
+			originalFormatArgs.call(dbg, args);
 		}
 
 		// Extract the callpoint from namespace (strip 'gg:' prefix and any URL suffix)
-		const nsMatch = this.namespace.match(/^gg:([^h]+?)(?:http|$)/);
-		const callpoint = nsMatch ? nsMatch[1] : this.namespace.replace(/^gg:/, '');
+		const nsMatch = dbg.namespace.match(/^gg:([^h]+?)(?:http|$)/);
+		const callpoint = nsMatch ? nsMatch[1] : dbg.namespace.replace(/^gg:/, '');
 		const paddedCallpoint = callpoint.padEnd(maxCallpointLength, ' ');
 
 		// Replace the namespace in the formatted string with padded version
 		if (typeof args[0] === 'string') {
-			args[0] = args[0].replace(this.namespace, `gg:${paddedCallpoint}`);
+			args[0] = args[0].replace(dbg.namespace, `gg:${paddedCallpoint}`);
 		}
 	};
 
@@ -199,7 +197,7 @@ const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 // To maintain unique millisecond diffs for each callpoint:
 // - Create a unique log function for each callpoint.
 // - Cache and reuse the same log function for a given callpoint.
-const namespaceToLogFunction = new Map<string, debug.Debugger>();
+const namespaceToLogFunction = new Map<string, Debugger>();
 let maxCallpointLength = 0;
 
 // Cache: raw stack line → word tuple (avoids re-hashing the same call site)

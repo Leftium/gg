@@ -11,7 +11,7 @@
 		"build": "vite build && npm run prepack",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"prepack": "svelte-kit sync && node scripts/bundle-debug.js && svelte-package && node scripts/fix-debug-import.js && publint",
+		"prepack": "svelte-kit sync && svelte-package && publint",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
@@ -20,9 +20,7 @@
 	"files": [
 		"dist",
 		"!dist/**/*.test.*",
-		"!dist/**/*.spec.*",
-		"!dist/debug/",
-		"patches/"
+		"!dist/**/*.spec.*"
 	],
 	"sideEffects": [
 		"**/*.css"
@@ -46,17 +44,12 @@
 		"@eslint/compat": "^2.0.2",
 		"@eslint/js": "^10.0.1",
 		"@picocss/pico": "^2.1.1",
-		"@rollup/plugin-commonjs": "^29.0.0",
-		"@rollup/plugin-node-resolve": "^16.0.3",
-		"@rollup/plugin-terser": "^0.4.4",
 		"@sveltejs/adapter-vercel": "^6.3.1",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/package": "^2.5.7",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
-		"@types/debug": "^4.1.12",
 		"@types/node": "^25.2.2",
 		"add": "^2.0.6",
-		"debug": "^4.4.3",
 		"eruda": "^3.4.3",
 		"eslint": "^10.0.0",
 		"eslint-config-prettier": "^10.1.8",
@@ -65,7 +58,6 @@
 		"prettier": "^3.8.1",
 		"prettier-plugin-svelte": "^3.4.1",
 		"publint": "^0.3.17",
-		"rollup": "^4.57.1",
 		"supports-color": "^10.2.2",
 		"svelte": "^5.50.1",
 		"svelte-check": "^4.3.6",
@@ -80,10 +72,7 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"esbuild"
-		],
-		"patchedDependencies": {
-			"debug@4.4.3": "patches/debug@4.4.3.patch"
-		}
+		]
 	},
 	"dependencies": {
 		"dotenv": "^17.2.4",
