@@ -147,14 +147,16 @@ export function createGgPlugin(
 			// Register the capture hook on gg
 			if (gg) {
 				gg._onLog = (entry: CapturedEntry) => {
+					// Track namespaces for filter UI update (check BEFORE pushing to buffer)
+					const hadNamespace = getAllCapturedNamespaces().includes(entry.namespace);
 					buffer.push(entry);
 					// Add new namespace to enabledNamespaces if it matches the current pattern
 					const effectivePattern = filterPattern || 'gg:*';
 					if (namespaceMatchesPattern(entry.namespace, effectivePattern)) {
 						enabledNamespaces.add(entry.namespace);
 					}
-					// Update filter UI if expanded (new namespace may have appeared)
-					if (filterExpanded) {
+					// Update filter UI if new namespace appeared (updates button summary count)
+					if (!hadNamespace) {
 						renderFilterUI();
 					}
 					renderLogs();
