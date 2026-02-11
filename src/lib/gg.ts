@@ -670,35 +670,23 @@ export async function runGgDiagnostics() {
 	if (!ggConfig.showHints || isCloudflareWorker() || diagnosticsRan) return;
 	diagnosticsRan = true;
 
-	// Create test debugger INSIDE this function (not at module level) so it picks up
-	// the current localStorage.debug value, which may have been set by autoEnable
+	// Create test debugger for server-side enabled check
 	const ggLogTest = debugFactory('gg:TEST');
 
 	let ggMessage = '\n';
-	// Utilities for forming ggMessage:
 	const message = (s: string) => (ggMessage += `${s}\n`);
 	const checkbox = (test: boolean) => (test ? '✅' : '❌');
 	const makeHint = (test: boolean, ifTrue: string, ifFalse = '') => (test ? ifTrue : ifFalse);
 
-	// Use plain console.log for diagnostics - appears in Eruda's Console tab
 	console.log(`Loaded gg module. Checking configuration...`);
 
-	// Check current state (including autoEnable changes)
-	let configOk = ggConfig.enabled;
-	if (BROWSER && configOk) {
-		const debugValue = localStorage?.debug || '';
-		const includesGg = debugValue.includes('gg:') || debugValue === '*';
-		configOk = includesGg;
-	} else if (configOk) {
-		configOk = ggLogTest.enabled;
-	}
+	const configOk = BROWSER ? ggConfig.enabled : ggConfig.enabled && ggLogTest.enabled;
 
 	if (configOk) {
-		console.log(`gg:TEST If you can see this logg, gg configured correctly!`);
 		message(`No problems detected:`);
 		if (BROWSER) {
 			message(
-				`ℹ️ If gg output not visible: enable "Verbose" log level in DevTools, or check Eruda's GG tab.`
+				`ℹ️ gg messages appear in the Eruda GG panel. Use Settings > Native Console to also show in browser console.`
 			);
 		}
 	} else {
@@ -715,27 +703,16 @@ export async function runGgDiagnostics() {
 	}
 	message(`${checkbox(ggConfig.enabled)} gg enabled: ${ggConfig.enabled}${enableHint}`);
 
-	if (BROWSER) {
-		// Re-check if debug pattern includes gg:* (in case it was just set by autoEnable)
-		const debugValue = localStorage?.debug || '';
-		const includesGg = debugValue.includes('gg:') || debugValue === '*';
-		const hint = makeHint(
-			!includesGg,
-			" (Try `localStorage.debug = 'gg:*'`)",
-			includesGg && !ggLogTest.enabled
-				? ' (Reload page to apply; or call debugFactory.enable("gg:*"))'
-				: ''
-		);
-		message(`${checkbox(includesGg)} localStorage.debug: ${debugValue}${hint}`);
-	} else {
-		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm dev`)');
+	if (!BROWSER) {
+		// Server-side: check DEBUG env var (the only output path on the server)
+		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm run dev`)');
 		if (dotenvModule) {
-			dotenvModule.config(); // Load the environment variables
+			dotenvModule.config();
 		}
 		message(`${checkbox(ggLogTest.enabled)} DEBUG env variable: ${process?.env?.DEBUG}${hint}`);
 	}
 
-	// Optional plugin diagnostics listed last
+	// Optional plugin diagnostics
 	message(
 		makeHint(
 			_ggCallSitesPlugin,
@@ -755,11 +732,7 @@ export async function runGgDiagnostics() {
 		);
 	}
 
-	// Use plain console.log for diagnostics - appears in Eruda's Console tab
 	console.log(ggMessage);
-
-	// Reset namespace width after configuration check
-	// This prevents the long callpoint from the config check from affecting subsequent logs
 	resetNamespaceWidth();
 }
 

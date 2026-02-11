@@ -20,22 +20,10 @@ export interface GgErudaOptions {
 	maxEntries?: number;
 
 	/**
-	 * Auto-enable localStorage.debug = 'gg:*' if unset
-	 * @default true
-	 */
-	autoEnable?: boolean;
-
-	/**
 	 * Additional Eruda options passed to eruda.init()
 	 * @default {}
 	 */
 	erudaOptions?: Record<string, unknown>;
-
-	/**
-	 * Internal flag set by loader to indicate debug was auto-set
-	 * @internal
-	 */
-	_autoSetDebug?: boolean;
 }
 
 /**

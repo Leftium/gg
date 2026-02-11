@@ -44,9 +44,8 @@ export function createGgPlugin(
 	// Settings UI state
 	let settingsExpanded = false;
 
-	// Sentinel value for localStorage.debug to prevent gg from auto-setting it.
-	// Uses valid debug pattern syntax (-* disables all) so it's self-documenting.
-	const GG_DEBUG_SENTINEL = 'DISABLED BY GG,-*';
+	// Filter pattern persistence key (independent of localStorage.debug)
+	const FILTER_KEY = 'gg-filter';
 
 	// Namespace click action: 'open' uses Vite dev middleware, 'copy' copies formatted string, 'open-url' navigates to URI
 	const NS_ACTION_KEY = 'gg-ns-action';
@@ -112,13 +111,6 @@ export function createGgPlugin(
 	let nsClickAction: NsClickAction =
 		(localStorage.getItem(NS_ACTION_KEY) as NsClickAction) || (DEV ? 'open' : 'copy');
 	let editorBin = localStorage.getItem(EDITOR_BIN_KEY) || '';
-	// Separate format strings for copy vs URL modes (each persisted independently)
-	// Migrate from old single-key format (gg-editor-format) if present
-	const legacyFormat = localStorage.getItem('gg-editor-format');
-	if (legacyFormat && !localStorage.getItem(COPY_FORMAT_KEY)) {
-		localStorage.setItem(COPY_FORMAT_KEY, legacyFormat);
-		localStorage.removeItem('gg-editor-format');
-	}
 	let copyFormat = localStorage.getItem(COPY_FORMAT_KEY) || copyPresets['Raw path'];
 	let urlFormat = localStorage.getItem(URL_FORMAT_KEY) || uriPresets['VS Code'];
 	let projectRoot = localStorage.getItem(PROJECT_ROOT_KEY) || '';
@@ -145,6 +137,10 @@ export function createGgPlugin(
 		init($container: LiciaElement) {
 			$el = $container;
 
+			// Load filter state BEFORE registering _onLog hook, because setting _onLog
+			// triggers replay of earlyLogBuffer and each entry checks filterPattern
+			filterPattern = localStorage.getItem(FILTER_KEY) || 'gg:*';
+
 			// Register the capture hook on gg
 			if (gg) {
 				gg._onLog = (entry: CapturedEntry) => {
@@ -161,9 +157,6 @@ export function createGgPlugin(
 					renderLogs();
 				};
 			}
-
-			// Load initial filter state
-			filterPattern = localStorage.getItem('debug') || '';
 
 			// Probe for openInEditorPlugin (status 222) and auto-populate $ROOT in dev mode
 			if (DEV) {
@@ -747,7 +740,7 @@ export function createGgPlugin(
 
 	function applyPatternFromInput(value: string) {
 		filterPattern = value;
-		localStorage.setItem('debug', filterPattern);
+		localStorage.setItem(FILTER_KEY, filterPattern);
 		// Sync enabledNamespaces from the new pattern
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
@@ -819,7 +812,7 @@ export function createGgPlugin(
 					filterPattern = `gg:*,${exclusions}`;
 					enabledNamespaces.clear();
 				}
-				localStorage.setItem('debug', filterPattern);
+				localStorage.setItem(FILTER_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;
@@ -985,6 +978,41 @@ export function createGgPlugin(
 				optionsSection = renderFormatSection(nsClickAction === 'open-url');
 			}
 
+			// Native Console section
+			const currentDebugValue = localStorage.getItem('debug');
+			const debugDisplay =
+				currentDebugValue !== null ? `'${escapeHtml(currentDebugValue)}'` : 'not set';
+			const currentFilter = filterPattern || 'gg:*';
+			const debugMatchesFilter = currentDebugValue === currentFilter;
+			const debugIncludesGg =
+				currentDebugValue !== null &&
+				(currentDebugValue.includes('gg:') || currentDebugValue === '*');
+
+			const nativeConsoleSection = `
+				<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">
+					<div class="gg-settings-label">Native Console Output</div>
+					<div style="font-size: 11px; opacity: 0.7; margin-bottom: 8px;">
+						gg messages always appear in this GG panel. To also see them in the browser's native console, set <code>localStorage.debug</code> below.
+						For server-side: <code>DEBUG=gg:* npm run dev</code>
+					</div>
+					<div style="font-family: monospace; font-size: 12px; margin-bottom: 6px;">
+						localStorage.debug = ${debugDisplay}
+						${debugIncludesGg ? '<span style="color: green;">✅</span>' : '<span style="color: #999;">⚫ gg:* not included</span>'}
+					</div>
+					<div style="display: flex; gap: 6px; flex-wrap: wrap;">
+						<button class="gg-sync-debug-btn" style="padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ccc; border-radius: 3px; background: ${debugMatchesFilter ? '#e8e8e8' : '#fff'};"${debugMatchesFilter ? ' disabled' : ''}>
+							${debugMatchesFilter ? 'In sync' : `Set to '${escapeHtml(currentFilter)}'`}
+						</button>
+						<button class="gg-clear-debug-btn" style="padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ccc; border-radius: 3px; background: #fff;"${currentDebugValue === null ? ' disabled' : ''}>
+							Clear
+						</button>
+					</div>
+					<div style="font-size: 10px; opacity: 0.5; margin-top: 4px;">
+						Changes take effect on next page reload.
+					</div>
+				</div>
+			`;
+
 			settingsPanel.innerHTML = `
 				${callSitesWarning}
 				<div class="gg-settings-label">When namespace clicked:</div>
@@ -1003,6 +1031,7 @@ export function createGgPlugin(
 					</label>
 				</div>
 				${optionsSection}
+				${nativeConsoleSection}
 			`;
 		} else {
 			settingsPanel.classList.remove('expanded');
@@ -1071,7 +1100,7 @@ export function createGgPlugin(
 			}
 		});
 
-		// Preset button clicks + editor bin button clicks
+		// Preset button clicks + editor bin button clicks + native console buttons
 		settingsPanel.addEventListener('click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
 			if (target.classList.contains('gg-preset-btn')) {
@@ -1088,6 +1117,17 @@ export function createGgPlugin(
 					localStorage.setItem(EDITOR_BIN_KEY, editorBin);
 					renderSettingsUI();
 				}
+			}
+			// Native Console: sync localStorage.debug to current gg-filter
+			if (target.classList.contains('gg-sync-debug-btn')) {
+				const currentFilter = localStorage.getItem(FILTER_KEY) || 'gg:*';
+				localStorage.setItem('debug', currentFilter);
+				renderSettingsUI();
+			}
+			// Native Console: clear localStorage.debug
+			if (target.classList.contains('gg-clear-debug-btn')) {
+				localStorage.removeItem('debug');
+				renderSettingsUI();
 			}
 		});
 	}
@@ -1208,18 +1248,6 @@ export function createGgPlugin(
 		containerEl.addEventListener('click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
 
-			// Handle debug banner buttons
-			if (target?.classList?.contains('gg-clear-debug-btn')) {
-				localStorage.setItem('debug', GG_DEBUG_SENTINEL);
-				location.reload();
-				return;
-			}
-			if (target?.classList?.contains('gg-fix-debug-btn')) {
-				localStorage.setItem('debug', 'gg:*');
-				location.reload();
-				return;
-			}
-
 			// Handle expand/collapse
 			if (target?.classList?.contains('gg-expand')) {
 				const index = target.getAttribute('data-index');
@@ -1260,7 +1288,7 @@ export function createGgPlugin(
 					soloNamespace(namespace);
 				}
 
-				localStorage.setItem('debug', filterPattern);
+				localStorage.setItem(FILTER_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;
@@ -1272,7 +1300,7 @@ export function createGgPlugin(
 				if (!namespace) return;
 
 				soloNamespace(namespace);
-				localStorage.setItem('debug', filterPattern);
+				localStorage.setItem(FILTER_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;
@@ -1287,7 +1315,7 @@ export function createGgPlugin(
 				filterPattern = 'gg:*';
 				enabledNamespaces.clear();
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
-				localStorage.setItem('debug', filterPattern);
+				localStorage.setItem(FILTER_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 			}
@@ -1357,11 +1385,6 @@ export function createGgPlugin(
 		const countSpan = $el.find('.gg-count');
 		if (!logContainer.length || !countSpan.length) return;
 
-		// Check if localStorage.debug is set to include gg:* patterns
-		const debugValue = localStorage.getItem('debug') || '';
-		const includesGg = debugValue.includes('gg:') || debugValue === '*';
-		const showDebugWarning = !includesGg;
-
 		const allEntries = buffer.getEntries();
 
 		// Apply filtering
@@ -1375,123 +1398,89 @@ export function createGgPlugin(
 				: `${entries.length} / ${allEntries.length} entries`;
 		countSpan.html(countText);
 
-		// Show debug banner (warning if not set, info if auto-set)
-		let debugBanner = '';
-		if (showDebugWarning) {
-			// Warning: debug doesn't include gg:*
-			const currentDebug = debugValue ? `'${debugValue}'` : 'not set';
-			debugBanner = `
-				<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
-					<strong>⚠️ localStorage.debug doesn't include gg:*</strong><br>
-					Current value: ${escapeHtml(currentDebug)}<br>
-					gg messages appear here but NOT in the native console.<br>
-					<button class="gg-fix-debug-btn" style="margin-top: 8px; padding: 6px 12px; background: #ffc107; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">
-						Fix: Set debug='gg:*' and reload
-					</button>
-				</div>
-			`;
-		} else if (options._autoSetDebug) {
-			// Info: debug was auto-set by gg
-			debugBanner = `
-				<div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 4px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
-					<strong>ℹ️ localStorage.debug auto-set to 'gg:*'</strong><br>
-					gg messages now appear in both this GG panel and the native console.<br>
-					<button class="gg-clear-debug-btn" style="margin-top: 8px; padding: 6px 12px; background: #17a2b8; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">
-						Don't auto-set
-					</button>
-					<span style="opacity: 0.7; font-size: 11px; display: block; margin-top: 6px;">
-						Removes localStorage.debug and prevents future auto-setting.
-					</span>
-				</div>
-			`;
-		}
-
 		if (entries.length === 0) {
 			logContainer.html(
-				debugBanner +
-					'<div style="padding: 20px; text-align: center; opacity: 0.5;">No logs captured yet. Call gg() to see output here.</div>'
+				'<div style="padding: 20px; text-align: center; opacity: 0.5;">No logs captured yet. Call gg() to see output here.</div>'
 			);
 			return;
 		}
 
-		const logsHTML =
-			debugBanner +
-			`<div class="gg-log-grid" style="grid-template-columns: ${gridColumns()};">${entries
-				.map((entry: CapturedEntry, index: number) => {
-					const color = entry.color || '#0066cc';
-					const diff = `+${humanize(entry.diff)}`;
-					const ns = escapeHtml(entry.namespace);
+		const logsHTML = `<div class="gg-log-grid" style="grid-template-columns: ${gridColumns()};">${entries
+			.map((entry: CapturedEntry, index: number) => {
+				const color = entry.color || '#0066cc';
+				const diff = `+${humanize(entry.diff)}`;
+				const ns = escapeHtml(entry.namespace);
 
-					// Format each arg individually - objects are expandable
-					let argsHTML = '';
-					let detailsHTML = '';
-					if (entry.args.length > 0) {
-						argsHTML = entry.args
-							.map((arg, argIdx) => {
-								if (typeof arg === 'object' && arg !== null) {
-									// Show expandable object
-									const preview = Array.isArray(arg) ? `Array(${arg.length})` : 'Object';
-									const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
-									const uniqueId = `${index}-${argIdx}`;
-									// Store details separately to render after the row
-									detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
-									return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
-								} else {
-									// Parse ANSI codes first, then convert URLs to clickable links
-									const argStr = String(arg);
-									const parsedAnsi = parseAnsiToHtml(argStr);
-									// Note: URL linking happens after ANSI parsing, so links work inside colored text
-									// This is a simple approach - URLs inside ANSI codes won't be linkified
-									// For more complex parsing, we'd need to track ANSI state while matching URLs
-									return `<span>${parsedAnsi}</span>`;
-								}
-							})
-							.join(' ');
-					}
+				// Format each arg individually - objects are expandable
+				let argsHTML = '';
+				let detailsHTML = '';
+				if (entry.args.length > 0) {
+					argsHTML = entry.args
+						.map((arg, argIdx) => {
+							if (typeof arg === 'object' && arg !== null) {
+								// Show expandable object
+								const preview = Array.isArray(arg) ? `Array(${arg.length})` : 'Object';
+								const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
+								const uniqueId = `${index}-${argIdx}`;
+								// Store details separately to render after the row
+								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;"><pre style="margin: 0;">${jsonStr}</pre></div>`;
+								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}">${preview}</span>`;
+							} else {
+								// Parse ANSI codes first, then convert URLs to clickable links
+								const argStr = String(arg);
+								const parsedAnsi = parseAnsiToHtml(argStr);
+								// Note: URL linking happens after ANSI parsing, so links work inside colored text
+								// This is a simple approach - URLs inside ANSI codes won't be linkified
+								// For more complex parsing, we'd need to track ANSI state while matching URLs
+								return `<span>${parsedAnsi}</span>`;
+							}
+						})
+						.join(' ');
+				}
 
-					// Filter icons column (only when expanded)
-					const iconsCol = filterExpanded
-						? `<div class="gg-log-icons" data-namespace="${ns}">` +
-							`<button class="gg-icon-hide" title="Hide this namespace">🗑</button>` +
-							`<button class="gg-icon-solo" title="Show only this namespace">🎯</button>` +
-							`</div>`
-						: '';
-
-					// When filter expanded, diff+ns are clickable (solo) with data-namespace
-					const soloAttr = filterExpanded ? ` data-namespace="${ns}"` : '';
-					const soloClass = filterExpanded ? ' gg-solo-target' : '';
-
-					// Open-in-editor data attributes (file, line, col)
-					const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
-					const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
-					const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
-					let fileTitleText = '';
-					if (entry.file) {
-						if (nsClickAction === 'open' && DEV) {
-							fileTitleText = `Open in editor: ${entry.file}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}`;
-						} else if (nsClickAction === 'open-url') {
-							fileTitleText = `Open URL: ${formatString(activeFormat(), entry.file, String(entry.line || 1), String(entry.col || 1))}`;
-						} else {
-							fileTitleText = `Copy: ${formatString(activeFormat(), entry.file, String(entry.line || 1), String(entry.col || 1))}`;
-						}
-					}
-					const fileTitle = fileTitleText ? ` title="${escapeHtml(fileTitleText)}"` : '';
-
-					// Desktop: grid layout, Mobile: stacked layout
-					return (
-						`<div class="gg-log-entry">` +
-						`<div class="gg-log-header">` +
-						iconsCol +
-						`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
-						`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}${fileAttr}${lineAttr}${colAttr}${fileTitle}>${ns}</div>` +
-						`<div class="gg-log-handle"></div>` +
-						`</div>` +
-						`<div class="gg-log-content"${entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
-						detailsHTML +
+				// Filter icons column (only when expanded)
+				const iconsCol = filterExpanded
+					? `<div class="gg-log-icons" data-namespace="${ns}">` +
+						`<button class="gg-icon-hide" title="Hide this namespace">🗑</button>` +
+						`<button class="gg-icon-solo" title="Show only this namespace">🎯</button>` +
 						`</div>`
-					);
-				})
-				.join('')}</div>`;
+					: '';
+
+				// When filter expanded, diff+ns are clickable (solo) with data-namespace
+				const soloAttr = filterExpanded ? ` data-namespace="${ns}"` : '';
+				const soloClass = filterExpanded ? ' gg-solo-target' : '';
+
+				// Open-in-editor data attributes (file, line, col)
+				const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
+				const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
+				const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
+				let fileTitleText = '';
+				if (entry.file) {
+					if (nsClickAction === 'open' && DEV) {
+						fileTitleText = `Open in editor: ${entry.file}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}`;
+					} else if (nsClickAction === 'open-url') {
+						fileTitleText = `Open URL: ${formatString(activeFormat(), entry.file, String(entry.line || 1), String(entry.col || 1))}`;
+					} else {
+						fileTitleText = `Copy: ${formatString(activeFormat(), entry.file, String(entry.line || 1), String(entry.col || 1))}`;
+					}
+				}
+				const fileTitle = fileTitleText ? ` title="${escapeHtml(fileTitleText)}"` : '';
+
+				// Desktop: grid layout, Mobile: stacked layout
+				return (
+					`<div class="gg-log-entry">` +
+					`<div class="gg-log-header">` +
+					iconsCol +
+					`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
+					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}${fileAttr}${lineAttr}${colAttr}${fileTitle}>${ns}</div>` +
+					`<div class="gg-log-handle"></div>` +
+					`</div>` +
+					`<div class="gg-log-content"${entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
+					detailsHTML +
+					`</div>`
+				);
+			})
+			.join('')}</div>`;
 
 		logContainer.html(logsHTML);
 
