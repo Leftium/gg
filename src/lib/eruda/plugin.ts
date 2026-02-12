@@ -438,6 +438,19 @@ export function createGgPlugin(
 			.gg-log-ns[data-file]:hover::after {
 				opacity: 1;
 			}
+			/* Clickable namespace segments */
+			.gg-ns-segment {
+				cursor: pointer;
+				padding: 1px 2px;
+				border-radius: 2px;
+				transition: background 0.1s;
+			}
+			.gg-ns-segment:hover {
+				background: rgba(0,0,0,0.1);
+				text-decoration: underline;
+				text-decoration-style: solid;
+				text-underline-offset: 2px;
+			}
 			.gg-details {
 				grid-column: 1 / -1;
 				border-top: none;
@@ -1404,6 +1417,40 @@ export function createGgPlugin(
 				return;
 			}
 
+			// Handle clicking namespace segments
+			if (target?.classList?.contains('gg-ns-segment')) {
+				// When filter is collapsed, open in editor instead of filtering
+				if (!filterExpanded) {
+					const nsContainer = target.closest('.gg-log-ns') as HTMLElement;
+					if (nsContainer?.hasAttribute('data-file')) {
+						handleNamespaceClick(nsContainer);
+					}
+					return;
+				}
+
+				// When filter is expanded, apply hierarchical filtering
+				const filter = target.getAttribute('data-filter');
+				if (!filter) return;
+
+				// Toggle behavior: if already at this filter, restore all
+				if (filterPattern === filter) {
+					filterPattern = 'gg:*';
+					enabledNamespaces.clear();
+					getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
+				} else {
+					filterPattern = filter;
+					enabledNamespaces.clear();
+					getAllCapturedNamespaces()
+						.filter((ns) => namespaceMatchesPattern(ns, filter))
+						.forEach((ns) => enabledNamespaces.add(ns));
+				}
+
+				localStorage.setItem(FILTER_KEY, filterPattern);
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
 			// Handle clicking namespace to open in editor (when filter collapsed)
 			if (
 				target?.classList?.contains('gg-log-ns') &&
@@ -1622,6 +1669,20 @@ export function createGgPlugin(
 				const diff = `+${humanize(entry.diff)}`;
 				const ns = escapeHtml(entry.namespace);
 
+				// Split namespace into clickable segments
+				const nsSegments = entry.namespace.split(':');
+				let nsHTML = '';
+				for (let i = 0; i < nsSegments.length; i++) {
+					const segment = escapeHtml(nsSegments[i]);
+					// Build the filter pattern for this segment
+					const filterPattern =
+						nsSegments.slice(0, i + 1).join(':') + (i < nsSegments.length - 1 ? ':*' : '');
+					nsHTML += `<span class="gg-ns-segment" data-filter="${escapeHtml(filterPattern)}">${segment}</span>`;
+					if (i < nsSegments.length - 1) {
+						nsHTML += ':';
+					}
+				}
+
 				// Format each arg individually - objects are expandable
 				let argsHTML = '';
 				let detailsHTML = '';
@@ -1732,7 +1793,7 @@ export function createGgPlugin(
 					`<div class="gg-log-header">` +
 					iconsCol +
 					`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
-					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}${fileAttr}${lineAttr}${colAttr}${fileTitle}>${ns}</div>` +
+					`<div class="gg-log-ns${soloClass}" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"${fileAttr}${lineAttr}${colAttr}${fileTitle}>${nsHTML}</div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
 					`<div class="gg-log-content"${!entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}${stackHTML}</div>` +

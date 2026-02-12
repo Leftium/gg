@@ -200,3 +200,47 @@ export function testTrace() {
 	const val = gg.trace('trace returns this', { extra: 'data' });
 	gg(`trace returned: ${val}`);
 }
+
+export function testNamespaceSegments() {
+	// Generate test data with multi-level namespaces to demonstrate clickable segments
+	const messages = [
+		'Processing request',
+		'Data loaded successfully',
+		'Updating state',
+		'Rendering component',
+		'API call completed',
+		'Event triggered',
+		'Validation passed',
+		'Cache hit'
+	];
+
+	// rift namespace hierarchy (gg: prefix is added automatically)
+	gg.ns('rift:transcription:interim', messages[0], { confidence: 0.85 });
+	gg.ns('rift:transcription:final', messages[1], { confidence: 0.98 });
+	gg.ns('rift:audio:recording', messages[2], { duration: '1.2s' });
+	gg.ns('rift:audio:playback', messages[3], { volume: 0.8 });
+	gg.ns('rift:websocket:connect', messages[4], { url: 'ws://localhost' });
+	gg.ns('rift:websocket:message', messages[5], { type: 'audio' });
+
+	// routes namespace hierarchy
+	gg.ns('routes:home:load', messages[6]);
+	gg.ns('routes:home:render', messages[7]);
+	gg.ns('routes:about:load', messages[0]);
+
+	// components namespace hierarchy
+	gg.ns('components:header:mount', messages[1]);
+	gg.ns('components:footer:mount', messages[2]);
+
+	// api namespace hierarchy
+	gg.ns('api:users:fetch', messages[3], { count: 10 });
+	gg.ns('api:users:create', messages[4], { id: 42 });
+	gg.ns('api:posts:list', messages[5], { page: 1 });
+
+	// utils namespace hierarchy
+	gg.ns('utils:format:date', messages[6], { format: 'ISO8601' });
+	gg.ns('utils:format:currency', messages[7], { locale: 'en-US' });
+
+	gg.info(
+		'Generated 16 test logs with multi-level namespaces. Click namespace segments to filter!'
+	);
+}
