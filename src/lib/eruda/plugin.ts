@@ -51,8 +51,12 @@ export function createGgPlugin(
 	// Settings UI state
 	let settingsExpanded = false;
 
+	// Expression visibility toggle
+	let showExpressions = false;
+
 	// Filter pattern persistence key (independent of localStorage.debug)
 	const FILTER_KEY = 'gg-filter';
+	const SHOW_EXPRESSIONS_KEY = 'gg-show-expressions';
 
 	// Namespace click action: 'open' uses Vite dev middleware, 'copy' copies formatted string, 'open-url' navigates to URI
 	const NS_ACTION_KEY = 'gg-ns-action';
@@ -147,6 +151,7 @@ export function createGgPlugin(
 			// Load filter state BEFORE registering _onLog hook, because setting _onLog
 			// triggers replay of earlyLogBuffer and each entry checks filterPattern
 			filterPattern = localStorage.getItem(FILTER_KEY) || 'gg:*';
+			showExpressions = localStorage.getItem(SHOW_EXPRESSIONS_KEY) === 'true';
 
 			// Register the capture hook on gg
 			if (gg) {
@@ -610,14 +615,14 @@ export function createGgPlugin(
 				.gg-log-handle.gg-dragging {
 					background: rgba(0,0,0,0.15);
 				}
-				.gg-log-content {
-					word-break: break-word;
-					padding: 4px 0;
-					position: relative;
-					-webkit-user-select: text !important;
-					user-select: text !important;
-					cursor: text;
-				}
+			.gg-log-content {
+				word-break: break-word;
+				padding: 4px 0;
+				position: relative;
+				-webkit-user-select: text !important;
+				user-select: text !important;
+				cursor: text;
+			}
 				.gg-log-content * {
 					-webkit-user-select: text !important;
 					user-select: text !important;
@@ -667,6 +672,20 @@ export function createGgPlugin(
 				}
 				.gg-log-content[data-src]:not(:has(.gg-expand)):hover::after {
 					opacity: 1;
+				}
+				/* Inline expression label (shown when expression toggle is on) */
+				.gg-inline-expr {
+					color: #888;
+					font-style: italic;
+					font-size: 11px;
+				}
+				/* When expressions are shown inline, suppress the CSS tooltip and magnifying glass on primitives */
+				.gg-show-expr .gg-log-content[data-src] {
+					cursor: text;
+				}
+				.gg-show-expr .gg-log-content[data-src]:not(:has(.gg-expand))::before,
+				.gg-show-expr .gg-log-content[data-src]:not(:has(.gg-expand))::after {
+					display: none;
 				}
 				/* Expression icon inline with expandable object labels */
 				.gg-src-icon {
@@ -976,6 +995,10 @@ export function createGgPlugin(
 				<span class="gg-btn-icon">NS: </span>
 				<span class="gg-filter-summary"></span>
 			</button>
+			<button class="gg-expressions-btn" style="background: ${showExpressions ? '#e8f5e9' : 'transparent'};" title="Toggle expression visibility in logs and clipboard">
+				<span class="gg-btn-text">\uD83D\uDD0D Expr</span>
+				<span class="gg-btn-icon" title="Expressions">\uD83D\uDD0D</span>
+			</button>
 				<span style="flex: 1;"></span>
 				<button class="gg-settings-btn">
 					<span class="gg-btn-text">⚙️ Settings</span>
@@ -988,7 +1011,7 @@ export function createGgPlugin(
 			</div>
 				<div class="gg-filter-panel"></div>
 				<div class="gg-settings-panel"></div>
-				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
+				<div class="gg-log-container" style="flex: 1; overflow-y: auto; overflow-x: hidden; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
 				<div class="gg-toast"></div>
 				<iframe class="gg-editor-iframe" hidden title="open-in-editor"></iframe>
 			</div>
@@ -1460,6 +1483,9 @@ export function createGgPlugin(
 					const time = new Date(e.timestamp).toISOString().slice(11, 19);
 					// Trim namespace and strip 'gg:' prefix to save tokens
 					const ns = e.namespace.trim().replace(/^gg:/, '');
+					// Include expression suffix when toggle is enabled
+					const hasSrcExpr = !e.level && e.src?.trim() && !/^['"`]/.test(e.src);
+					const exprSuffix = showExpressions && hasSrcExpr ? ` \u2039${e.src}\u203A` : '';
 					// Format args: compact JSON for objects, primitives as-is
 					const argsStr = e.args
 						.map((arg) => {
@@ -1470,7 +1496,7 @@ export function createGgPlugin(
 							return stripAnsi(String(arg));
 						})
 						.join(' ');
-					return `${time} ${ns} ${argsStr}`;
+					return `${time} ${ns} ${argsStr}${exprSuffix}`;
 				})
 				.join('\n');
 
@@ -1485,6 +1511,15 @@ export function createGgPlugin(
 				document.execCommand('copy');
 				document.body.removeChild(textarea);
 			}
+		});
+
+		$el.find('.gg-expressions-btn').on('click', () => {
+			showExpressions = !showExpressions;
+			localStorage.setItem(SHOW_EXPRESSIONS_KEY, String(showExpressions));
+			// Update button styling inline (toolbar is not re-rendered by renderLogs)
+			const btn = $el!.find('.gg-expressions-btn').get(0);
+			if (btn) btn.style.background = showExpressions ? '#e8f5e9' : 'transparent';
+			renderLogs();
 		});
 	}
 
@@ -1937,6 +1972,9 @@ export function createGgPlugin(
 
 				const time = new Date(entry.timestamp).toISOString().slice(11, 19);
 				const ns = entry.namespace.trim().replace(/^gg:/, '');
+				// Include expression suffix when toggle is enabled
+				const hasSrcExpr = !entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src);
+				const exprSuffix = showExpressions && hasSrcExpr ? ` \u2039${entry.src}\u203A` : '';
 				const argsStr = entry.args
 					.map((arg) => {
 						if (typeof arg === 'object' && arg !== null) {
@@ -1945,7 +1983,7 @@ export function createGgPlugin(
 						return stripAnsi(String(arg));
 					})
 					.join(' ');
-				const text = `${time} ${ns} ${argsStr}`;
+				const text = `${time} ${ns} ${argsStr}${exprSuffix}`;
 
 				navigator.clipboard.writeText(text).then(() => {
 					showConfirmationTooltip(containerEl, contentEl, 'Copied message');
@@ -2168,7 +2206,7 @@ export function createGgPlugin(
 			return;
 		}
 
-		const logsHTML = `<div class="gg-log-grid${filterExpanded ? ' filter-mode' : ''}" style="grid-template-columns: ${gridColumns()};">${entries
+		const logsHTML = `<div class="gg-log-grid${filterExpanded ? ' filter-mode' : ''}${showExpressions ? ' gg-show-expr' : ''}" style="grid-template-columns: ${gridColumns()};">${entries
 			.map((entry: CapturedEntry, index: number) => {
 				const color = entry.color || '#0066cc';
 				const diff = `+${humanize(entry.diff)}`;
@@ -2236,7 +2274,7 @@ export function createGgPlugin(
 							return `<tr>${cells}</tr>`;
 						})
 						.join('');
-					argsHTML = `<table style="border-collapse: collapse; margin: 2px 0; font-family: monospace;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRowsHtml}</tbody></table>`;
+					argsHTML = `<div style="overflow-x: auto;"><table style="border-collapse: collapse; margin: 2px 0; font-family: monospace;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRowsHtml}</tbody></table></div>`;
 				} else if (entry.args.length > 0) {
 					argsHTML = entry.args
 						.map((arg, argIdx) => {
@@ -2252,7 +2290,12 @@ export function createGgPlugin(
 								// data-entry/data-arg for hover tooltip lookup, data-src for expression context
 								const srcAttr = srcExpr ? ` data-src="${srcExpr}"` : '';
 								const srcIcon = srcExpr ? `<span class="gg-src-icon">\uD83D\uDD0D</span>` : '';
-								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}</span>`;
+								// Show expression inline after preview when toggle is enabled
+								const inlineExpr =
+									showExpressions && srcExpr
+										? ` <span class="gg-inline-expr">\u2039${srcExpr}\u203A</span>`
+										: '';
+								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}${inlineExpr}</span>`;
 							} else {
 								// Parse ANSI codes first, then convert URLs to clickable links
 								const argStr = String(arg);
@@ -2293,6 +2336,15 @@ export function createGgPlugin(
 				}
 
 				// Desktop: grid layout, Mobile: stacked layout
+				// Expression tooltip: skip table entries (tableData) -- expression is just gg.table(...) which isn't useful
+				const hasSrcExpr =
+					!entry.level && !entry.tableData && entry.src?.trim() && !/^['"`]/.test(entry.src);
+				// For primitives-only entries, append inline expression when showExpressions is enabled
+				const inlineExprForPrimitives =
+					showExpressions && hasSrcExpr && !argsHTML.includes('gg-expand')
+						? ` <span class="gg-inline-expr">\u2039${escapeHtml(entry.src!)}\u203A</span>`
+						: '';
+
 				return (
 					`<div class="gg-log-entry${levelClass}" data-entry="${index}">` +
 					`<div class="gg-log-header">` +
@@ -2300,7 +2352,7 @@ export function createGgPlugin(
 					`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
-					`<div class="gg-log-content"${!entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}${stackHTML}</div>` +
+					`<div class="gg-log-content"${hasSrcExpr ? ` data-src="${escapeHtml(entry.src!)}"` : ''}>${argsHTML}${inlineExprForPrimitives}${stackHTML}</div>` +
 					detailsHTML +
 					`</div>`
 				);

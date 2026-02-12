@@ -11,7 +11,8 @@
 		testTable,
 		testTimers,
 		testTrace,
-		testNamespaceSegments
+		testNamespaceSegments,
+		testExpressions
 	} from './demo-helpers.js';
 
 	// Early log buffer in gg.ts handles buffering before Eruda loads
@@ -42,6 +43,7 @@
 	<button onclick={testTextStyling}>✨ Text Styling (bold/italic)</button>
 	<button onclick={() => gg.ns('$NS:click', 'template event handler')}>🔬 Template gg()</button>
 	<button onclick={testNamespaceSegments}>🔗 Namespace Segments</button>
+	<button onclick={testExpressions}>🔍 Test Expressions</button>
 </div>
 
 <h3>Console-like Methods</h3>

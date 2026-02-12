@@ -157,6 +157,34 @@ export function testTable() {
 		['name', 'role']
 	);
 
+	// Wide table to test horizontal scrollbar (should not overflow panel)
+	gg.table([
+		{
+			id: 1,
+			firstName: 'Christopher',
+			lastName: 'Washington',
+			email: 'christopher.washington@example.com',
+			phone: '+1-555-123-4567',
+			address: '123 Long Street Name Avenue',
+			city: 'San Francisco',
+			state: 'CA',
+			zipCode: '94102',
+			country: 'United States'
+		},
+		{
+			id: 2,
+			firstName: 'Elizabeth',
+			lastName: 'Montgomery',
+			email: 'elizabeth.montgomery@example.com',
+			phone: '+1-555-987-6543',
+			address: '456 Another Very Long Address',
+			city: 'Los Angeles',
+			state: 'CA',
+			zipCode: '90001',
+			country: 'United States'
+		}
+	]);
+
 	// Passthrough: returns the original data
 	const data = gg.table([{ x: 1 }, { x: 2 }]);
 	gg('table returned:', data);
@@ -199,6 +227,31 @@ export function testTrace() {
 	// Passthrough
 	const val = gg.trace('trace returns this', { extra: 'data' });
 	gg(`trace returned: ${val}`);
+}
+
+export function testExpressions() {
+	// Primitive values with expressions
+	const count = 42;
+	const name = 'Alice';
+	const isActive = true;
+
+	gg(count);
+	gg(name);
+	gg(isActive);
+	gg(count + 10);
+	gg(name.toUpperCase());
+
+	// Object with expression
+	const user = { name: 'Bob', age: 25 };
+	gg(user);
+	gg(user.name);
+
+	// Array with expression
+	const items = ['apple', 'banana', 'cherry'];
+	gg(items);
+	gg(items.length);
+
+	gg.info('Toggle the Expr button in the toolbar to see expressions inline and in clipboard!');
 }
 
 export function testNamespaceSegments() {
