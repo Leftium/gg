@@ -250,6 +250,46 @@ export function createGgPlugin(
 		});
 	}
 
+	function toggleNamespaces(namespaces: string[], enable: boolean) {
+		const currentPattern = filterPattern || 'gg:*';
+		let parts = currentPattern
+			.split(',')
+			.map((p) => p.trim())
+			.filter(Boolean);
+
+		namespaces.forEach((namespace) => {
+			const ns = namespace.trim();
+			if (enable) {
+				// Remove any exclusion for this namespace
+				parts = parts.filter((p) => p !== `-${ns}`);
+			} else {
+				// Add exclusion if not already present
+				const exclusion = `-${ns}`;
+				if (!parts.includes(exclusion)) {
+					parts.push(exclusion);
+				}
+			}
+		});
+
+		filterPattern = parts.join(',');
+
+		// Simplify pattern
+		filterPattern = simplifyPattern(filterPattern);
+
+		// Sync enabledNamespaces from the NEW pattern
+		const allNamespaces = getAllCapturedNamespaces();
+		enabledNamespaces.clear();
+		const effectivePattern = filterPattern || 'gg:*';
+		allNamespaces.forEach((ns) => {
+			if (namespaceMatchesPattern(ns, effectivePattern)) {
+				enabledNamespaces.add(ns);
+			}
+		});
+
+		// Persist the new pattern
+		localStorage.setItem(FILTER_KEY, filterPattern);
+	}
+
 	function soloNamespace(namespace: string) {
 		const ns = namespace.trim();
 
@@ -955,6 +995,22 @@ export function createGgPlugin(
 				return;
 			}
 
+			// Handle "other" checkbox
+			if (target.classList.contains('gg-other-checkbox')) {
+				const otherNamespacesJson = target.getAttribute('data-other-namespaces');
+				if (!otherNamespacesJson) return;
+
+				const otherNamespaces = JSON.parse(otherNamespacesJson) as string[];
+
+				// Toggle all "other" namespaces at once
+				toggleNamespaces(otherNamespaces, target.checked);
+
+				// localStorage already saved in toggleNamespaces()
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
 			// Handle individual namespace checkboxes
 			if (target.classList.contains('gg-ns-checkbox')) {
 				const namespace = target.getAttribute('data-namespace');
@@ -1000,24 +1056,58 @@ export function createGgPlugin(
 			if (simple && allNamespaces.length > 0) {
 				const allChecked = enabledCount === totalCount;
 
+				// Count frequency of each namespace in the buffer
+				const allEntries = buffer.getEntries();
+				const nsCounts = new Map<string, number>();
+				allEntries.forEach((entry: CapturedEntry) => {
+					nsCounts.set(entry.namespace, (nsCounts.get(entry.namespace) || 0) + 1);
+				});
+
+				// Sort ALL namespaces by frequency (most common first)
+				const sortedAllNamespaces = [...allNamespaces].sort(
+					(a, b) => (nsCounts.get(b) || 0) - (nsCounts.get(a) || 0)
+				);
+
+				// Take top 5 most common (regardless of enabled state)
+				const displayedNamespaces = sortedAllNamespaces.slice(0, 5);
+
+				// Calculate "other" namespaces (not in top 5)
+				const displayedSet = new Set(displayedNamespaces);
+				const otherNamespaces = allNamespaces.filter((ns) => !displayedSet.has(ns));
+				const otherEnabledCount = otherNamespaces.filter((ns) => enabledNamespaces.has(ns)).length;
+				const otherTotalCount = otherNamespaces.length;
+				const otherChecked = otherEnabledCount > 0;
+				const otherCount = otherNamespaces.reduce((sum, ns) => sum + (nsCounts.get(ns) || 0), 0);
+
 				checkboxesHTML = `
 				<div class="gg-filter-checkboxes">
 					<label class="gg-filter-checkbox" style="font-weight: bold;">
 						<input type="checkbox" class="gg-all-checkbox" ${allChecked ? 'checked' : ''}>
 						<span>ALL</span>
 					</label>
-					${allNamespaces
+					${displayedNamespaces
 						.map((ns) => {
 							// Check if namespace matches the current pattern
 							const checked = namespaceMatchesPattern(ns, effectivePattern);
+							const count = nsCounts.get(ns) || 0;
 							return `
 							<label class="gg-filter-checkbox">
 								<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
-								<span>${escapeHtml(ns)}</span>
+								<span>${escapeHtml(ns)} (${count})</span>
 							</label>
 						`;
 						})
 						.join('')}
+					${
+						otherTotalCount > 0
+							? `
+					<label class="gg-filter-checkbox" style="opacity: 0.7;">
+						<input type="checkbox" class="gg-other-checkbox" ${otherChecked ? 'checked' : ''} data-other-namespaces='${JSON.stringify(otherNamespaces)}'>
+						<span>other (${otherCount})</span>
+					</label>
+					`
+							: ''
+					}
 				</div>
 			`;
 			} else if (!simple) {
