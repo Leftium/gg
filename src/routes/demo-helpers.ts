@@ -3,7 +3,7 @@
  * Imported from +page.svelte to demonstrate that gg() call-site
  * metadata works correctly from imported .ts files too.
  */
-import { gg, fg, bg } from '$lib/index.js';
+import { gg, fg, bg, bold, italic, underline, dim } from '$lib/index.js';
 
 export function testManualNs() {
 	// Plain label (no template variables) - used as-is
@@ -46,6 +46,38 @@ export function testAnsiColors() {
 
 	// Test custom hex colors with chaining
 	gg(fg('#ff6347').bg('#98fb98')`Tomato on pale green`);
+}
+
+export function testTextStyling() {
+	// Standalone text styles
+	gg(bold()`Bold text`);
+	gg(italic()`Italic text`);
+	gg(underline()`Underlined text`);
+	gg(dim()`Dimmed text`);
+
+	// Combined with colors
+	gg(fg('red').bold()`Bold red error`);
+	gg(fg('green').bold()`Bold green success`);
+	gg(bg('yellow').italic()`Italic on yellow background`);
+	gg(fg('blue').bg('white').underline()`Blue underlined on white`);
+	gg(fg('gray').dim()`Dimmed gray text`);
+
+	// Multiple styles chained
+	gg(bold().italic()`Bold and italic`);
+	gg(bold().underline()`Bold and underlined`);
+	gg(fg('red').bold().underline()`Bold underlined red`);
+	gg(fg('white').bg('blue').bold().italic()`All styles combined`);
+
+	// Reusable style presets
+	const finalStyle = fg('green').bold();
+	const interimStyle = fg('gray');
+
+	gg(finalStyle`final` + ' seg=0 "my name is John Kim Murphy" 96%');
+	gg(interimStyle`interim` + ' seg=0 "my name is John Kim Murphy" 90%');
+
+	// Mixed inline styling
+	gg(bold()`Important:` + ' normal text ' + italic()`with emphasis`);
+	gg(fg('red').bold()`Error:` + ' ' + underline()`Connection failed`);
 }
 
 export function testInfo() {

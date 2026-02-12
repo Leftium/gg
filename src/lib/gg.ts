@@ -950,9 +950,13 @@ function formatTable(data: unknown, columns?: string[]): TableResult {
 type ColorTagFunction = (strings: TemplateStringsArray, ...values: unknown[]) => string;
 
 interface ChainableColorFn extends ColorTagFunction {
-	// Method chaining: fg('red').bg('green')
+	// Method chaining: fg('red').bg('green').bold()
 	fg: (color: string) => ChainableColorFn;
 	bg: (color: string) => ChainableColorFn;
+	bold: () => ChainableColorFn;
+	italic: () => ChainableColorFn;
+	underline: () => ChainableColorFn;
+	dim: () => ChainableColorFn;
 }
 
 /**
@@ -1027,28 +1031,58 @@ function parseColor(color: string): { r: number; g: number; b: number } | null {
 }
 
 /**
+ * ANSI style codes for text formatting
+ */
+const STYLE_CODES = {
+	bold: '\x1b[1m',
+	dim: '\x1b[2m',
+	italic: '\x1b[3m',
+	underline: '\x1b[4m'
+} as const;
+
+/**
  * Internal helper to create chainable color function with method chaining
  */
-function createColorFunction(fgCode: string = '', bgCode: string = ''): ChainableColorFn {
+function createColorFunction(
+	fgCode: string = '',
+	bgCode: string = '',
+	styleCode: string = ''
+): ChainableColorFn {
 	const tagFn = function (strings: TemplateStringsArray, ...values: unknown[]): string {
 		const text = strings.reduce(
 			(acc, str, i) => acc + str + (values[i] !== undefined ? String(values[i]) : ''),
 			''
 		);
-		return fgCode + bgCode + text + '\x1b[0m';
+		return fgCode + bgCode + styleCode + text + '\x1b[0m';
 	};
 
 	// Add method chaining
 	tagFn.fg = (color: string) => {
 		const rgb = parseColor(color);
 		const newFgCode = rgb ? `\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
-		return createColorFunction(newFgCode, bgCode);
+		return createColorFunction(newFgCode, bgCode, styleCode);
 	};
 
 	tagFn.bg = (color: string) => {
 		const rgb = parseColor(color);
 		const newBgCode = rgb ? `\x1b[48;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
-		return createColorFunction(fgCode, newBgCode);
+		return createColorFunction(fgCode, newBgCode, styleCode);
+	};
+
+	tagFn.bold = () => {
+		return createColorFunction(fgCode, bgCode, styleCode + STYLE_CODES.bold);
+	};
+
+	tagFn.italic = () => {
+		return createColorFunction(fgCode, bgCode, styleCode + STYLE_CODES.italic);
+	};
+
+	tagFn.underline = () => {
+		return createColorFunction(fgCode, bgCode, styleCode + STYLE_CODES.underline);
+	};
+
+	tagFn.dim = () => {
+		return createColorFunction(fgCode, bgCode, styleCode + STYLE_CODES.dim);
 	};
 
 	return tagFn as ChainableColorFn;
@@ -1082,6 +1116,55 @@ export function bg(color: string): ChainableColorFn {
 	const rgb = parseColor(color);
 	const bgCode = rgb ? `\x1b[48;2;${rgb.r};${rgb.g};${rgb.b}m` : '';
 	return createColorFunction('', bgCode);
+}
+
+/**
+ * Bold text style
+ * Can be used directly or chained with colors
+ *
+ * @example
+ * gg(bold()`Important text`);
+ * gg(bold().fg('red')`Bold red error`);
+ * gg(fg('green').bold()`Bold green success`);
+ */
+export function bold(): ChainableColorFn {
+	return createColorFunction('', '', STYLE_CODES.bold);
+}
+
+/**
+ * Italic text style
+ * Can be used directly or chained with colors
+ *
+ * @example
+ * gg(italic()`Emphasized text`);
+ * gg(italic().fg('blue')`Italic blue`);
+ */
+export function italic(): ChainableColorFn {
+	return createColorFunction('', '', STYLE_CODES.italic);
+}
+
+/**
+ * Underline text style
+ * Can be used directly or chained with colors
+ *
+ * @example
+ * gg(underline()`Underlined text`);
+ * gg(underline().fg('cyan')`Underlined cyan`);
+ */
+export function underline(): ChainableColorFn {
+	return createColorFunction('', '', STYLE_CODES.underline);
+}
+
+/**
+ * Dim text style (faint/dimmed appearance)
+ * Can be used directly or chained with colors
+ *
+ * @example
+ * gg(dim()`Less important text`);
+ * gg(dim().fg('white')`Dimmed white`);
+ */
+export function dim(): ChainableColorFn {
+	return createColorFunction('', '', STYLE_CODES.dim);
 }
 
 /**

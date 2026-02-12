@@ -4,6 +4,7 @@
 	import {
 		testManualNs,
 		testAnsiColors,
+		testTextStyling,
 		testInfo,
 		testWarnError,
 		testAssert,
@@ -37,6 +38,7 @@
 	<button onclick={testLog}>🧪 Test gg() Log</button>
 	<button onclick={testManualNs}>🏷️ gg.ns() Templates</button>
 	<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
+	<button onclick={testTextStyling}>✨ Text Styling (bold/italic)</button>
 	<button onclick={() => gg.ns('$NS:click', 'template event handler')}>🔬 Template gg()</button>
 </div>
 

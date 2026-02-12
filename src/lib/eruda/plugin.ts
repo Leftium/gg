@@ -1831,6 +1831,7 @@ export function createGgPlugin(
 	 * Supports:
 	 * - Basic 3/4-bit colors: \x1b[31m (fg red), \x1b[41m (bg red), \x1b[91m (bright fg), etc.
 	 * - 24-bit RGB: \x1b[38;2;r;g;bm (foreground), \x1b[48;2;r;g;bm (background)
+	 * - Text styles: \x1b[1m (bold), \x1b[2m (dim), \x1b[3m (italic), \x1b[4m (underline)
 	 * - Reset: \x1b[0m
 	 */
 	function parseAnsiToHtml(text: string): string {
@@ -1842,13 +1843,25 @@ export function createGgPlugin(
 		let lastIndex = 0;
 		let currentFg: string | null = null;
 		let currentBg: string | null = null;
+		let currentBold = false;
+		let currentDim = false;
+		let currentItalic = false;
+		let currentUnderline = false;
 		let match;
 
 		while ((match = ansiRegex.exec(text)) !== null) {
 			// Add text before this code (with current styling)
 			const textBefore = text.slice(lastIndex, match.index);
 			if (textBefore) {
-				html += wrapWithStyle(escapeHtml(textBefore), currentFg, currentBg);
+				html += wrapWithStyle(
+					escapeHtml(textBefore),
+					currentFg,
+					currentBg,
+					currentBold,
+					currentDim,
+					currentItalic,
+					currentUnderline
+				);
 			}
 
 			// Parse the ANSI code
@@ -1856,9 +1869,35 @@ export function createGgPlugin(
 			const parts = code.split(';').map(Number);
 
 			if (parts[0] === 0) {
-				// Reset
+				// Reset all
 				currentFg = null;
 				currentBg = null;
+				currentBold = false;
+				currentDim = false;
+				currentItalic = false;
+				currentUnderline = false;
+			} else if (parts[0] === 1) {
+				// Bold
+				currentBold = true;
+			} else if (parts[0] === 2) {
+				// Dim/Faint
+				currentDim = true;
+			} else if (parts[0] === 3) {
+				// Italic
+				currentItalic = true;
+			} else if (parts[0] === 4) {
+				// Underline
+				currentUnderline = true;
+			} else if (parts[0] === 22) {
+				// Normal intensity (not bold, not dim)
+				currentBold = false;
+				currentDim = false;
+			} else if (parts[0] === 23) {
+				// Not italic
+				currentItalic = false;
+			} else if (parts[0] === 24) {
+				// Not underlined
+				currentUnderline = false;
 			} else if (parts[0] === 38 && parts[1] === 2 && parts.length >= 5) {
 				// Foreground RGB: 38;2;r;g;b
 				currentFg = `rgb(${parts[2]},${parts[3]},${parts[4]})`;
@@ -1888,21 +1927,41 @@ export function createGgPlugin(
 		// Add remaining text
 		const remaining = text.slice(lastIndex);
 		if (remaining) {
-			html += wrapWithStyle(escapeHtml(remaining), currentFg, currentBg);
+			html += wrapWithStyle(
+				escapeHtml(remaining),
+				currentFg,
+				currentBg,
+				currentBold,
+				currentDim,
+				currentItalic,
+				currentUnderline
+			);
 		}
 
 		return html || escapeHtml(text);
 	}
 
 	/**
-	 * Wrap text with inline color styles
+	 * Wrap text with inline color and text style CSS
 	 */
-	function wrapWithStyle(text: string, fg: string | null, bg: string | null): string {
-		if (!fg && !bg) return text;
+	function wrapWithStyle(
+		text: string,
+		fg: string | null,
+		bg: string | null,
+		bold: boolean,
+		dim: boolean,
+		italic: boolean,
+		underline: boolean
+	): string {
+		if (!fg && !bg && !bold && !dim && !italic && !underline) return text;
 
 		const styles: string[] = [];
 		if (fg) styles.push(`color: ${fg}`);
 		if (bg) styles.push(`background-color: ${bg}`);
+		if (bold) styles.push('font-weight: bold');
+		if (dim) styles.push('opacity: 0.6');
+		if (italic) styles.push('font-style: italic');
+		if (underline) styles.push('text-decoration: underline');
 
 		return `<span style="${styles.join('; ')}">${text}</span>`;
 	}

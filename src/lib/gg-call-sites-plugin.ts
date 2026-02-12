@@ -91,6 +91,9 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// This prevents rewriting library code (including gg itself when published)
 			if (id.includes('/node_modules/')) return null;
 
+			// Don't transform the gg.ts file itself (contains gg function definitions)
+			if (id.includes('/gg.ts') || id.includes('/gg.js')) return null;
+
 			// Quick bail: no gg calls in this file
 			if (
 				!code.includes('gg(') &&

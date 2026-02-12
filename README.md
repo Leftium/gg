@@ -159,6 +159,49 @@ gg(fg('rgb(255,99,71)')`Tomato text`);
 - Node.js terminal
 - All environments that support ANSI escape codes
 
+## Text Styling (ANSI)
+
+Add visual emphasis to logs with `bold()`, `italic()`, `underline()`, and `dim()`. These can be used standalone or chained with colors:
+
+```javascript
+import { gg, fg, bg, bold, italic, underline, dim } from '@leftium/gg';
+
+// Standalone text styles
+gg(bold()`Bold text`);
+gg(italic()`Italic text`);
+gg(underline()`Underlined text`);
+gg(dim()`Dimmed/faint text`);
+
+// Combined with colors
+gg(fg('red').bold()`Bold red error`);
+gg(fg('green').bold()`Bold green success`);
+gg(bg('yellow').italic()`Italic on yellow background`);
+gg(fg('blue').underline()`Blue underlined text`);
+
+// Multiple styles chained
+gg(bold().italic()`Bold and italic`);
+gg(fg('red').bold().underline()`Bold underlined red`);
+
+// Reusable style presets
+const finalStyle = fg('green').bold();
+const interimStyle = fg('gray');
+
+gg(finalStyle`final` + ' seg=0 "my name is John Kim Murphy" 96%');
+gg(interimStyle`interim` + ' seg=0 "my name is John Kim Murphy" 90%');
+
+// Mixed inline styling
+gg(bold()`Important:` + ' normal text ' + italic()`with emphasis`);
+```
+
+**Available styles:**
+
+- `bold()` - Bold/strong text (font-weight: bold)
+- `italic()` - Italic/emphasized text (font-style: italic)
+- `underline()` - Underlined text (text-decoration: underline)
+- `dim()` - Dimmed/faint text (opacity: 0.6)
+
+Text styles work in the same environments as colors (browser console, GgConsole, terminal).
+
 ## Other Frameworks
 
 `gg()` works in any JavaScript project. The Vite plugins work with any Vite-based framework (React, Vue, Solid, etc.).
