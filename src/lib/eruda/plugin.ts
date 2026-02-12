@@ -468,15 +468,17 @@ export function createGgPlugin(
 			text-overflow: ellipsis;
 			min-width: 0;
 		}
-		.gg-ns-hide {
-			all: unset;
-			cursor: pointer;
-			opacity: 0;
-			font-size: 11px;
-			padding: 2px 4px;
-			transition: opacity 0.15s;
-			flex-shrink: 0;
-		}
+	.gg-ns-hide {
+		all: unset;
+		cursor: pointer;
+		opacity: 0;
+		font-size: 14px;
+		font-weight: bold;
+		line-height: 1;
+		padding: 1px 4px;
+		transition: opacity 0.15s;
+		flex-shrink: 0;
+	}
 		.gg-log-ns:hover .gg-ns-hide {
 			opacity: 0.4;
 		}
@@ -1548,6 +1550,128 @@ export function createGgPlugin(
 			}
 		});
 
+		// Helper: show confirmation tooltip near target element
+		function showConfirmationTooltip(containerEl: HTMLElement, target: HTMLElement, text: string) {
+			const tip = containerEl.querySelector('.gg-hover-tooltip') as HTMLElement | null;
+			if (!tip) return;
+
+			tip.textContent = text;
+			tip.style.display = 'block';
+
+			const targetRect = target.getBoundingClientRect();
+			let left = targetRect.left;
+			let top = targetRect.bottom + 4;
+
+			const tipRect = tip.getBoundingClientRect();
+			if (left + tipRect.width > window.innerWidth) {
+				left = window.innerWidth - tipRect.width - 8;
+			}
+			if (left < 4) left = 4;
+			if (top + tipRect.height > window.innerHeight) {
+				top = targetRect.top - tipRect.height - 4;
+			}
+
+			tip.style.left = `${left}px`;
+			tip.style.top = `${top}px`;
+
+			setTimeout(() => {
+				tip.style.display = 'none';
+			}, 1500);
+		}
+
+		// Right-click context actions
+		containerEl.addEventListener('contextmenu', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+
+			// Right-click namespace segment: hide that pattern
+			if (target?.classList?.contains('gg-ns-segment')) {
+				const filter = target.getAttribute('data-filter');
+				if (!filter) return;
+
+				e.preventDefault();
+
+				// Add exclusion pattern: keep current base, add -<pattern>
+				const currentPattern = filterPattern || 'gg:*';
+				const exclusion = `-${filter}`;
+
+				// Check if already excluded (toggle off)
+				const parts = currentPattern.split(',').map((p) => p.trim());
+				if (parts.includes(exclusion)) {
+					// Remove the exclusion to un-hide
+					filterPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
+				} else {
+					// Ensure we have a base inclusion pattern
+					const hasInclusion = parts.some((p) => !p.startsWith('-'));
+					if (hasInclusion) {
+						filterPattern = `${currentPattern},${exclusion}`;
+					} else {
+						filterPattern = `gg:*,${exclusion}`;
+					}
+				}
+
+				filterPattern = simplifyPattern(filterPattern);
+
+				// Sync enabledNamespaces from the new pattern
+				enabledNamespaces.clear();
+				const effectivePattern = filterPattern || 'gg:*';
+				getAllCapturedNamespaces().forEach((ns) => {
+					if (namespaceMatchesPattern(ns, effectivePattern)) {
+						enabledNamespaces.add(ns);
+					}
+				});
+
+				localStorage.setItem(FILTER_KEY, filterPattern);
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
+			// Right-click time diff: copy file location to clipboard
+			if (target?.classList?.contains('gg-log-diff') && target.hasAttribute('data-file')) {
+				e.preventDefault();
+
+				const file = target.getAttribute('data-file') || '';
+				const line = target.getAttribute('data-line');
+				const col = target.getAttribute('data-col');
+				const formatted = formatString(activeFormat(), file, line, col);
+
+				navigator.clipboard.writeText(formatted).then(() => {
+					showConfirmationTooltip(containerEl, target, `Copied: ${formatted}`);
+				});
+				return;
+			}
+
+			// Right-click message area: copy that single message
+			const contentEl = target?.closest?.('.gg-log-content') as HTMLElement | null;
+			if (contentEl) {
+				const entryEl = contentEl.closest('.gg-log-entry') as HTMLElement | null;
+				const entryIdx = entryEl?.getAttribute('data-entry');
+				if (entryIdx === null || entryIdx === undefined) return;
+
+				const entry = renderedEntries[Number(entryIdx)];
+				if (!entry) return;
+
+				e.preventDefault();
+
+				const time = new Date(entry.timestamp).toISOString().slice(11, 19);
+				const ns = entry.namespace.trim().replace(/^gg:/, '');
+				const argsStr = entry.args
+					.map((arg) => {
+						if (typeof arg === 'object' && arg !== null) {
+							return JSON.stringify(arg);
+						}
+						return stripAnsi(String(arg));
+					})
+					.join(' ');
+				const text = `${time} ${ns} ${argsStr}`;
+
+				navigator.clipboard.writeText(text).then(() => {
+					showConfirmationTooltip(containerEl, contentEl, 'Copied message');
+				});
+				return;
+			}
+		});
+
 		// Hover tooltip for expandable objects/arrays.
 		// The tooltip div is re-created after each renderLogs() call
 		// since logContainer.html() destroys children. Event listeners query it dynamically.
@@ -1869,17 +1993,6 @@ export function createGgPlugin(
 				const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
 				const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
 				const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
-				let fileTitleText = '';
-				if (entry.file) {
-					if (nsClickAction === 'open' && DEV) {
-						fileTitleText = `Open in editor: ${entry.file}${entry.line ? ':' + entry.line : ''}${entry.col ? ':' + entry.col : ''}`;
-					} else if (nsClickAction === 'open-url') {
-						fileTitleText = `Open URL: ${formatString(activeFormat(), entry.file, String(entry.line || 1), String(entry.col || 1))}`;
-					} else {
-						fileTitleText = `Copy: ${formatString(activeFormat(), entry.file, String(entry.line || 1), String(entry.col || 1))}`;
-					}
-				}
-				const fileTitle = fileTitleText ? ` title="${escapeHtml(fileTitleText)}"` : '';
 
 				// Level class for info/warn/error styling
 				const levelClass =
@@ -1902,10 +2015,10 @@ export function createGgPlugin(
 
 				// Desktop: grid layout, Mobile: stacked layout
 				return (
-					`<div class="gg-log-entry${levelClass}">` +
+					`<div class="gg-log-entry${levelClass}" data-entry="${index}">` +
 					`<div class="gg-log-header">` +
 					`<div class="gg-log-diff" style="color: ${color};"${fileAttr}${lineAttr}${colAttr}>${diff}</div>` +
-					`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">🗑</button></div>` +
+					`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
 					`<div class="gg-log-content"${!entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}${stackHTML}</div>` +
