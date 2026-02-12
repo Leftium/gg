@@ -582,7 +582,16 @@ export function createGgPlugin(
 					padding-bottom: 4px;
 					border-bottom: 1px solid #ddd;
 				}
-				/* Level-based styling for warn/error entries */
+				/* Level-based styling for info/warn/error entries */
+				.gg-level-info .gg-log-diff,
+				.gg-level-info .gg-log-ns,
+				.gg-level-info .gg-log-content {
+					background: rgba(23, 162, 184, 0.08);
+				}
+				.gg-level-info .gg-log-content {
+					border-left: 3px solid #17a2b8;
+					padding-left: 6px;
+				}
 				.gg-level-warn .gg-log-diff,
 				.gg-level-warn .gg-log-ns,
 				.gg-level-warn .gg-log-content {
@@ -1698,13 +1707,15 @@ export function createGgPlugin(
 				}
 				const fileTitle = fileTitleText ? ` title="${escapeHtml(fileTitleText)}"` : '';
 
-				// Level class for warn/error styling
+				// Level class for info/warn/error styling
 				const levelClass =
-					entry.level === 'warn'
-						? ' gg-level-warn'
-						: entry.level === 'error'
-							? ' gg-level-error'
-							: '';
+					entry.level === 'info'
+						? ' gg-level-info'
+						: entry.level === 'warn'
+							? ' gg-level-warn'
+							: entry.level === 'error'
+								? ' gg-level-error'
+								: '';
 
 				// Stack trace toggle (for error/trace entries with captured stacks)
 				let stackHTML = '';

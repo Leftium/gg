@@ -48,6 +48,17 @@ export function testAnsiColors() {
 	gg(fg('#ff6347').bg('#98fb98')`Tomato on pale green`);
 }
 
+export function testInfo() {
+	// gg.info - informational level (blue badge)
+	gg.info('System startup complete');
+	gg.info('Connected to database', { host: 'localhost', port: 5432 });
+	gg.info('Configuration loaded', { env: 'development', debug: true });
+
+	// Passthrough demo: info returns the first argument
+	const config = gg.info({ theme: 'dark', locale: 'en-US' });
+	gg(`info returned:`, config);
+}
+
 export function testWarnError() {
 	// gg.warn - warning level
 	gg.warn('This API is deprecated, use v2 instead');

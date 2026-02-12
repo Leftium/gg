@@ -247,7 +247,7 @@ function openInEditorUrl(fileName: string, line?: number, col?: number) {
 /**
  * Hook for capturing gg() output (used by Eruda plugin)
  */
-type LogLevel = 'debug' | 'warn' | 'error';
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 interface CapturedEntry {
 	namespace: string;
@@ -381,8 +381,10 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		returnValue = args[0];
 	}
 
-	// Add level prefix emoji for warn/error
-	if (level === 'warn') {
+	// Add level prefix emoji for info/warn/error
+	if (level === 'info') {
+		logArgs[0] = `ℹ️ ${logArgs[0]}`;
+	} else if (level === 'warn') {
 		logArgs[0] = `⚠️ ${logArgs[0]}`;
 	} else if (level === 'error') {
 		logArgs[0] = `⛔ ${logArgs[0]}`;
@@ -514,6 +516,34 @@ function getErrorStack(firstArg: unknown, skipFrames: number): string | undefine
 	}
 	return captureStack(skipFrames);
 }
+
+/**
+ * gg.info() - Log at info level.
+ *
+ * Passthrough: returns the first argument.
+ * In Eruda, entries are styled with a blue/info indicator.
+ *
+ * @example
+ * gg.info('System startup complete');
+ * const config = gg.info(loadedConfig, 'loaded config');
+ */
+gg.info = function (this: void, ...args: unknown[]): unknown {
+	if (!ggConfig.enabled || isCloudflareWorker()) {
+		return args.length ? args[0] : undefined;
+	}
+	const callpoint = resolveCallpoint(3);
+	return ggLog({ ns: callpoint, level: 'info' }, ...args);
+};
+
+/**
+ * gg._info() - Internal: info with call-site metadata from Vite plugin.
+ */
+gg._info = function (
+	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+	...args: unknown[]
+): unknown {
+	return ggLog({ ...options, level: 'info' }, ...args);
+};
 
 /**
  * gg.warn() - Log at warning level.
@@ -1103,6 +1133,7 @@ export namespace gg {
 	) => { ns: string; file?: string; line?: number; col?: number; src?: string };
 
 	// Console-like methods (public API)
+	export let info: (...args: unknown[]) => unknown;
 	export let warn: (...args: unknown[]) => unknown;
 	export let error: (...args: unknown[]) => unknown;
 	export let assert: (condition: unknown, ...args: unknown[]) => unknown;
@@ -1113,6 +1144,10 @@ export namespace gg {
 	export let trace: (...args: unknown[]) => unknown;
 
 	// Internal plugin-rewrite targets (same as above but with call-site metadata)
+	export let _info: (
+		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+		...args: unknown[]
+	) => unknown;
 	export let _warn: (
 		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 		...args: unknown[]

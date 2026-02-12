@@ -91,6 +91,7 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			if (
 				!code.includes('gg(') &&
 				!code.includes('gg.ns(') &&
+				!code.includes('gg.info(') &&
 				!code.includes('gg.warn(') &&
 				!code.includes('gg.error(') &&
 				!code.includes('gg.table(') &&
@@ -892,11 +893,11 @@ export function transformGgCalls(
 				continue;
 			}
 
-			// Case 1b: gg.warn/error/table/trace/assert → gg._warn/_error/_table/_trace/_assert
+			// Case 1b: gg.info/warn/error/table/trace/assert → gg._info/_warn/_error/_table/_trace/_assert
 			// These methods are rewritten like bare gg() but with their internal variant.
 			const dotMethodMatch = code
 				.slice(i + 2)
-				.match(/^\.(warn|error|table|trace|assert|time|timeLog|timeEnd)\(/);
+				.match(/^\.(info|warn|error|table|trace|assert|time|timeLog|timeEnd)\(/);
 			if (dotMethodMatch) {
 				const methodName = dotMethodMatch[1];
 				const internalName = `_${methodName}`;

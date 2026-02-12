@@ -4,6 +4,7 @@
 	import {
 		testManualNs,
 		testAnsiColors,
+		testInfo,
 		testWarnError,
 		testAssert,
 		testTable,
@@ -41,6 +42,7 @@
 
 <h3>Console-like Methods</h3>
 <div style="margin-bottom: 1rem;">
+	<button onclick={testInfo}>ℹ️ info</button>
 	<button onclick={testWarnError}>⚠️ warn / error</button>
 	<button onclick={testAssert}>✅ assert</button>
 	<button onclick={testTable}>📊 table</button>

@@ -27,7 +27,7 @@ export interface GgErudaOptions {
 }
 
 /** Log severity level */
-export type LogLevel = 'debug' | 'warn' | 'error';
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 /**
  * A captured log entry from gg()
