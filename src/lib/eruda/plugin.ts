@@ -445,10 +445,18 @@ export function createGgPlugin(
 				display: flex;
 				align-items: center;
 			}
-			.gg-log-icons button:hover {
-				opacity: 1;
-				background: rgba(0,0,0,0.05);
-			}
+		.gg-log-icons button:hover {
+			opacity: 1;
+			background: rgba(0,0,0,0.05);
+		}
+		.gg-reset-filter-btn:hover {
+			background: #1976D2 !important;
+			transform: translateY(-1px);
+			box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
+		}
+		.gg-reset-filter-btn:active {
+			transform: translateY(0);
+		}
 			.gg-solo-target {
 				cursor: pointer;
 			}
@@ -1081,36 +1089,36 @@ export function createGgPlugin(
 				const otherCount = otherNamespaces.reduce((sum, ns) => sum + (nsCounts.get(ns) || 0), 0);
 
 				checkboxesHTML = `
-				<div class="gg-filter-checkboxes">
-					<label class="gg-filter-checkbox" style="font-weight: bold;">
-						<input type="checkbox" class="gg-all-checkbox" ${allChecked ? 'checked' : ''}>
-						<span>ALL</span>
-					</label>
-					${displayedNamespaces
-						.map((ns) => {
-							// Check if namespace matches the current pattern
-							const checked = namespaceMatchesPattern(ns, effectivePattern);
-							const count = nsCounts.get(ns) || 0;
-							return `
-							<label class="gg-filter-checkbox">
-								<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
-								<span>${escapeHtml(ns)} (${count})</span>
-							</label>
-						`;
-						})
-						.join('')}
-					${
-						otherTotalCount > 0
-							? `
-					<label class="gg-filter-checkbox" style="opacity: 0.7;">
-						<input type="checkbox" class="gg-other-checkbox" ${otherChecked ? 'checked' : ''} data-other-namespaces='${JSON.stringify(otherNamespaces)}'>
-						<span>other (${otherCount})</span>
-					</label>
-					`
-							: ''
-					}
-				</div>
-			`;
+			<div class="gg-filter-checkboxes">
+				<label class="gg-filter-checkbox" style="font-weight: bold;">
+					<input type="checkbox" class="gg-all-checkbox" ${allChecked ? 'checked' : ''}>
+					<span>ALL</span>
+				</label>
+				${displayedNamespaces
+					.map((ns) => {
+						// Check if namespace matches the current pattern
+						const checked = namespaceMatchesPattern(ns, effectivePattern);
+						const count = nsCounts.get(ns) || 0;
+						return `
+						<label class="gg-filter-checkbox">
+							<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
+							<span>${escapeHtml(ns)} (${count})</span>
+						</label>
+					`;
+					})
+					.join('')}
+				${
+					otherTotalCount > 0
+						? `
+				<label class="gg-filter-checkbox" style="opacity: 0.7;">
+					<input type="checkbox" class="gg-other-checkbox" ${otherChecked ? 'checked' : ''} data-other-namespaces='${JSON.stringify(otherNamespaces)}'>
+					<span>other (${otherCount})</span>
+				</label>
+				`
+						: ''
+				}
+			</div>
+		`;
 			} else if (!simple) {
 				checkboxesHTML = `<div style="opacity: 0.6; font-size: 11px; margin: 8px 0;">⚠️ Complex pattern - edit manually (quick filters disabled)</div>`;
 			}
@@ -1476,6 +1484,17 @@ export function createGgPlugin(
 		containerEl.addEventListener('click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
 
+			// Handle reset filter button (shown when all logs filtered out)
+			if (target?.classList?.contains('gg-reset-filter-btn')) {
+				filterPattern = 'gg:*';
+				enabledNamespaces.clear();
+				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
+				localStorage.setItem(FILTER_KEY, filterPattern);
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
 			// Handle expand/collapse
 			if (target?.classList?.contains('gg-expand')) {
 				const index = target.getAttribute('data-index');
@@ -1748,8 +1767,15 @@ export function createGgPlugin(
 		countSpan.html(countText);
 
 		if (entries.length === 0) {
+			const hasFilteredLogs = allEntries.length > 0;
+			const message = hasFilteredLogs
+				? `All ${allEntries.length} logs filtered out.`
+				: 'No logs captured yet. Call gg() to see output here.';
+			const resetButton = hasFilteredLogs
+				? '<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (gg:*)</button>'
+				: '';
 			logContainer.html(
-				'<div style="padding: 20px; text-align: center; opacity: 0.5;">No logs captured yet. Call gg() to see output here.</div>'
+				`<div style="padding: 20px; text-align: center; opacity: 0.5;">${message}<div>${resetButton}</div></div>`
 			);
 			return;
 		}
