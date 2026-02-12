@@ -240,7 +240,13 @@ export function testNamespaceSegments() {
 	gg.ns('utils:format:date', messages[6], { format: 'ISO8601' });
 	gg.ns('utils:format:currency', messages[7], { locale: 'en-US' });
 
-	gg.info(
-		'Generated 16 test logs with multi-level namespaces. Click namespace segments to filter!'
-	);
+	// Test new delimiters: @ / - _
+	gg.ns('routes/dashboard/settings/+page.svelte@handleSubmit', messages[0], { action: 'save' });
+	gg.ns('routes/dashboard/settings/+page.svelte@handleCancel', messages[1], { action: 'cancel' });
+	gg.ns('routes/dashboard/profile/+page.svelte@onMount', messages[2], { loaded: true });
+	gg.ns('api-client:fetch_user_data@handle-error', messages[3], { status: 404 });
+	gg.ns('user-profile-card:render_avatar@click-handler', messages[4], { userId: 123 });
+	gg.ns('payment_processor:process-transaction@validate_card', messages[5], { valid: true });
+
+	gg.info('Generated 22 test logs with multi-delimiter namespaces. Click any segment to filter!');
 }

@@ -478,19 +478,20 @@ export function createGgPlugin(
 			.gg-log-ns[data-file]:hover::after {
 				opacity: 1;
 			}
-			/* Clickable namespace segments */
-			.gg-ns-segment {
-				cursor: pointer;
-				padding: 1px 2px;
-				border-radius: 2px;
-				transition: background 0.1s;
-			}
-			.gg-ns-segment:hover {
-				background: rgba(0,0,0,0.1);
-				text-decoration: underline;
-				text-decoration-style: solid;
-				text-underline-offset: 2px;
-			}
+		/* Clickable namespace segments */
+		.gg-ns-segment {
+			cursor: pointer;
+			padding: 1px 2px;
+			border-radius: 2px;
+			transition: background 0.1s;
+		}
+		/* Only show segment hover styling when in filter mode */
+		.gg-log-grid.filter-mode .gg-ns-segment:hover {
+			background: rgba(0,0,0,0.1);
+			text-decoration: underline;
+			text-decoration-style: solid;
+			text-underline-offset: 2px;
+		}
 			.gg-details {
 				grid-column: 1 / -1;
 				border-top: none;
@@ -1753,23 +1754,45 @@ export function createGgPlugin(
 			return;
 		}
 
-		const logsHTML = `<div class="gg-log-grid" style="grid-template-columns: ${gridColumns()};">${entries
+		const logsHTML = `<div class="gg-log-grid${filterExpanded ? ' filter-mode' : ''}" style="grid-template-columns: ${gridColumns()};">${entries
 			.map((entry: CapturedEntry, index: number) => {
 				const color = entry.color || '#0066cc';
 				const diff = `+${humanize(entry.diff)}`;
 				const ns = escapeHtml(entry.namespace);
 
-				// Split namespace into clickable segments
-				const nsSegments = entry.namespace.split(':');
+				// Split namespace into clickable segments on multiple delimiters: : @ / - _
+				const parts = entry.namespace.split(/([:\/@\-_])/);
+				const nsSegments: string[] = [];
+				const delimiters: string[] = [];
+
+				for (let i = 0; i < parts.length; i++) {
+					if (i % 2 === 0) {
+						// Even indices are segments
+						if (parts[i]) nsSegments.push(parts[i]);
+					} else {
+						// Odd indices are delimiters
+						delimiters.push(parts[i]);
+					}
+				}
+
 				let nsHTML = '';
 				for (let i = 0; i < nsSegments.length; i++) {
 					const segment = escapeHtml(nsSegments[i]);
-					// Build the filter pattern for this segment
-					const filterPattern =
-						nsSegments.slice(0, i + 1).join(':') + (i < nsSegments.length - 1 ? ':*' : '');
+
+					// Build filter pattern: reconstruct namespace up to this point
+					let filterPattern = '';
+					for (let j = 0; j <= i; j++) {
+						filterPattern += nsSegments[j];
+						if (j < i) {
+							filterPattern += delimiters[j];
+						} else if (j < nsSegments.length - 1) {
+							filterPattern += delimiters[j] + '*';
+						}
+					}
+
 					nsHTML += `<span class="gg-ns-segment" data-filter="${escapeHtml(filterPattern)}">${segment}</span>`;
 					if (i < nsSegments.length - 1) {
-						nsHTML += ':';
+						nsHTML += escapeHtml(delimiters[i]);
 					}
 				}
 
