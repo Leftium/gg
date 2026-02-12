@@ -20,7 +20,27 @@ npm add @leftium/gg
 
 ## SvelteKit Quick Start
 
-### 1. Add Vite plugins
+### 1. Use `gg()` anywhere
+
+```svelte
+<script>
+	import { gg } from '@leftium/gg';
+
+	gg('Hello world');
+
+	// Log expressions (returns first argument)
+	const result = gg(someFunction());
+
+	// Multiple arguments
+	gg('User:', user, 'Status:', status);
+</script>
+```
+
+That's it! Output appears in the browser dev console and terminal. The following optional steps are highly recommended to unlock the full experience:
+
+### 2. Add Vite plugins (optional, recommended)
+
+Without plugins, namespaces are random word-tuples. With plugins, you get real file/function callpoints, open-in-editor links, and icecream-style source expressions.
 
 ```ts
 // vite.config.ts
@@ -39,7 +59,9 @@ export default defineConfig({
 - **Open-in-editor plugin** -- adds dev server middleware for click-to-open
 - **Automatic `es2022` target** -- required for top-level await
 
-### 2. Add the debug console
+### 3. Add the debug console (optional, recommended)
+
+An in-browser debug console (powered by Eruda) with a dedicated GG tab for filtering and inspecting logs — especially useful on mobile.
 
 ```svelte
 <!-- src/routes/+layout.svelte -->
@@ -51,23 +73,7 @@ export default defineConfig({
 {@render children()}
 ```
 
-### 3. Use `gg()` anywhere
-
-```svelte
-<script>
-	import { gg } from '@leftium/gg';
-
-	gg('Hello world');
-
-	// Log expressions (returns first argument)
-	const result = gg(someFunction());
-
-	// Multiple arguments
-	gg('User:', user, 'Status:', status);
-</script>
-```
-
-That's it! In development, a debug console appears automatically.
+In development, the debug console appears automatically.
 In production, add `?gg` to the URL or use a 5-tap gesture to activate.
 
 ## GgConsole Options
