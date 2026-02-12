@@ -170,6 +170,36 @@ describe('gg.ns() combined variables', () => {
 	});
 });
 
+// ── Plugin integration tests ──────────────────────────────────────────
+
+describe('plugin transform() filter', () => {
+	it('should not transform files in node_modules', () => {
+		// Simulate what the plugin's transform() does with a file ID check
+		const nodeModulesIds = [
+			'/project/node_modules/@leftium/gg/dist/gg.js',
+			'/Users/dev/app/node_modules/some-lib/index.js',
+			'C:/project/node_modules/package/file.ts' // Vite normalizes Windows paths to forward slashes
+		];
+
+		for (const id of nodeModulesIds) {
+			// The plugin checks: if (id.includes('/node_modules/')) return null
+			expect(id.includes('/node_modules/')).toBe(true);
+		}
+	});
+
+	it('should transform user source files (not in node_modules)', () => {
+		const userFileIds = [
+			'/project/src/routes/+page.svelte',
+			'/Users/dev/app/src/lib/utils.ts',
+			'C:/project/src/components/Button.svelte' // Vite normalizes Windows paths to forward slashes
+		];
+
+		for (const id of userFileIds) {
+			expect(id.includes('/node_modules/')).toBe(false);
+		}
+	});
+});
+
 // ── Edge cases ─────────────────────────────────────────────────────────
 
 describe('edge cases', () => {

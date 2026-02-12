@@ -87,6 +87,10 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// Only process JS/TS/Svelte files
 			if (!/\.(js|ts|svelte|jsx|tsx|mjs|mts)(\?.*)?$/.test(id)) return null;
 
+			// Don't transform code inside node_modules
+			// This prevents rewriting library code (including gg itself when published)
+			if (id.includes('/node_modules/')) return null;
+
 			// Quick bail: no gg calls in this file
 			if (
 				!code.includes('gg(') &&
@@ -102,9 +106,6 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 				!code.includes('gg.timeEnd(')
 			)
 				return null;
-
-			// Don't transform gg's own source files
-			if (id.includes('/lib/gg.') || id.includes('/lib/debug')) return null;
 
 			// Build the short callpoint from the file path (strips src/ prefix)
 			// e.g. "/Users/me/project/src/routes/+page.svelte" → "routes/+page.svelte"
