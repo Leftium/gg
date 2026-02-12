@@ -44,6 +44,10 @@ export function createGgPlugin(
 	// Last rendered entries (for hover tooltip arg lookup)
 	let renderedEntries: CapturedEntry[] = [];
 
+	// Toast state for "namespace hidden" feedback
+	let lastHiddenPattern: string | null = null; // filterPattern before the hide (for undo)
+	let hasSeenToastExplanation = false; // first toast auto-expands help text
+
 	// Settings UI state
 	let settingsExpanded = false;
 
@@ -193,6 +197,7 @@ export function createGgPlugin(
 			wireUpResize();
 			wireUpFilterUI();
 			wireUpSettingsUI();
+			wireUpToast();
 			renderLogs();
 		},
 
@@ -487,6 +492,105 @@ export function createGgPlugin(
 			background: rgba(0,0,0,0.08);
 			border-radius: 3px;
 		}
+	/* Toast bar for "namespace hidden" feedback */
+	.gg-toast {
+		display: none;
+		background: #333;
+		color: #e0e0e0;
+		font-size: 12px;
+		font-family: monospace;
+		padding: 8px 12px;
+		border-radius: 6px 6px 0 0;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 8px;
+		margin-top: 4px;
+		animation: gg-toast-slide-up 0.2s ease-out;
+	}
+	.gg-toast.visible {
+		display: flex;
+		flex-wrap: wrap;
+	}
+	@keyframes gg-toast-slide-up {
+		from { transform: translateY(100%); opacity: 0; }
+		to { transform: translateY(0); opacity: 1; }
+	}
+	.gg-toast-label {
+		opacity: 0.7;
+		flex-shrink: 0;
+	}
+	.gg-toast-ns {
+		display: inline-flex;
+		align-items: center;
+		gap: 0;
+	}
+	.gg-toast-segment {
+		cursor: pointer;
+		padding: 1px 3px;
+		border-radius: 2px;
+		color: #bbb;
+		text-decoration: line-through;
+		transition: background 0.1s, color 0.1s;
+	}
+	.gg-toast-segment:hover {
+		color: #ef5350;
+		background: rgba(239, 83, 80, 0.15);
+	}
+	.gg-toast-delim {
+		opacity: 0.5;
+	}
+	.gg-toast-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-left: auto;
+		flex-shrink: 0;
+	}
+	.gg-toast-btn {
+		all: unset;
+		cursor: pointer;
+		padding: 2px 8px;
+		border-radius: 3px;
+		font-size: 11px;
+		transition: background 0.1s;
+	}
+	.gg-toast-undo {
+		color: #64b5f6;
+		font-weight: bold;
+	}
+	.gg-toast-undo:hover {
+		background: rgba(100, 181, 246, 0.2);
+	}
+	.gg-toast-help {
+		color: #999;
+		font-size: 13px;
+		line-height: 1;
+	}
+	.gg-toast-help:hover {
+		color: #ccc;
+		background: rgba(255,255,255,0.1);
+	}
+	.gg-toast-dismiss {
+		color: #999;
+		font-size: 14px;
+		line-height: 1;
+	}
+	.gg-toast-dismiss:hover {
+		color: #fff;
+		background: rgba(255,255,255,0.1);
+	}
+	.gg-toast-explanation {
+		display: none;
+		width: 100%;
+		font-size: 11px;
+		opacity: 0.6;
+		padding-top: 4px;
+		margin-top: 4px;
+		border-top: 1px solid rgba(255,255,255,0.1);
+	}
+	.gg-toast-explanation.visible {
+		display: block;
+	}
 				.gg-log-handle {
 					width: 4px;
 					cursor: col-resize;
@@ -885,6 +989,7 @@ export function createGgPlugin(
 				<div class="gg-filter-panel"></div>
 				<div class="gg-settings-panel"></div>
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
+				<div class="gg-toast"></div>
 				<iframe class="gg-editor-iframe" hidden title="open-in-editor"></iframe>
 			</div>
 		`;
@@ -1439,6 +1544,177 @@ export function createGgPlugin(
 		}
 	}
 
+	/** Show toast bar after hiding a namespace via the x button */
+	function showHideToast(namespace: string, previousPattern: string) {
+		if (!$el) return;
+
+		lastHiddenPattern = previousPattern;
+
+		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
+		if (!toast) return;
+
+		// Split namespace into segments with delimiters (same logic as log row rendering)
+		const parts = namespace.split(/([:/@ \-_])/);
+		const segments: string[] = [];
+		const delimiters: string[] = [];
+		for (let i = 0; i < parts.length; i++) {
+			if (i % 2 === 0) {
+				if (parts[i]) segments.push(parts[i]);
+			} else {
+				delimiters.push(parts[i]);
+			}
+		}
+
+		// Build clickable segment HTML
+		let nsHTML = '';
+		for (let i = 0; i < segments.length; i++) {
+			const segment = escapeHtml(segments[i]);
+
+			// Build filter pattern for this segment level
+			let segFilter = '';
+			for (let j = 0; j <= i; j++) {
+				segFilter += segments[j];
+				if (j < i) {
+					segFilter += delimiters[j];
+				} else if (j < segments.length - 1) {
+					segFilter += delimiters[j] + '*';
+				}
+			}
+
+			nsHTML += `<span class="gg-toast-segment" data-filter="${escapeHtml(segFilter)}">${segment}</span>`;
+			if (i < segments.length - 1) {
+				nsHTML += `<span class="gg-toast-delim">${escapeHtml(delimiters[i])}</span>`;
+			}
+		}
+
+		// Auto-expand explanation on first use
+		const showExplanation = !hasSeenToastExplanation;
+
+		toast.innerHTML =
+			`<button class="gg-toast-btn gg-toast-dismiss" title="Dismiss">\u00d7</button>` +
+			`<span class="gg-toast-label">Hidden:</span>` +
+			`<span class="gg-toast-ns">${nsHTML}</span>` +
+			`<span class="gg-toast-actions">` +
+			`<button class="gg-toast-btn gg-toast-undo">Undo</button>` +
+			`<button class="gg-toast-btn gg-toast-help" title="Toggle help">?</button>` +
+			`</span>` +
+			`<div class="gg-toast-explanation${showExplanation ? ' visible' : ''}">` +
+			`Click a segment above to hide all matching namespaces (e.g. click "api" to hide gg:api:*). ` +
+			`Tip: you can also right-click any segment in the log to hide it directly.` +
+			`</div>`;
+
+		toast.classList.add('visible');
+
+		if (showExplanation) {
+			hasSeenToastExplanation = true;
+		}
+	}
+
+	/** Dismiss the toast bar */
+	function dismissToast() {
+		if (!$el) return;
+		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
+		if (toast) {
+			toast.classList.remove('visible');
+		}
+		lastHiddenPattern = null;
+	}
+
+	/** Undo the last namespace hide */
+	function undoHide() {
+		if (!$el || lastHiddenPattern === null) return;
+
+		// Restore the previous filter pattern
+		filterPattern = lastHiddenPattern;
+		localStorage.setItem(FILTER_KEY, filterPattern);
+
+		// Sync enabledNamespaces from the restored pattern
+		enabledNamespaces.clear();
+		const effectivePattern = filterPattern || 'gg:*';
+		getAllCapturedNamespaces().forEach((ns) => {
+			if (namespaceMatchesPattern(ns, effectivePattern)) {
+				enabledNamespaces.add(ns);
+			}
+		});
+
+		dismissToast();
+		renderFilterUI();
+		renderLogs();
+	}
+
+	/** Wire up toast event handlers (called once after init) */
+	function wireUpToast() {
+		if (!$el) return;
+
+		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
+		if (!toast) return;
+
+		toast.addEventListener('click', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+
+			// Undo button
+			if (target.classList?.contains('gg-toast-undo')) {
+				undoHide();
+				return;
+			}
+
+			// Dismiss button
+			if (target.classList?.contains('gg-toast-dismiss')) {
+				dismissToast();
+				return;
+			}
+
+			// Help toggle
+			if (target.classList?.contains('gg-toast-help')) {
+				const explanation = toast.querySelector('.gg-toast-explanation') as HTMLElement;
+				if (explanation) {
+					explanation.classList.toggle('visible');
+				}
+				return;
+			}
+
+			// Segment click: add exclusion for that pattern
+			if (target.classList?.contains('gg-toast-segment')) {
+				const filter = target.getAttribute('data-filter');
+				if (!filter) return;
+
+				// Add exclusion pattern (same logic as right-click segment)
+				const currentPattern = filterPattern || 'gg:*';
+				const exclusion = `-${filter}`;
+				const parts = currentPattern.split(',').map((p) => p.trim());
+
+				if (parts.includes(exclusion)) {
+					// Already excluded, toggle off
+					filterPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
+				} else {
+					const hasInclusion = parts.some((p) => !p.startsWith('-'));
+					if (hasInclusion) {
+						filterPattern = `${currentPattern},${exclusion}`;
+					} else {
+						filterPattern = `gg:*,${exclusion}`;
+					}
+				}
+
+				filterPattern = simplifyPattern(filterPattern);
+
+				// Sync enabledNamespaces
+				enabledNamespaces.clear();
+				const effectivePattern = filterPattern || 'gg:*';
+				getAllCapturedNamespaces().forEach((ns) => {
+					if (namespaceMatchesPattern(ns, effectivePattern)) {
+						enabledNamespaces.add(ns);
+					}
+				});
+
+				localStorage.setItem(FILTER_KEY, filterPattern);
+				dismissToast();
+				renderFilterUI();
+				renderLogs();
+				return;
+			}
+		});
+	}
+
 	function wireUpExpanders() {
 		if (!$el || expanderAttached) return;
 
@@ -1528,10 +1804,16 @@ export function createGgPlugin(
 				const namespace = target.getAttribute('data-namespace');
 				if (!namespace) return;
 
+				// Save current pattern for undo before hiding
+				const previousPattern = filterPattern;
+
 				toggleNamespace(namespace, false);
 				localStorage.setItem(FILTER_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
+
+				// Show toast with undo option
+				showHideToast(namespace, previousPattern);
 				return;
 			}
 
@@ -1755,15 +2037,13 @@ export function createGgPlugin(
 			if (!tip) return;
 
 			// Build tooltip content
-			let actionText = '';
+			let actionText: string;
 			if (nsClickAction === 'open' && DEV) {
 				actionText = `Open in editor: ${file}:${line}:${col}`;
 			} else if (nsClickAction === 'open-url') {
-				const formatted = formatString(activeFormat(), file, line, col);
-				actionText = `Open URL: ${formatted}`;
+				actionText = `Open URL: ${formatString(activeFormat(), file, line, col)}`;
 			} else {
-				const formatted = formatString(activeFormat(), file, line, col);
-				actionText = `Copy: ${formatted}`;
+				actionText = `Copy: ${formatString(activeFormat(), file, line, col)}`;
 			}
 
 			tip.textContent = actionText;
@@ -1892,10 +2172,9 @@ export function createGgPlugin(
 			.map((entry: CapturedEntry, index: number) => {
 				const color = entry.color || '#0066cc';
 				const diff = `+${humanize(entry.diff)}`;
-				const ns = escapeHtml(entry.namespace);
 
 				// Split namespace into clickable segments on multiple delimiters: : @ / - _
-				const parts = entry.namespace.split(/([:\/@\-_])/);
+				const parts = entry.namespace.split(/([:/@ \-_])/);
 				const nsSegments: string[] = [];
 				const delimiters: string[] = [];
 
