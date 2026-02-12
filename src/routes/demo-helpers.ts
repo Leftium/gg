@@ -47,3 +47,113 @@ export function testAnsiColors() {
 	// Test custom hex colors with chaining
 	gg(fg('#ff6347').bg('#98fb98')`Tomato on pale green`);
 }
+
+export function testWarnError() {
+	// gg.warn - warning level
+	gg.warn('This API is deprecated, use v2 instead');
+	gg.warn('Slow query detected', { duration: 3200, query: 'SELECT * FROM users' });
+
+	// gg.error - error level with automatic stack capture
+	gg.error('Connection to database failed');
+	gg.error('Unexpected response', { status: 500, body: 'Internal Server Error' });
+
+	// gg.error with an actual Error object (uses its .stack)
+	try {
+		JSON.parse('not json{');
+	} catch (err) {
+		gg.error(err);
+	}
+
+	// Passthrough demo: warn/error return the first argument
+	const value = gg.warn('returning this value');
+	gg(`warn returned: ${value}`);
+}
+
+export function testAssert() {
+	const users = [{ name: 'Alice' }, { name: 'Bob' }];
+	const emptyList: unknown[] = [];
+
+	// Passing assertion - no output
+	gg.assert(users.length > 0, 'users should not be empty');
+
+	// Failing assertion - logs error with stack trace
+	gg.assert(emptyList.length > 0, 'list should not be empty', emptyList);
+
+	// Failing with no message - defaults to "Assertion failed"
+	gg.assert(false);
+
+	// Passthrough: returns the condition value
+	const result = gg.assert(42, 'this passes');
+	gg(`assert returned: ${result}`);
+}
+
+export function testTable() {
+	// Array of objects
+	gg.table([
+		{ name: 'Alice', age: 30, role: 'admin' },
+		{ name: 'Bob', age: 25, role: 'user' },
+		{ name: 'Charlie', age: 35, role: 'moderator' }
+	]);
+
+	// Array of primitives
+	gg.table(['apple', 'banana', 'cherry']);
+
+	// Object of objects
+	gg.table({
+		us: { currency: 'USD', population: '331M' },
+		uk: { currency: 'GBP', population: '67M' },
+		jp: { currency: 'JPY', population: '125M' }
+	});
+
+	// With column filter
+	gg.table(
+		[
+			{ name: 'Alice', age: 30, role: 'admin', email: 'alice@example.com' },
+			{ name: 'Bob', age: 25, role: 'user', email: 'bob@example.com' }
+		],
+		['name', 'role']
+	);
+
+	// Passthrough: returns the original data
+	const data = gg.table([{ x: 1 }, { x: 2 }]);
+	gg('table returned:', data);
+}
+
+export function testTimers() {
+	// Basic timer
+	gg.time('demo');
+
+	setTimeout(() => {
+		gg.timeLog('demo', 'checkpoint 1');
+	}, 100);
+
+	setTimeout(() => {
+		gg.timeLog('demo', 'checkpoint 2');
+	}, 250);
+
+	setTimeout(() => {
+		gg.timeEnd('demo');
+	}, 500);
+
+	// Non-existent timer warning
+	gg.timeEnd('nope');
+
+	// Immediate timer (near-zero elapsed)
+	gg.time('instant');
+	gg.timeEnd('instant');
+}
+
+export function testTrace() {
+	function innerFunction() {
+		function deeplyNested() {
+			// Trace captures the full call stack
+			gg.trace('Trace from deeply nested function');
+		}
+		deeplyNested();
+	}
+	innerFunction();
+
+	// Passthrough
+	const val = gg.trace('trace returns this', { extra: 'data' });
+	gg(`trace returned: ${val}`);
+}

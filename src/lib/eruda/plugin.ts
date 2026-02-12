@@ -582,7 +582,53 @@ export function createGgPlugin(
 					padding-bottom: 4px;
 					border-bottom: 1px solid #ddd;
 				}
-				.gg-filter-panel {
+				/* Level-based styling for warn/error entries */
+				.gg-level-warn .gg-log-diff,
+				.gg-level-warn .gg-log-ns,
+				.gg-level-warn .gg-log-content {
+					background: rgba(255, 200, 0, 0.08);
+				}
+				.gg-level-warn .gg-log-content {
+					border-left: 3px solid #e6a700;
+					padding-left: 6px;
+				}
+				.gg-level-error .gg-log-diff,
+				.gg-level-error .gg-log-ns,
+				.gg-level-error .gg-log-content {
+					background: rgba(255, 50, 50, 0.08);
+				}
+				.gg-level-error .gg-log-content {
+					border-left: 3px solid #cc0000;
+					padding-left: 6px;
+				}
+				/* Stack trace toggle */
+				.gg-stack-toggle {
+					cursor: pointer;
+					font-size: 11px;
+					opacity: 0.6;
+					margin-left: 8px;
+					user-select: none;
+				}
+				.gg-stack-toggle:hover {
+					opacity: 1;
+				}
+				.gg-stack-content {
+					display: none;
+					font-size: 11px;
+					font-family: monospace;
+					white-space: pre;
+					padding: 6px 8px;
+					margin-top: 4px;
+					background: #f0f0f0;
+					border-radius: 3px;
+					overflow-x: auto;
+					color: #666;
+					line-height: 1.4;
+				}
+				.gg-stack-content.expanded {
+					display: block;
+				}
+			.gg-filter-panel {
 					background: #f5f5f5;
 					padding: 10px;
 					margin-bottom: 8px;
@@ -1332,6 +1378,23 @@ export function createGgPlugin(
 				return;
 			}
 
+			// Handle stack trace toggle
+			if (target?.classList?.contains('gg-stack-toggle')) {
+				const stackId = target.getAttribute('data-stack-id');
+				if (!stackId) return;
+
+				const stackEl = containerEl.querySelector(
+					`.gg-stack-content[data-stack-id="${stackId}"]`
+				) as HTMLElement | null;
+
+				if (stackEl) {
+					const isExpanded = stackEl.classList.contains('expanded');
+					stackEl.classList.toggle('expanded');
+					target.textContent = isExpanded ? '▶ stack' : '▼ stack';
+				}
+				return;
+			}
+
 			// Handle clicking namespace to open in editor (when filter collapsed)
 			if (
 				target?.classList?.contains('gg-log-ns') &&
@@ -1555,7 +1618,30 @@ export function createGgPlugin(
 				let detailsHTML = '';
 				// Source expression for this entry (used in hover tooltips and expanded details)
 				const srcExpr = entry.src?.trim() && !/^['"`]/.test(entry.src) ? escapeHtml(entry.src) : '';
-				if (entry.args.length > 0) {
+
+				// HTML table rendering for gg.table() entries
+				if (entry.tableData && entry.tableData.keys.length > 0) {
+					const { keys, rows: tableRows } = entry.tableData;
+					const headerCells = keys
+						.map(
+							(k) =>
+								`<th style="padding: 2px 8px; border: 1px solid #ccc; background: #f0f0f0; font-size: 11px; white-space: nowrap;">${escapeHtml(k)}</th>`
+						)
+						.join('');
+					const bodyRowsHtml = tableRows
+						.map((row) => {
+							const cells = keys
+								.map((k) => {
+									const val = row[k];
+									const display = val === undefined ? '' : escapeHtml(String(val));
+									return `<td style="padding: 2px 8px; border: 1px solid #ddd; font-size: 11px; white-space: nowrap;">${display}</td>`;
+								})
+								.join('');
+							return `<tr>${cells}</tr>`;
+						})
+						.join('');
+					argsHTML = `<table style="border-collapse: collapse; margin: 2px 0; font-family: monospace;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRowsHtml}</tbody></table>`;
+				} else if (entry.args.length > 0) {
 					argsHTML = entry.args
 						.map((arg, argIdx) => {
 							if (typeof arg === 'object' && arg !== null) {
@@ -1612,16 +1698,33 @@ export function createGgPlugin(
 				}
 				const fileTitle = fileTitleText ? ` title="${escapeHtml(fileTitleText)}"` : '';
 
+				// Level class for warn/error styling
+				const levelClass =
+					entry.level === 'warn'
+						? ' gg-level-warn'
+						: entry.level === 'error'
+							? ' gg-level-error'
+							: '';
+
+				// Stack trace toggle (for error/trace entries with captured stacks)
+				let stackHTML = '';
+				if (entry.stack) {
+					const stackId = `stack-${index}`;
+					stackHTML =
+						`<span class="gg-stack-toggle" data-stack-id="${stackId}">▶ stack</span>` +
+						`<div class="gg-stack-content" data-stack-id="${stackId}">${escapeHtml(entry.stack)}</div>`;
+				}
+
 				// Desktop: grid layout, Mobile: stacked layout
 				return (
-					`<div class="gg-log-entry">` +
+					`<div class="gg-log-entry${levelClass}">` +
 					`<div class="gg-log-header">` +
 					iconsCol +
 					`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
 					`<div class="gg-log-ns${soloClass}" style="color: ${color};"${soloAttr}${fileAttr}${lineAttr}${colAttr}${fileTitle}>${ns}</div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
-					`<div class="gg-log-content"${entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}</div>` +
+					`<div class="gg-log-content"${!entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}${stackHTML}</div>` +
 					detailsHTML +
 					`</div>`
 				);

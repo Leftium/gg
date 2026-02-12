@@ -88,7 +88,19 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			if (!/\.(js|ts|svelte|jsx|tsx|mjs|mts)(\?.*)?$/.test(id)) return null;
 
 			// Quick bail: no gg calls in this file
-			if (!code.includes('gg(') && !code.includes('gg.ns(')) return null;
+			if (
+				!code.includes('gg(') &&
+				!code.includes('gg.ns(') &&
+				!code.includes('gg.warn(') &&
+				!code.includes('gg.error(') &&
+				!code.includes('gg.table(') &&
+				!code.includes('gg.trace(') &&
+				!code.includes('gg.assert(') &&
+				!code.includes('gg.time(') &&
+				!code.includes('gg.timeLog(') &&
+				!code.includes('gg.timeEnd(')
+			)
+				return null;
 
 			// Don't transform gg's own source files
 			if (id.includes('/lib/gg.') || id.includes('/lib/debug')) return null;
@@ -144,7 +156,7 @@ export function parseJavaScript(code: string): FunctionScope[] {
 
 		const scopes: FunctionScope[] = [];
 		// Reuse the same AST walker we built for Svelte
-		collectFunctionScopes(ast.body as any[], scopes);
+		collectFunctionScopes(ast.body as Program['body'], scopes);
 		scopes.sort((a, b) => a.start - b.start);
 		return scopes;
 	} catch {
@@ -176,14 +188,14 @@ export function collectCodeRanges(code: string): SvelteCodeInfo {
 
 		// Script blocks (instance + module)
 		// The Svelte AST Program node has start/end at runtime but TypeScript's
-		// estree Program type doesn't declare them — cast through any.
+		// estree Program type doesn't declare them — we know they exist.
 		if (ast.instance) {
-			const content = ast.instance.content as any;
+			const content = ast.instance.content as Program & { start: number; end: number };
 			ranges.push({ start: content.start, end: content.end, context: 'script' });
 			collectFunctionScopes(ast.instance.content.body, functionScopes);
 		}
 		if (ast.module) {
-			const content = ast.module.content as any;
+			const content = ast.module.content as Program & { start: number; end: number };
 			ranges.push({ start: content.start, end: content.end, context: 'script' });
 			collectFunctionScopes(ast.module.content.body, functionScopes);
 		}
@@ -880,7 +892,51 @@ export function transformGgCalls(
 				continue;
 			}
 
-			// Skip other gg.* calls (gg.enable, gg.disable, gg._ns, gg._onLog, etc.)
+			// Case 1b: gg.warn/error/table/trace/assert → gg._warn/_error/_table/_trace/_assert
+			// These methods are rewritten like bare gg() but with their internal variant.
+			const dotMethodMatch = code
+				.slice(i + 2)
+				.match(/^\.(warn|error|table|trace|assert|time|timeLog|timeEnd)\(/);
+			if (dotMethodMatch) {
+				const methodName = dotMethodMatch[1];
+				const internalName = `_${methodName}`;
+				const methodCallLen = 2 + 1 + methodName.length + 1; // 'gg' + '.' + method + '('
+				const openParenPos = i + methodCallLen - 1;
+
+				const { line, col } = getLineCol(code, i);
+				const fnName = getFunctionName(i, range);
+				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+				const escapedNs = escapeForString(callpoint);
+
+				const closeParenPos = findMatchingParen(code, openParenPos);
+				if (closeParenPos === -1) {
+					i += methodCallLen;
+					continue;
+				}
+
+				const argsText = code.slice(openParenPos + 1, closeParenPos).trim();
+
+				result.push(code.slice(lastIndex, i));
+
+				if (argsText === '') {
+					// gg.warn() → gg._warn(opts)
+					result.push(`gg.${internalName}(${buildOptions(range, escapedNs, line, col)})`);
+					lastIndex = closeParenPos + 1;
+					i = closeParenPos + 1;
+				} else {
+					// gg.warn(expr) → gg._warn(opts, expr)
+					const escapedSrc = escapeForString(argsText);
+					result.push(
+						`gg.${internalName}(${buildOptions(range, escapedNs, line, col, escapedSrc)}, `
+					);
+					lastIndex = openParenPos + 1; // keep original args
+					i = openParenPos + 1;
+				}
+				modified = true;
+				continue;
+			}
+
+			// Skip other gg.* calls (gg.enable, gg.disable, gg._ns, gg._onLog, gg.time, etc.)
 			if (code[i + 2] === '.') {
 				i += 3;
 				continue;

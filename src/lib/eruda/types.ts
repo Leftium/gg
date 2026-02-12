@@ -26,6 +26,9 @@ export interface GgErudaOptions {
 	erudaOptions?: Record<string, unknown>;
 }
 
+/** Log severity level */
+export type LogLevel = 'debug' | 'warn' | 'error';
+
 /**
  * A captured log entry from gg()
  */
@@ -50,6 +53,12 @@ export interface CapturedEntry {
 	col?: number;
 	/** Source expression text for icecream-style display (e.g., "user.name") */
 	src?: string;
+	/** Log severity level (default: 'debug') */
+	level?: LogLevel;
+	/** Stack trace string (captured for error/trace calls) */
+	stack?: string;
+	/** Structured table data for gg.table() — Eruda renders as HTML table */
+	tableData?: { keys: string[]; rows: Array<Record<string, unknown>> };
 }
 
 /**

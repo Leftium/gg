@@ -1,7 +1,15 @@
 <script lang="ts">
 	import { gg } from '$lib/index.js';
 	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
-	import { testManualNs, testAnsiColors } from './demo-helpers.js';
+	import {
+		testManualNs,
+		testAnsiColors,
+		testWarnError,
+		testAssert,
+		testTable,
+		testTimers,
+		testTrace
+	} from './demo-helpers.js';
 
 	// Early log buffer in gg.ts handles buffering before Eruda loads
 	gg('Hello, gg!!');
@@ -29,6 +37,15 @@
 	<button onclick={testManualNs}>🏷️ gg.ns() Templates</button>
 	<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
 	<button onclick={() => gg.ns('$NS:click', 'template event handler')}>🔬 Template gg()</button>
+</div>
+
+<h3>Console-like Methods</h3>
+<div style="margin-bottom: 1rem;">
+	<button onclick={testWarnError}>⚠️ warn / error</button>
+	<button onclick={testAssert}>✅ assert</button>
+	<button onclick={testTable}>📊 table</button>
+	<button onclick={testTimers}>⏱️ time / timeEnd</button>
+	<button onclick={testTrace}>🔍 trace</button>
 </div>
 
 <OpenInEditorLink gg={gg()} />
