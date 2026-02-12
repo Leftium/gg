@@ -2,9 +2,8 @@
 	import '@picocss/pico';
 
 	import type { Snippet } from 'svelte';
-	import { onMount } from 'svelte';
 	import { gg, fg, bg } from '$lib/index.js';
-	import { initGgEruda } from '$lib/eruda/index.js';
+	import GgConsole from '$lib/GgConsole.svelte';
 	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -12,17 +11,9 @@
 	// gg() with no arguments returns call-site info for open-in-editor
 	const ggResult = gg();
 
-	// Initialize Eruda plugin first
-	initGgEruda();
-
-	// Wait for Eruda to load before logging
-	onMount(() => {
-		// Give Eruda a moment to initialize
-		setTimeout(() => {
-			gg('Hello, gg!!');
-			gg('The colored *callpoint* indicates the location of this logg. (As filename@function)');
-		}, 100);
-	});
+	// Early log buffer in gg.ts handles buffering before Eruda loads
+	gg('Hello, gg!!');
+	gg('The colored *callpoint* indicates the location of this logg. (As filename@function)');
 
 	function testLog() {
 		const data = { count: 42, active: true };
@@ -92,5 +83,8 @@
 
 	<p><small>Template expression: {gg('inline template gg()')}</small></p>
 
-	<div>{@render children()}</div>
+	<div>
+		<GgConsole />
+		{@render children()}
+	</div>
 </main>

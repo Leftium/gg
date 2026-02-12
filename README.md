@@ -18,24 +18,95 @@
 npm add @leftium/gg
 ```
 
-## Usage
+## SvelteKit Quick Start
 
-### Basic Logging
+### 1. Add Vite plugins
 
-```javascript
-import { gg } from '@leftium/gg';
+```ts
+// vite.config.ts
+import ggPlugins from '@leftium/gg/vite';
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
 
-// Simple logging
-gg('Hello world');
-
-// Log expressions (returns first argument)
-const result = gg(someFunction());
-
-// Multiple arguments
-gg('User:', user, 'Status:', status);
+export default defineConfig({
+	plugins: [sveltekit(), ...ggPlugins()]
+});
 ```
 
-### Color Support (ANSI)
+`ggPlugins()` includes:
+
+- **Call-sites plugin** -- rewrites `gg()` calls with source file/line/col metadata
+- **Open-in-editor plugin** -- adds dev server middleware for click-to-open
+- **Automatic `es2022` target** -- required for top-level await
+
+### 2. Add the debug console
+
+```svelte
+<!-- src/routes/+layout.svelte -->
+<script>
+	import { GgConsole } from '@leftium/gg';
+</script>
+
+<GgConsole />
+{@render children()}
+```
+
+### 3. Use `gg()` anywhere
+
+```svelte
+<script>
+	import { gg } from '@leftium/gg';
+
+	gg('Hello world');
+
+	// Log expressions (returns first argument)
+	const result = gg(someFunction());
+
+	// Multiple arguments
+	gg('User:', user, 'Status:', status);
+</script>
+```
+
+That's it! In development, a debug console appears automatically.
+In production, add `?gg` to the URL or use a 5-tap gesture to activate.
+
+## GgConsole Options
+
+```svelte
+<GgConsole prod={['url-param', 'gesture']} maxEntries={5000} />
+```
+
+| Prop           | Type                       | Default                    | Description                    |
+| -------------- | -------------------------- | -------------------------- | ------------------------------ |
+| `prod`         | `Array \| string \| false` | `['url-param', 'gesture']` | Production activation triggers |
+| `maxEntries`   | `number`                   | `2000`                     | Max log entries in ring buffer |
+| `erudaOptions` | `object`                   | `{}`                       | Pass-through options to Eruda  |
+
+**Production triggers:**
+
+- `'url-param'` -- activate with `?gg` in the URL (persists to localStorage)
+- `'gesture'` -- activate with 5 rapid taps anywhere on the page
+- `'localStorage'` -- activate if `localStorage['gg-enabled']` is `'true'`
+- `false` -- disable debug console in production entirely
+
+## Vite Plugin Options
+
+```ts
+import ggPlugins from '@leftium/gg/vite';
+
+ggPlugins({
+	callSites: { srcRootPattern: '.*?(/src/)' },
+	openInEditor: false // disable open-in-editor middleware
+});
+```
+
+Individual plugins are also available for advanced setups:
+
+```ts
+import { ggCallSitesPlugin, openInEditorPlugin } from '@leftium/gg/vite';
+```
+
+## Color Support (ANSI)
 
 Color your logs for better visual distinction using `fg()` (foreground/text) and `bg()` (background):
 
@@ -77,10 +148,34 @@ gg(fg('rgb(255,99,71)')`Tomato text`);
 
 **Where colors work:**
 
-- ✅ Native browser console (Chrome DevTools, Firefox, etc.)
-- ✅ Eruda GG panel (mobile debugging)
-- ✅ Node.js terminal
-- ✅ All environments that support ANSI escape codes
+- Native browser console (Chrome DevTools, Firefox, etc.)
+- GgConsole debug panel (mobile debugging)
+- Node.js terminal
+- All environments that support ANSI escape codes
+
+## Other Frameworks
+
+`gg()` works in any JavaScript project. The Vite plugins work with any Vite-based framework (React, Vue, Solid, etc.).
+
+### Vanilla / Non-Svelte Setup
+
+```ts
+// vite.config.ts
+import ggPlugins from '@leftium/gg/vite';
+
+export default defineConfig({
+	plugins: [...ggPlugins()]
+});
+```
+
+```js
+// app.js
+import { gg } from '@leftium/gg';
+import { initGgEruda } from '@leftium/gg/eruda';
+
+initGgEruda();
+gg('works in any framework');
+```
 
 ## Technical Details
 
