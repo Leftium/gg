@@ -290,23 +290,6 @@ export function createGgPlugin(
 		localStorage.setItem(FILTER_KEY, filterPattern);
 	}
 
-	function soloNamespace(namespace: string) {
-		const ns = namespace.trim();
-
-		// Toggle: if already soloed on this namespace, restore all
-		if (filterPattern === ns) {
-			filterPattern = 'gg:*';
-			enabledNamespaces.clear();
-			getAllCapturedNamespaces().forEach((n) => enabledNamespaces.add(n));
-			return;
-		}
-
-		// Solo: show only this namespace
-		filterPattern = ns;
-		enabledNamespaces.clear();
-		enabledNamespaces.add(ns);
-	}
-
 	function simplifyPattern(pattern: string): string {
 		if (!pattern) return '';
 
@@ -396,11 +379,7 @@ export function createGgPlugin(
 
 	function gridColumns(): string {
 		const ns = nsColWidth !== null ? `${nsColWidth}px` : 'auto';
-		// When filter expanded: icons | diff | ns | handle | content
-		// When collapsed:               diff | ns | handle | content
-		if (filterExpanded) {
-			return `auto auto ${ns} 4px 1fr`;
-		}
+		// Grid columns: diff | ns | handle | content
 		return `auto ${ns} 4px 1fr`;
 	}
 
@@ -417,84 +396,46 @@ export function createGgPlugin(
 			.gg-log-entry {
 				display: contents;
 			}
-			.gg-log-header {
-				display: contents;
-			}
-			.gg-log-icons,
-			.gg-log-diff,
-			.gg-log-ns,
-			.gg-log-handle,
-			.gg-log-content {
-				min-width: 0;
-				align-self: start !important;
-				border-top: 1px solid rgba(0,0,0,0.05);
-			}
-			.gg-log-icons {
-				display: flex;
-				gap: 2px;
-				padding: 0 4px 0 0;
-				white-space: nowrap;
-				align-self: stretch !important;
-			}
-			.gg-log-icons button {
-				all: unset;
-				cursor: pointer;
-				opacity: 0.35;
-				padding: 4px 10px;
-				line-height: 1;
-				display: flex;
-				align-items: center;
-			}
-		.gg-log-icons button:hover {
+		.gg-log-header {
+			display: contents;
+		}
+		.gg-log-diff,
+		.gg-log-ns,
+		.gg-log-handle,
+		.gg-log-content {
+			min-width: 0;
+			align-self: start !important;
+			border-top: 1px solid rgba(0,0,0,0.05);
+		}
+	.gg-reset-filter-btn:hover {
+		background: #1976D2 !important;
+		transform: translateY(-1px);
+		box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
+	}
+	.gg-reset-filter-btn:active {
+		transform: translateY(0);
+	}
+		/* Clickable time diff with file metadata (open-in-editor) */
+		.gg-log-diff[data-file] {
+			cursor: pointer;
+			text-decoration: underline;
+			text-decoration-style: dotted;
+			text-underline-offset: 2px;
+			opacity: 0.85;
+		}
+		.gg-log-diff[data-file]:hover {
+			text-decoration-style: solid;
 			opacity: 1;
 			background: rgba(0,0,0,0.05);
 		}
-		.gg-reset-filter-btn:hover {
-			background: #1976D2 !important;
-			transform: translateY(-1px);
-			box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
-		}
-		.gg-reset-filter-btn:active {
-			transform: translateY(0);
-		}
-			.gg-solo-target {
-				cursor: pointer;
-			}
-			.gg-solo-target:hover {
-				background: rgba(0,0,0,0.05);
-			}
-			/* Clickable namespace cells with file metadata (open-in-editor) */
-			.gg-log-ns[data-file] {
-				cursor: pointer;
-				text-decoration: underline;
-				text-decoration-style: dotted;
-				text-underline-offset: 3px;
-			}
-			.gg-log-ns[data-file]:hover {
-				text-decoration-style: solid;
-				background: rgba(0,0,0,0.05);
-			}
-			.gg-log-ns[data-file]::after {
-				content: ' \u{1F4CB}';
-				font-size: 10px;
-				opacity: 0;
-				transition: opacity 0.1s;
-			}
-			.gg-action-open .gg-log-ns[data-file]::after {
-				content: ' \u{1F517}';
-			}
-			.gg-log-ns[data-file]:hover::after {
-				opacity: 1;
-			}
-		/* Clickable namespace segments */
+	/* Clickable namespace segments - always enabled for filtering */
 		.gg-ns-segment {
 			cursor: pointer;
 			padding: 1px 2px;
 			border-radius: 2px;
 			transition: background 0.1s;
 		}
-		/* Only show segment hover styling when in filter mode */
-		.gg-log-grid.filter-mode .gg-ns-segment:hover {
+		.gg-ns-segment:hover {
 			background: rgba(0,0,0,0.1);
 			text-decoration: underline;
 			text-decoration-style: solid;
@@ -513,13 +454,37 @@ export function createGgPlugin(
 					padding: 4px 8px 4px 0;
 					white-space: pre;
 				}
-				.gg-log-ns {
-					font-weight: bold;
-					white-space: nowrap;
-					overflow: hidden;
-					text-overflow: ellipsis;
-					padding: 4px 8px 4px 0;
-				}
+		.gg-log-ns {
+			font-weight: bold;
+			white-space: nowrap;
+			overflow: hidden;
+			padding: 4px 8px 4px 0;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+		}
+		.gg-ns-text {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			min-width: 0;
+		}
+		.gg-ns-hide {
+			all: unset;
+			cursor: pointer;
+			opacity: 0;
+			font-size: 11px;
+			padding: 2px 4px;
+			transition: opacity 0.15s;
+			flex-shrink: 0;
+		}
+		.gg-log-ns:hover .gg-ns-hide {
+			opacity: 0.4;
+		}
+		.gg-ns-hide:hover {
+			opacity: 1 !important;
+			background: rgba(0,0,0,0.08);
+			border-radius: 3px;
+		}
 				.gg-log-handle {
 					width: 4px;
 					cursor: col-resize;
@@ -850,18 +815,17 @@ export function createGgPlugin(
 						display: block;
 						padding: 8px 0;
 					}
-					/* Remove double borders on mobile - only border on entry wrapper */
-					.gg-log-entry:not(:first-child) {
-						border-top: 1px solid rgba(0,0,0,0.05);
-					}
-				.gg-log-icons,
-				.gg-log-diff,
-				.gg-log-ns,
-				.gg-log-handle,
-				.gg-log-content,
-				.gg-details {
-					border-top: none !important;
+				/* Remove double borders on mobile - only border on entry wrapper */
+				.gg-log-entry:not(:first-child) {
+					border-top: 1px solid rgba(0,0,0,0.05);
 				}
+			.gg-log-diff,
+			.gg-log-ns,
+			.gg-log-handle,
+			.gg-log-content,
+			.gg-details {
+				border-top: none !important;
+			}
 			.gg-log-header {
 				display: flex;
 				align-items: center;
@@ -1527,18 +1491,8 @@ export function createGgPlugin(
 				return;
 			}
 
-			// Handle clicking namespace segments
+			// Handle clicking namespace segments - always filter
 			if (target?.classList?.contains('gg-ns-segment')) {
-				// When filter is collapsed, open in editor instead of filtering
-				if (!filterExpanded) {
-					const nsContainer = target.closest('.gg-log-ns') as HTMLElement;
-					if (nsContainer?.hasAttribute('data-file')) {
-						handleNamespaceClick(nsContainer);
-					}
-					return;
-				}
-
-				// When filter is expanded, apply hierarchical filtering
 				const filter = target.getAttribute('data-filter');
 				if (!filter) return;
 
@@ -1561,43 +1515,18 @@ export function createGgPlugin(
 				return;
 			}
 
-			// Handle clicking namespace to open in editor (when filter collapsed)
-			if (
-				target?.classList?.contains('gg-log-ns') &&
-				target.hasAttribute('data-file') &&
-				!target.classList.contains('gg-solo-target')
-			) {
+			// Handle clicking time diff to open in editor
+			if (target?.classList?.contains('gg-log-diff') && target.hasAttribute('data-file')) {
 				handleNamespaceClick(target);
 				return;
 			}
 
-			// Handle filter icon clicks (hide / solo)
-			if (
-				target?.classList?.contains('gg-icon-hide') ||
-				target?.classList?.contains('gg-icon-solo')
-			) {
-				const iconsDiv = target.closest('.gg-log-icons') as HTMLElement;
-				const namespace = iconsDiv?.getAttribute('data-namespace');
-				if (!namespace) return;
-
-				if (target.classList.contains('gg-icon-hide')) {
-					toggleNamespace(namespace, false);
-				} else {
-					soloNamespace(namespace);
-				}
-
-				localStorage.setItem(FILTER_KEY, filterPattern);
-				renderFilterUI();
-				renderLogs();
-				return;
-			}
-
-			// Handle clicking diff/ns cells to solo (same as 🎯)
-			if (target?.classList?.contains('gg-solo-target')) {
+			// Handle clicking hide button for namespace
+			if (target?.classList?.contains('gg-ns-hide')) {
 				const namespace = target.getAttribute('data-namespace');
 				if (!namespace) return;
 
-				soloNamespace(namespace);
+				toggleNamespace(namespace, false);
 				localStorage.setItem(FILTER_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
@@ -1683,6 +1612,61 @@ export function createGgPlugin(
 			// Only hide if we're not moving to another child of the same .gg-expand
 			const related = e.relatedTarget as HTMLElement | null;
 			if (related?.closest?.('.gg-expand') === target) return;
+
+			const tip = containerEl!.querySelector('.gg-hover-tooltip') as HTMLElement | null;
+			if (tip) tip.style.display = 'none';
+		});
+
+		// Tooltip for time diff (open-in-editor action)
+		containerEl.addEventListener('mouseover', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+			if (!target?.classList?.contains('gg-log-diff')) return;
+			if (!target.hasAttribute('data-file')) return;
+
+			const file = target.getAttribute('data-file') || '';
+			const line = target.getAttribute('data-line') || '1';
+			const col = target.getAttribute('data-col') || '1';
+
+			const tip = containerEl!.querySelector('.gg-hover-tooltip') as HTMLElement | null;
+			if (!tip) return;
+
+			// Build tooltip content
+			let actionText = '';
+			if (nsClickAction === 'open' && DEV) {
+				actionText = `Open in editor: ${file}:${line}:${col}`;
+			} else if (nsClickAction === 'open-url') {
+				const formatted = formatString(activeFormat(), file, line, col);
+				actionText = `Open URL: ${formatted}`;
+			} else {
+				const formatted = formatString(activeFormat(), file, line, col);
+				actionText = `Copy: ${formatted}`;
+			}
+
+			tip.textContent = actionText;
+			tip.style.display = 'block';
+
+			// Position below the target
+			const targetRect = target.getBoundingClientRect();
+			let left = targetRect.left;
+			let top = targetRect.bottom + 4;
+
+			// Keep tooltip within viewport
+			const tipRect = tip.getBoundingClientRect();
+			if (left + tipRect.width > window.innerWidth) {
+				left = window.innerWidth - tipRect.width - 8;
+			}
+			if (left < 4) left = 4;
+			if (top + tipRect.height > window.innerHeight) {
+				top = targetRect.top - tipRect.height - 4;
+			}
+
+			tip.style.left = `${left}px`;
+			tip.style.top = `${top}px`;
+		});
+
+		containerEl.addEventListener('mouseout', (e: MouseEvent) => {
+			const target = e.target as HTMLElement;
+			if (!target?.classList?.contains('gg-log-diff')) return;
 
 			const tip = containerEl!.querySelector('.gg-hover-tooltip') as HTMLElement | null;
 			if (tip) tip.style.display = 'none';
@@ -1879,17 +1863,7 @@ export function createGgPlugin(
 						.join(' ');
 				}
 
-				// Filter icons column (only when expanded)
-				const iconsCol = filterExpanded
-					? `<div class="gg-log-icons" data-namespace="${ns}">` +
-						`<button class="gg-icon-hide" title="Hide this namespace">🗑</button>` +
-						`<button class="gg-icon-solo" title="Show only this namespace">🎯</button>` +
-						`</div>`
-					: '';
-
-				// When filter expanded, diff+ns are clickable (solo) with data-namespace
-				const soloAttr = filterExpanded ? ` data-namespace="${ns}"` : '';
-				const soloClass = filterExpanded ? ' gg-solo-target' : '';
+				// Time diff will be clickable for open-in-editor when file metadata exists
 
 				// Open-in-editor data attributes (file, line, col)
 				const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
@@ -1930,9 +1904,8 @@ export function createGgPlugin(
 				return (
 					`<div class="gg-log-entry${levelClass}">` +
 					`<div class="gg-log-header">` +
-					iconsCol +
-					`<div class="gg-log-diff${soloClass}" style="color: ${color};"${soloAttr}>${diff}</div>` +
-					`<div class="gg-log-ns${soloClass}" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"${fileAttr}${lineAttr}${colAttr}${fileTitle}>${nsHTML}</div>` +
+					`<div class="gg-log-diff" style="color: ${color};"${fileAttr}${lineAttr}${colAttr}>${diff}</div>` +
+					`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">🗑</button></div>` +
 					`<div class="gg-log-handle"></div>` +
 					`</div>` +
 					`<div class="gg-log-content"${!entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src) ? ` data-src="${escapeHtml(entry.src)}"` : ''}>${argsHTML}${stackHTML}</div>` +
