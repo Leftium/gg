@@ -862,7 +862,7 @@ export function createGgPlugin(
 		<div class="eruda-gg${nsClickAction === 'open' || nsClickAction === 'open-url' ? ' gg-action-open' : ''}" style="padding: 10px; height: 100%; display: flex; flex-direction: column; font-size: 14px; touch-action: none; overscroll-behavior: contain;">
 			<div class="gg-toolbar">
 				<button class="gg-copy-btn">
-					<span class="gg-btn-text">Copy</span>
+					<span class="gg-btn-text">📋 <span class="gg-copy-count">Copy 0 entries</span></span>
 					<span class="gg-btn-icon" title="Copy">📋</span>
 				</button>
 			<button class="gg-filter-btn" style="text-align: left; white-space: nowrap;">
@@ -870,11 +870,11 @@ export function createGgPlugin(
 				<span class="gg-btn-icon">NS: </span>
 				<span class="gg-filter-summary"></span>
 			</button>
+				<span style="flex: 1;"></span>
 				<button class="gg-settings-btn">
 					<span class="gg-btn-text">⚙️ Settings</span>
 					<span class="gg-btn-icon" title="Settings">⚙️</span>
 				</button>
-				<span class="gg-count" style="opacity: 0.6; white-space: nowrap; flex: 1; text-align: right;"></span>
 				<button class="gg-clear-btn">
 					<span class="gg-btn-text">Clear</span>
 					<span class="gg-btn-icon" title="Clear">⊘</span>
@@ -1733,8 +1733,8 @@ export function createGgPlugin(
 		if (!$el) return;
 
 		const logContainer = $el.find('.gg-log-container');
-		const countSpan = $el.find('.gg-count');
-		if (!logContainer.length || !countSpan.length) return;
+		const copyCountSpan = $el.find('.gg-copy-count');
+		if (!logContainer.length || !copyCountSpan.length) return;
 
 		const allEntries = buffer.getEntries();
 
@@ -1746,9 +1746,9 @@ export function createGgPlugin(
 
 		const countText =
 			entries.length === allEntries.length
-				? `${entries.length} entries`
-				: `${entries.length} / ${allEntries.length} entries`;
-		countSpan.html(countText);
+				? `Copy ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
+				: `Copy ${entries.length} / ${allEntries.length} ${entries.length === 1 ? 'entry' : 'entries'}`;
+		copyCountSpan.html(countText);
 
 		if (entries.length === 0) {
 			const hasFilteredLogs = allEntries.length > 0;
