@@ -3,9 +3,6 @@
 	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
 	import { testManualNs, testAnsiColors } from './demo-helpers.js';
 
-	// gg() with no arguments returns call-site info for open-in-editor
-	const ggResult = gg();
-
 	// Early log buffer in gg.ts handles buffering before Eruda loads
 	gg('Hello, gg!!');
 	gg('The colored *callpoint* indicates the location of this logg. (As filename@function)');
@@ -34,10 +31,6 @@
 	<button onclick={() => gg.ns('$NS:click', 'template event handler')}>🔬 Template gg()</button>
 </div>
 
-<OpenInEditorLink
-	url={ggResult.url}
-	fileName={ggResult.fileName}
-	title={`${ggResult.fileName}@${ggResult.functionName}`}
-/>
+<OpenInEditorLink gg={gg()} />
 
 <p><small>Template expression: {gg('inline template gg()')}</small></p>
