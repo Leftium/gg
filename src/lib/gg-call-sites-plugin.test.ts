@@ -212,4 +212,21 @@ describe('edge cases', () => {
 		// Template prose: left untouched (prose text, not a code expression)
 		expect(out).toContain('gg.ns("label")');
 	});
+
+	it('does not let HTML apostrophes break gg() in template expressions', () => {
+		// Regression: an apostrophe in HTML prose (e.g. "Eruda's") was treated as
+		// a JS string delimiter, causing the scanner to skip over a subsequent
+		// gg.ns() call inside an onclick handler.
+		const code = `<script>
+	import { gg } from '$lib/index.js';
+</script>
+
+<p>Check Eruda's GG tab.</p>
+<button onclick={() => gg.ns('$NS:click', 'event handler')}>Click</button>`;
+		const out = transform(code)!;
+		expect(out).not.toBeNull();
+		// $NS should be expanded to the file path, not left as literal '$NS'
+		expect(out).toContain('routes/+page.svelte:click');
+		expect(out).not.toContain("'$NS:click'");
+	});
 });

@@ -720,64 +720,72 @@ export function transformGgCalls(
 	// States for string/comment tracking
 	let i = 0;
 	while (i < code.length) {
-		// Skip single-line comments
-		if (code[i] === '/' && code[i + 1] === '/') {
-			const end = code.indexOf('\n', i);
-			i = end === -1 ? code.length : end + 1;
-			continue;
-		}
+		// For .svelte files, only apply JS string/comment/backtick skipping inside
+		// code ranges (script blocks + template expressions). Outside code ranges,
+		// characters like ' " ` // /* are just HTML prose — NOT JS syntax.
+		// e.g. "Eruda's" contains an apostrophe that is NOT a JS string delimiter.
+		const inCodeRange = !svelteInfo || !!rangeAt(i);
 
-		// Skip multi-line comments
-		if (code[i] === '/' && code[i + 1] === '*') {
-			const end = code.indexOf('*/', i + 2);
-			i = end === -1 ? code.length : end + 2;
-			continue;
-		}
-
-		// Skip template literals (backticks)
-		if (code[i] === '`') {
-			i++;
-			let depth = 0;
-			while (i < code.length) {
-				if (code[i] === '\\') {
-					i += 2;
-					continue;
-				}
-				if (code[i] === '$' && code[i + 1] === '{') {
-					depth++;
-					i += 2;
-					continue;
-				}
-				if (code[i] === '}' && depth > 0) {
-					depth--;
-					i++;
-					continue;
-				}
-				if (code[i] === '`' && depth === 0) {
-					i++;
-					break;
-				}
-				i++;
+		if (inCodeRange) {
+			// Skip single-line comments
+			if (code[i] === '/' && code[i + 1] === '/') {
+				const end = code.indexOf('\n', i);
+				i = end === -1 ? code.length : end + 1;
+				continue;
 			}
-			continue;
-		}
 
-		// Skip strings (single and double quotes)
-		if (code[i] === '"' || code[i] === "'") {
-			const quote = code[i];
-			i++;
-			while (i < code.length) {
-				if (code[i] === '\\') {
-					i += 2;
-					continue;
-				}
-				if (code[i] === quote) {
-					i++;
-					break;
-				}
-				i++;
+			// Skip multi-line comments
+			if (code[i] === '/' && code[i + 1] === '*') {
+				const end = code.indexOf('*/', i + 2);
+				i = end === -1 ? code.length : end + 2;
+				continue;
 			}
-			continue;
+
+			// Skip template literals (backticks)
+			if (code[i] === '`') {
+				i++;
+				let depth = 0;
+				while (i < code.length) {
+					if (code[i] === '\\') {
+						i += 2;
+						continue;
+					}
+					if (code[i] === '$' && code[i + 1] === '{') {
+						depth++;
+						i += 2;
+						continue;
+					}
+					if (code[i] === '}' && depth > 0) {
+						depth--;
+						i++;
+						continue;
+					}
+					if (code[i] === '`' && depth === 0) {
+						i++;
+						break;
+					}
+					i++;
+				}
+				continue;
+			}
+
+			// Skip strings (single and double quotes)
+			if (code[i] === '"' || code[i] === "'") {
+				const quote = code[i];
+				i++;
+				while (i < code.length) {
+					if (code[i] === '\\') {
+						i += 2;
+						continue;
+					}
+					if (code[i] === quote) {
+						i++;
+						break;
+					}
+					i++;
+				}
+				continue;
+			}
 		}
 
 		// Look for 'gg' pattern — could be gg( or gg.ns(
