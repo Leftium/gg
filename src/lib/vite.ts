@@ -24,8 +24,6 @@ export interface GgPluginsOptions {
  * Includes:
  * - `ggCallSitesPlugin` — rewrites `gg()` calls with source file/line/col metadata
  * - `openInEditorPlugin` — adds `/__open-in-editor` dev server middleware
- * - Automatic `es2022` build target (required for top-level await)
- *
  * @example
  * ```ts
  * import ggPlugins from '@leftium/gg/vite';
@@ -37,24 +35,6 @@ export interface GgPluginsOptions {
  */
 export default function ggPlugins(options: GgPluginsOptions = {}): Plugin[] {
 	const plugins: Plugin[] = [];
-
-	// Ensure es2022 target for top-level await support
-	plugins.push({
-		name: 'gg-config',
-		config() {
-			return {
-				build: {
-					target: 'es2022'
-				},
-				optimizeDeps: {
-					esbuildOptions: {
-						target: 'es2022',
-						supported: { 'top-level-await': true }
-					}
-				}
-			};
-		}
-	});
 
 	plugins.push(ggCallSitesPlugin(options.callSites));
 

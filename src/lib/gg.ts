@@ -65,25 +65,36 @@ type DotenvModule = typeof import('dotenv');
 type HttpModule = typeof import('http');
 type AddressInfo = import('net').AddressInfo;
 
-// Try to load Node.js modules if not in CloudFlare Workers
+// Lazy-load Node.js modules to avoid top-level await (Safari compatibility).
+// The imports start immediately but don't block module evaluation.
 let dotenvModule: DotenvModule | null = null;
 let httpModule: HttpModule | null = null;
 
-if (!isCloudflareWorker() && !BROWSER) {
-	try {
-		dotenvModule = await import('dotenv');
-	} catch {
-		httpModule = await import('http');
-		// Failed to import Node.js modules
-		console.warn('gg: Node.js modules not available');
-	}
+function loadServerModules(): Promise<void> {
+	if (isCloudflareWorker() || BROWSER) return Promise.resolve();
+
+	return (async () => {
+		try {
+			dotenvModule = await import('dotenv');
+		} catch {
+			// dotenv not available — optional dependency
+		}
+		try {
+			httpModule = await import('http');
+		} catch {
+			console.warn('gg: Node.js http module not available');
+		}
+	})();
 }
+
+// Start loading immediately (non-blocking)
+const serverModulesReady = loadServerModules();
 
 function findAvailablePort(startingPort: number): Promise<number> {
 	if (!httpModule) return Promise.resolve(startingPort);
 
 	return new Promise((resolve) => {
-		const server = httpModule.createServer();
+		const server = httpModule!.createServer();
 		server.listen(startingPort, () => {
 			const actualPort = (server?.address() as AddressInfo)?.port;
 			server.close(() => resolve(actualPort));
@@ -108,17 +119,24 @@ function getServerPort(): Promise<string | number> {
 			// CloudFlare Workers - return default port
 			resolve('5173');
 		} else {
-			// Node.js environment
-			const startingPort = Number(process?.env?.PORT) || 5173; // Default to Vite's default port
-
-			findAvailablePort(startingPort).then((actualPort) => {
-				resolve(actualPort);
+			// Node.js environment — wait for http module to be available
+			serverModulesReady.then(() => {
+				const startingPort = Number(process?.env?.PORT) || 5173; // Default to Vite's default port
+				findAvailablePort(startingPort).then((actualPort) => {
+					resolve(actualPort);
+				});
 			});
 		}
 	});
 }
 
-const port = await getServerPort();
+// Port resolution starts immediately but doesn't block module evaluation.
+// The template is updated asynchronously once the port is known.
+let port: string | number = 5173; // Default fallback
+void getServerPort().then((p) => {
+	port = p;
+	ggConfig.openInEditorUrlTemplate = `http://localhost:${port}/__open-in-editor?file=$FILENAME`;
+});
 
 /**
  * Determines if gg should be enabled based on environment and runtime triggers.
@@ -469,9 +487,9 @@ gg._o = function (
 	return { ns, file, line, col, src };
 };
 
-gg.disable = isCloudflareWorker() ? () => {} : debugFactory.disable;
+gg.disable = isCloudflareWorker() ? () => '' : () => debugFactory.disable();
 
-gg.enable = isCloudflareWorker() ? () => {} : debugFactory.enable;
+gg.enable = isCloudflareWorker() ? () => {} : (ns: string) => debugFactory.enable(ns);
 
 /**
  * Clear the persisted gg-enabled state from localStorage.
@@ -1278,6 +1296,9 @@ let diagnosticsRan = false;
 export async function runGgDiagnostics() {
 	if (!ggConfig.showHints || isCloudflareWorker() || diagnosticsRan) return;
 	diagnosticsRan = true;
+
+	// Ensure server modules (dotenv) are loaded before diagnostics
+	await serverModulesReady;
 
 	// Create test debugger for server-side enabled check
 	const ggLogTest = debugFactory('gg:TEST');
