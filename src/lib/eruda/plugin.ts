@@ -142,6 +142,31 @@ export function createGgPlugin(
 		}
 	}
 
+	/**
+	 * Format a single log entry for clipboard copy
+	 * Produces: HH:MM:SS.mmm namespace args [optional expression]
+	 */
+	function formatEntryForClipboard(entry: CapturedEntry, includeExpressions: boolean): string {
+		// Extract HH:MM:SS.mmm from timestamp (with milliseconds)
+		const time = new Date(entry.timestamp).toISOString().slice(11, 23);
+		// Trim namespace and strip 'gg:' prefix to save tokens
+		const ns = entry.namespace.trim().replace(/^gg:/, '');
+		// Include expression suffix when toggle is enabled
+		const hasSrcExpr = !entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src);
+		const exprSuffix = includeExpressions && hasSrcExpr ? ` \u2039${entry.src}\u203A` : '';
+		// Format args: compact JSON for objects, primitives as-is
+		const argsStr = entry.args
+			.map((arg) => {
+				if (typeof arg === 'object' && arg !== null) {
+					return JSON.stringify(arg);
+				}
+				// Strip ANSI escape codes from string args
+				return stripAnsi(String(arg));
+			})
+			.join(' ');
+		return `${time} ${ns} ${argsStr}${exprSuffix}`;
+	}
+
 	const plugin = {
 		name: 'GG',
 
@@ -1478,26 +1503,7 @@ export function createGgPlugin(
 			);
 
 			const text = entries
-				.map((e: CapturedEntry) => {
-					// Extract HH:MM:SS.mmm from timestamp (with milliseconds)
-					const time = new Date(e.timestamp).toISOString().slice(11, 23);
-					// Trim namespace and strip 'gg:' prefix to save tokens
-					const ns = e.namespace.trim().replace(/^gg:/, '');
-					// Include expression suffix when toggle is enabled
-					const hasSrcExpr = !e.level && e.src?.trim() && !/^['"`]/.test(e.src);
-					const exprSuffix = showExpressions && hasSrcExpr ? ` \u2039${e.src}\u203A` : '';
-					// Format args: compact JSON for objects, primitives as-is
-					const argsStr = e.args
-						.map((arg) => {
-							if (typeof arg === 'object' && arg !== null) {
-								return JSON.stringify(arg);
-							}
-							// Strip ANSI escape codes from string args
-							return stripAnsi(String(arg));
-						})
-						.join(' ');
-					return `${time} ${ns} ${argsStr}${exprSuffix}`;
-				})
+				.map((e: CapturedEntry) => formatEntryForClipboard(e, showExpressions))
 				.join('\n');
 
 			try {
@@ -1970,20 +1976,7 @@ export function createGgPlugin(
 
 				e.preventDefault();
 
-				const time = new Date(entry.timestamp).toISOString().slice(11, 23);
-				const ns = entry.namespace.trim().replace(/^gg:/, '');
-				// Include expression suffix when toggle is enabled
-				const hasSrcExpr = !entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src);
-				const exprSuffix = showExpressions && hasSrcExpr ? ` \u2039${entry.src}\u203A` : '';
-				const argsStr = entry.args
-					.map((arg) => {
-						if (typeof arg === 'object' && arg !== null) {
-							return JSON.stringify(arg);
-						}
-						return stripAnsi(String(arg));
-					})
-					.join(' ');
-				const text = `${time} ${ns} ${argsStr}${exprSuffix}`;
+				const text = formatEntryForClipboard(entry, showExpressions);
 
 				navigator.clipboard.writeText(text).then(() => {
 					showConfirmationTooltip(containerEl, contentEl, 'Copied message');
