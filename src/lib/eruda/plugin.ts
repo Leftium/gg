@@ -1479,8 +1479,8 @@ export function createGgPlugin(
 
 			const text = entries
 				.map((e: CapturedEntry) => {
-					// Extract just HH:MM:SS from timestamp (compact for LLMs)
-					const time = new Date(e.timestamp).toISOString().slice(11, 19);
+					// Extract HH:MM:SS.mmm from timestamp (with milliseconds)
+					const time = new Date(e.timestamp).toISOString().slice(11, 23);
 					// Trim namespace and strip 'gg:' prefix to save tokens
 					const ns = e.namespace.trim().replace(/^gg:/, '');
 					// Include expression suffix when toggle is enabled
@@ -1970,7 +1970,7 @@ export function createGgPlugin(
 
 				e.preventDefault();
 
-				const time = new Date(entry.timestamp).toISOString().slice(11, 19);
+				const time = new Date(entry.timestamp).toISOString().slice(11, 23);
 				const ns = entry.namespace.trim().replace(/^gg:/, '');
 				// Include expression suffix when toggle is enabled
 				const hasSrcExpr = !entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src);
