@@ -48,7 +48,7 @@
 
 <h1>gg() demo/test site</h1>
 
-<p>Open the browser dev console or Eruda's GG tab to check the output of gg().</p>
+<p>Check the Eruda GG tab below or the browser dev console to see the output of gg().</p>
 
 <div style="margin-bottom: 1rem;">
 	<button onclick={testLog}>🧪 Test gg() Log</button>

@@ -98,6 +98,8 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 
 		// Make GG tab the default selected tab
 		eruda.show('GG');
+		// Expand the Eruda panel (open from minimized floating button state)
+		eruda.show();
 
 		// Run diagnostics after Eruda is ready so they appear in Console tab
 		await runGgDiagnostics();
