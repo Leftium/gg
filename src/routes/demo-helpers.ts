@@ -315,7 +315,7 @@ let stressAbort = false;
  * batching multiple calls per frame to simulate a realistic WS message flood.
  * Returns a function to abort the run.
  */
-export function stressTest(): () => void {
+export function stressTest(onDone?: () => void): () => void {
 	const total = 3000;
 	const perFrame = 10; // messages per rAF tick — simulates burst of WS msgs
 	let i = 0;
@@ -329,6 +329,7 @@ export function stressTest(): () => void {
 		if (stressAbort || i >= total) {
 			const elapsed = (performance.now() - startTime).toFixed(0);
 			gg.info(`Stress test done: ${i}/${total} msgs in ${elapsed} ms`);
+			onDone?.();
 			return;
 		}
 		const end = Math.min(i + perFrame, total);

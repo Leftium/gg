@@ -65,6 +65,13 @@ export function createGgPlugin(
 	const URL_FORMAT_KEY = 'gg-url-format';
 	const PROJECT_ROOT_KEY = 'gg-project-root';
 
+	// Render batching: coalesce multiple _onLog calls into a single rAF
+	let renderPending = false;
+	let pendingEntries: CapturedEntry[] = []; // new entries since last render
+
+	// All namespaces ever seen (maintained incrementally, avoids scanning buffer)
+	const allNamespacesSet = new Set<string>();
+
 	// Plugin detection state (probed once at init)
 	let openInEditorPluginDetected: boolean | null = null; // null = not yet probed
 
@@ -181,8 +188,9 @@ export function createGgPlugin(
 			// Register the capture hook on gg
 			if (gg) {
 				gg._onLog = (entry: CapturedEntry) => {
-					// Track namespaces for filter UI update (check BEFORE pushing to buffer)
-					const hadNamespace = getAllCapturedNamespaces().includes(entry.namespace);
+					// Track namespaces incrementally (O(1) instead of scanning buffer)
+					const isNewNamespace = !allNamespacesSet.has(entry.namespace);
+					allNamespacesSet.add(entry.namespace);
 					buffer.push(entry);
 					// Add new namespace to enabledNamespaces if it matches the current pattern
 					const effectivePattern = filterPattern || 'gg:*';
@@ -190,10 +198,20 @@ export function createGgPlugin(
 						enabledNamespaces.add(entry.namespace);
 					}
 					// Update filter UI if new namespace appeared (updates button summary count)
-					if (!hadNamespace) {
+					if (isNewNamespace) {
 						renderFilterUI();
 					}
-					renderLogs();
+					// Batch: collect pending entries, schedule one render per frame
+					pendingEntries.push(entry);
+					if (!renderPending) {
+						renderPending = true;
+						requestAnimationFrame(() => {
+							renderPending = false;
+							const batch = pendingEntries;
+							pendingEntries = [];
+							appendLogs(batch);
+						});
+					}
 				};
 			}
 
@@ -249,6 +267,7 @@ export function createGgPlugin(
 				gg._onLog = null;
 			}
 			buffer.clear();
+			allNamespacesSet.clear();
 		}
 	};
 
@@ -342,10 +361,7 @@ export function createGgPlugin(
 	}
 
 	function getAllCapturedNamespaces(): string[] {
-		const entries = buffer.getEntries();
-		const nsSet = new Set<string>();
-		entries.forEach((e: CapturedEntry) => nsSet.add(e.namespace));
-		return Array.from(nsSet).sort();
+		return Array.from(allNamespacesSet).sort();
 	}
 
 	function namespaceMatchesPattern(namespace: string, pattern: string): boolean {
@@ -1492,6 +1508,7 @@ export function createGgPlugin(
 
 		$el.find('.gg-clear-btn').on('click', () => {
 			buffer.clear();
+			allNamespacesSet.clear();
 			renderLogs();
 		});
 
@@ -2164,12 +2181,241 @@ export function createGgPlugin(
 		resizeAttached = true;
 	}
 
+	/** Build the HTML string for a single log entry */
+	function renderEntryHTML(entry: CapturedEntry, index: number): string {
+		const color = entry.color || '#0066cc';
+		const diff = `+${humanize(entry.diff)}`;
+
+		// Split namespace into clickable segments on multiple delimiters: : @ / - _
+		const parts = entry.namespace.split(/([:/@ \-_])/);
+		const nsSegments: string[] = [];
+		const delimiters: string[] = [];
+
+		for (let i = 0; i < parts.length; i++) {
+			if (i % 2 === 0) {
+				// Even indices are segments
+				if (parts[i]) nsSegments.push(parts[i]);
+			} else {
+				// Odd indices are delimiters
+				delimiters.push(parts[i]);
+			}
+		}
+
+		let nsHTML = '';
+		for (let i = 0; i < nsSegments.length; i++) {
+			const segment = escapeHtml(nsSegments[i]);
+
+			// Build filter pattern: reconstruct namespace up to this point
+			let filterPattern = '';
+			for (let j = 0; j <= i; j++) {
+				filterPattern += nsSegments[j];
+				if (j < i) {
+					filterPattern += delimiters[j];
+				} else if (j < nsSegments.length - 1) {
+					filterPattern += delimiters[j] + '*';
+				}
+			}
+
+			nsHTML += `<span class="gg-ns-segment" data-filter="${escapeHtml(filterPattern)}">${segment}</span>`;
+			if (i < nsSegments.length - 1) {
+				nsHTML += escapeHtml(delimiters[i]);
+			}
+		}
+
+		// Format each arg individually - objects are expandable
+		let argsHTML = '';
+		let detailsHTML = '';
+		// Source expression for this entry (used in hover tooltips and expanded details)
+		const srcExpr = entry.src?.trim() && !/^['"`]/.test(entry.src) ? escapeHtml(entry.src) : '';
+
+		// HTML table rendering for gg.table() entries
+		if (entry.tableData && entry.tableData.keys.length > 0) {
+			const { keys, rows: tableRows } = entry.tableData;
+			const headerCells = keys
+				.map(
+					(k) =>
+						`<th style="padding: 2px 8px; border: 1px solid #ccc; background: #f0f0f0; font-size: 11px; white-space: nowrap;">${escapeHtml(k)}</th>`
+				)
+				.join('');
+			const bodyRowsHtml = tableRows
+				.map((row) => {
+					const cells = keys
+						.map((k) => {
+							const val = row[k];
+							const display = val === undefined ? '' : escapeHtml(String(val));
+							return `<td style="padding: 2px 8px; border: 1px solid #ddd; font-size: 11px; white-space: nowrap;">${display}</td>`;
+						})
+						.join('');
+					return `<tr>${cells}</tr>`;
+				})
+				.join('');
+			argsHTML = `<div style="overflow-x: auto;"><table style="border-collapse: collapse; margin: 2px 0; font-family: monospace;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRowsHtml}</tbody></table></div>`;
+		} else if (entry.args.length > 0) {
+			argsHTML = entry.args
+				.map((arg, argIdx) => {
+					if (typeof arg === 'object' && arg !== null) {
+						// Show expandable object
+						const preview = Array.isArray(arg) ? `Array(${arg.length})` : 'Object';
+						const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
+						const uniqueId = `${index}-${argIdx}`;
+						// Expression header inside expanded details
+						const srcHeader = srcExpr ? `<div class="gg-details-src">${srcExpr}</div>` : '';
+						// Store details separately to render after the row
+						detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;">${srcHeader}<pre style="margin: 0;">${jsonStr}</pre></div>`;
+						// data-entry/data-arg for hover tooltip lookup, data-src for expression context
+						const srcAttr = srcExpr ? ` data-src="${srcExpr}"` : '';
+						const srcIcon = srcExpr ? `<span class="gg-src-icon">\uD83D\uDD0D</span>` : '';
+						// Show expression inline after preview when toggle is enabled
+						const inlineExpr =
+							showExpressions && srcExpr
+								? ` <span class="gg-inline-expr">\u2039${srcExpr}\u203A</span>`
+								: '';
+						return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}${inlineExpr}</span>`;
+					} else {
+						// Parse ANSI codes first, then convert URLs to clickable links
+						const argStr = String(arg);
+						const parsedAnsi = parseAnsiToHtml(argStr);
+						return `<span>${parsedAnsi}</span>`;
+					}
+				})
+				.join(' ');
+		}
+
+		// Open-in-editor data attributes (file, line, col)
+		const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
+		const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
+		const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
+
+		// Level class for info/warn/error styling
+		const levelClass =
+			entry.level === 'info'
+				? ' gg-level-info'
+				: entry.level === 'warn'
+					? ' gg-level-warn'
+					: entry.level === 'error'
+						? ' gg-level-error'
+						: '';
+
+		// Stack trace toggle (for error/trace entries with captured stacks)
+		let stackHTML = '';
+		if (entry.stack) {
+			const stackId = `stack-${index}`;
+			stackHTML =
+				`<span class="gg-stack-toggle" data-stack-id="${stackId}">▶ stack</span>` +
+				`<div class="gg-stack-content" data-stack-id="${stackId}">${escapeHtml(entry.stack)}</div>`;
+		}
+
+		// Expression tooltip: skip table entries (tableData) -- expression is just gg.table(...) which isn't useful
+		const hasSrcExpr =
+			!entry.level && !entry.tableData && entry.src?.trim() && !/^['"`]/.test(entry.src);
+		// For primitives-only entries, append inline expression when showExpressions is enabled
+		const inlineExprForPrimitives =
+			showExpressions && hasSrcExpr && !argsHTML.includes('gg-expand')
+				? ` <span class="gg-inline-expr">\u2039${escapeHtml(entry.src!)}\u203A</span>`
+				: '';
+
+		return (
+			`<div class="gg-log-entry${levelClass}" data-entry="${index}">` +
+			`<div class="gg-log-header">` +
+			`<div class="gg-log-diff" style="color: ${color};"${fileAttr}${lineAttr}${colAttr}>${diff}</div>` +
+			`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
+			`<div class="gg-log-handle"></div>` +
+			`</div>` +
+			`<div class="gg-log-content"${hasSrcExpr ? ` data-src="${escapeHtml(entry.src!)}"` : ''}>${argsHTML}${inlineExprForPrimitives}${stackHTML}</div>` +
+			detailsHTML +
+			`</div>`
+		);
+	}
+
+	/** Update the copy-button count text */
+	function updateCopyCount() {
+		if (!$el) return;
+		const copyCountSpan = $el.find('.gg-copy-count');
+		if (!copyCountSpan.length) return;
+		const allCount = buffer.size;
+		const visibleCount = renderedEntries.length;
+		const countText =
+			visibleCount === allCount
+				? `Copy ${visibleCount} ${visibleCount === 1 ? 'entry' : 'entries'}`
+				: `Copy ${visibleCount} / ${allCount} ${visibleCount === 1 ? 'entry' : 'entries'}`;
+		copyCountSpan.html(countText);
+	}
+
+	/** Scroll to bottom only if user is already near the bottom */
+	function autoScroll(el: HTMLElement) {
+		const threshold = 50; // px from bottom
+		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+		if (nearBottom) el.scrollTop = el.scrollHeight;
+	}
+
+	/**
+	 * Incremental append: add new entries to the existing DOM without full rebuild.
+	 * Called from the rAF-batched _onLog path.
+	 */
+	function appendLogs(newEntries: CapturedEntry[]) {
+		if (!$el) return;
+
+		const logContainer = $el.find('.gg-log-container');
+		if (!logContainer.length) return;
+
+		// Filter new entries to only those matching enabled namespaces
+		const visibleNew = newEntries.filter((e) => enabledNamespaces.has(e.namespace));
+
+		// If there's no grid yet (first entries, or was showing empty state), do a full render
+		const containerDom = logContainer.get(0) as HTMLElement | undefined;
+		const grid = containerDom?.querySelector('.gg-log-grid');
+		if (!grid || !containerDom) {
+			renderLogs();
+			return;
+		}
+
+		if (visibleNew.length === 0) {
+			// New entries were all filtered out, just update count
+			updateCopyCount();
+			return;
+		}
+
+		// Compute the starting index (position in the renderedEntries array)
+		const startIndex = renderedEntries.length;
+
+		// Add to renderedEntries
+		renderedEntries.push(...visibleNew);
+
+		// Build HTML for just the new entries
+		const html = visibleNew.map((entry, i) => renderEntryHTML(entry, startIndex + i)).join('');
+
+		// Append to existing grid (no full DOM teardown!)
+		grid.insertAdjacentHTML('beforeend', html);
+
+		// Handle buffer overflow: the buffer evicts oldest entries when full.
+		// Count DOM entries and remove excess from the front to stay in sync.
+		// This avoids an expensive buffer.getEntries() + filter call.
+		const domEntries = grid.querySelectorAll(':scope > .gg-log-entry');
+		const excess = domEntries.length - buffer.capacity;
+		if (excess > 0) {
+			for (let i = 0; i < excess; i++) {
+				// Remove the entry and any associated .gg-details siblings
+				domEntries[i].remove();
+			}
+			// Trim renderedEntries from the front to match
+			renderedEntries.splice(0, excess);
+		}
+
+		updateCopyCount();
+
+		// Re-wire expanders after rendering
+		wireUpExpanders();
+
+		// Smart auto-scroll
+		autoScroll(containerDom);
+	}
+
+	/** Full render: rebuild the entire log view (used for filter changes, clear, show, etc.) */
 	function renderLogs() {
 		if (!$el) return;
 
 		const logContainer = $el.find('.gg-log-container');
-		const copyCountSpan = $el.find('.gg-copy-count');
-		if (!logContainer.length || !copyCountSpan.length) return;
+		if (!logContainer.length) return;
 
 		const allEntries = buffer.getEntries();
 
@@ -2179,11 +2425,7 @@ export function createGgPlugin(
 		);
 		renderedEntries = entries;
 
-		const countText =
-			entries.length === allEntries.length
-				? `Copy ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
-				: `Copy ${entries.length} / ${allEntries.length} ${entries.length === 1 ? 'entry' : 'entries'}`;
-		copyCountSpan.html(countText);
+		updateCopyCount();
 
 		if (entries.length === 0) {
 			const hasFilteredLogs = allEntries.length > 0;
@@ -2200,156 +2442,7 @@ export function createGgPlugin(
 		}
 
 		const logsHTML = `<div class="gg-log-grid${filterExpanded ? ' filter-mode' : ''}${showExpressions ? ' gg-show-expr' : ''}" style="grid-template-columns: ${gridColumns()};">${entries
-			.map((entry: CapturedEntry, index: number) => {
-				const color = entry.color || '#0066cc';
-				const diff = `+${humanize(entry.diff)}`;
-
-				// Split namespace into clickable segments on multiple delimiters: : @ / - _
-				const parts = entry.namespace.split(/([:/@ \-_])/);
-				const nsSegments: string[] = [];
-				const delimiters: string[] = [];
-
-				for (let i = 0; i < parts.length; i++) {
-					if (i % 2 === 0) {
-						// Even indices are segments
-						if (parts[i]) nsSegments.push(parts[i]);
-					} else {
-						// Odd indices are delimiters
-						delimiters.push(parts[i]);
-					}
-				}
-
-				let nsHTML = '';
-				for (let i = 0; i < nsSegments.length; i++) {
-					const segment = escapeHtml(nsSegments[i]);
-
-					// Build filter pattern: reconstruct namespace up to this point
-					let filterPattern = '';
-					for (let j = 0; j <= i; j++) {
-						filterPattern += nsSegments[j];
-						if (j < i) {
-							filterPattern += delimiters[j];
-						} else if (j < nsSegments.length - 1) {
-							filterPattern += delimiters[j] + '*';
-						}
-					}
-
-					nsHTML += `<span class="gg-ns-segment" data-filter="${escapeHtml(filterPattern)}">${segment}</span>`;
-					if (i < nsSegments.length - 1) {
-						nsHTML += escapeHtml(delimiters[i]);
-					}
-				}
-
-				// Format each arg individually - objects are expandable
-				let argsHTML = '';
-				let detailsHTML = '';
-				// Source expression for this entry (used in hover tooltips and expanded details)
-				const srcExpr = entry.src?.trim() && !/^['"`]/.test(entry.src) ? escapeHtml(entry.src) : '';
-
-				// HTML table rendering for gg.table() entries
-				if (entry.tableData && entry.tableData.keys.length > 0) {
-					const { keys, rows: tableRows } = entry.tableData;
-					const headerCells = keys
-						.map(
-							(k) =>
-								`<th style="padding: 2px 8px; border: 1px solid #ccc; background: #f0f0f0; font-size: 11px; white-space: nowrap;">${escapeHtml(k)}</th>`
-						)
-						.join('');
-					const bodyRowsHtml = tableRows
-						.map((row) => {
-							const cells = keys
-								.map((k) => {
-									const val = row[k];
-									const display = val === undefined ? '' : escapeHtml(String(val));
-									return `<td style="padding: 2px 8px; border: 1px solid #ddd; font-size: 11px; white-space: nowrap;">${display}</td>`;
-								})
-								.join('');
-							return `<tr>${cells}</tr>`;
-						})
-						.join('');
-					argsHTML = `<div style="overflow-x: auto;"><table style="border-collapse: collapse; margin: 2px 0; font-family: monospace;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRowsHtml}</tbody></table></div>`;
-				} else if (entry.args.length > 0) {
-					argsHTML = entry.args
-						.map((arg, argIdx) => {
-							if (typeof arg === 'object' && arg !== null) {
-								// Show expandable object
-								const preview = Array.isArray(arg) ? `Array(${arg.length})` : 'Object';
-								const jsonStr = escapeHtml(JSON.stringify(arg, null, 2));
-								const uniqueId = `${index}-${argIdx}`;
-								// Expression header inside expanded details
-								const srcHeader = srcExpr ? `<div class="gg-details-src">${srcExpr}</div>` : '';
-								// Store details separately to render after the row
-								detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;">${srcHeader}<pre style="margin: 0;">${jsonStr}</pre></div>`;
-								// data-entry/data-arg for hover tooltip lookup, data-src for expression context
-								const srcAttr = srcExpr ? ` data-src="${srcExpr}"` : '';
-								const srcIcon = srcExpr ? `<span class="gg-src-icon">\uD83D\uDD0D</span>` : '';
-								// Show expression inline after preview when toggle is enabled
-								const inlineExpr =
-									showExpressions && srcExpr
-										? ` <span class="gg-inline-expr">\u2039${srcExpr}\u203A</span>`
-										: '';
-								return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}${inlineExpr}</span>`;
-							} else {
-								// Parse ANSI codes first, then convert URLs to clickable links
-								const argStr = String(arg);
-								const parsedAnsi = parseAnsiToHtml(argStr);
-								// Note: URL linking happens after ANSI parsing, so links work inside colored text
-								// This is a simple approach - URLs inside ANSI codes won't be linkified
-								// For more complex parsing, we'd need to track ANSI state while matching URLs
-								return `<span>${parsedAnsi}</span>`;
-							}
-						})
-						.join(' ');
-				}
-
-				// Time diff will be clickable for open-in-editor when file metadata exists
-
-				// Open-in-editor data attributes (file, line, col)
-				const fileAttr = entry.file ? ` data-file="${escapeHtml(entry.file)}"` : '';
-				const lineAttr = entry.line ? ` data-line="${entry.line}"` : '';
-				const colAttr = entry.col ? ` data-col="${entry.col}"` : '';
-
-				// Level class for info/warn/error styling
-				const levelClass =
-					entry.level === 'info'
-						? ' gg-level-info'
-						: entry.level === 'warn'
-							? ' gg-level-warn'
-							: entry.level === 'error'
-								? ' gg-level-error'
-								: '';
-
-				// Stack trace toggle (for error/trace entries with captured stacks)
-				let stackHTML = '';
-				if (entry.stack) {
-					const stackId = `stack-${index}`;
-					stackHTML =
-						`<span class="gg-stack-toggle" data-stack-id="${stackId}">▶ stack</span>` +
-						`<div class="gg-stack-content" data-stack-id="${stackId}">${escapeHtml(entry.stack)}</div>`;
-				}
-
-				// Desktop: grid layout, Mobile: stacked layout
-				// Expression tooltip: skip table entries (tableData) -- expression is just gg.table(...) which isn't useful
-				const hasSrcExpr =
-					!entry.level && !entry.tableData && entry.src?.trim() && !/^['"`]/.test(entry.src);
-				// For primitives-only entries, append inline expression when showExpressions is enabled
-				const inlineExprForPrimitives =
-					showExpressions && hasSrcExpr && !argsHTML.includes('gg-expand')
-						? ` <span class="gg-inline-expr">\u2039${escapeHtml(entry.src!)}\u203A</span>`
-						: '';
-
-				return (
-					`<div class="gg-log-entry${levelClass}" data-entry="${index}">` +
-					`<div class="gg-log-header">` +
-					`<div class="gg-log-diff" style="color: ${color};"${fileAttr}${lineAttr}${colAttr}>${diff}</div>` +
-					`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
-					`<div class="gg-log-handle"></div>` +
-					`</div>` +
-					`<div class="gg-log-content"${hasSrcExpr ? ` data-src="${escapeHtml(entry.src!)}"` : ''}>${argsHTML}${inlineExprForPrimitives}${stackHTML}</div>` +
-					detailsHTML +
-					`</div>`
-				);
-			})
+			.map((entry: CapturedEntry, index: number) => renderEntryHTML(entry, index))
 			.join('')}</div>`;
 
 		logContainer.html(logsHTML);
@@ -2381,9 +2474,12 @@ export function createGgPlugin(
 	}
 
 	function escapeHtml(text: string): string {
-		const div = document.createElement('div');
-		div.textContent = text;
-		return div.innerHTML;
+		return text
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
 	}
 
 	/**

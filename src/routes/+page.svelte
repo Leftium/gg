@@ -39,7 +39,9 @@
 			stopStress();
 			stopStress = null;
 		} else {
-			stopStress = stressTest();
+			stopStress = stressTest(() => {
+				stopStress = null;
+			});
 		}
 	}
 </script>

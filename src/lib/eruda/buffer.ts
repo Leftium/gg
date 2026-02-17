@@ -43,4 +43,11 @@ export class LogBuffer {
 	get size(): number {
 		return this.entries.length;
 	}
+
+	/**
+	 * Get the maximum capacity
+	 */
+	get capacity(): number {
+		return this.maxSize;
+	}
 }
