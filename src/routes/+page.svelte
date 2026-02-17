@@ -12,7 +12,8 @@
 		testTimers,
 		testTrace,
 		testNamespaceSegments,
-		testExpressions
+		testExpressions,
+		stressTest
 	} from './demo-helpers.js';
 
 	// Early log buffer in gg.ts handles buffering before Eruda loads
@@ -22,6 +23,8 @@
 		"Hello, again! This logg's color differs because the callpoint's file and/or function differ."
 	);
 
+	let stopStress: (() => void) | null = $state(null);
+
 	function testLog() {
 		const data = { count: 42, active: true };
 		gg(data);
@@ -29,6 +32,15 @@
 			nested: { data: { value: 42 } }
 		});
 		gg(data.count + 99);
+	}
+
+	function handleStress() {
+		if (stopStress) {
+			stopStress();
+			stopStress = null;
+		} else {
+			stopStress = stressTest();
+		}
 	}
 </script>
 
@@ -54,6 +66,13 @@
 	<button onclick={testTable}>📊 table</button>
 	<button onclick={testTimers}>⏱️ time / timeEnd</button>
 	<button onclick={testTrace}>🔍 trace</button>
+</div>
+
+<h3>Performance</h3>
+<div style="margin-bottom: 1rem;">
+	<button onclick={handleStress}
+		>{stopStress ? '⏹️ Stop Stress Test' : '🔥 Stress Test (3K msgs)'}</button
+	>
 </div>
 
 <OpenInEditorLink gg={gg()} />

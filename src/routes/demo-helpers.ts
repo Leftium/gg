@@ -303,3 +303,48 @@ export function testNamespaceSegments() {
 
 	gg.info('Generated 22 test logs with multi-delimiter namespaces. Click any segment to filter!');
 }
+
+// ---------------------------------------------------------------------------
+// Stress test — simulates the rift-local WS flood bug
+// ---------------------------------------------------------------------------
+
+let stressAbort = false;
+
+/**
+ * Fire 3000 gg() calls as fast as possible using requestAnimationFrame,
+ * batching multiple calls per frame to simulate a realistic WS message flood.
+ * Returns a function to abort the run.
+ */
+export function stressTest(): () => void {
+	const total = 3000;
+	const perFrame = 10; // messages per rAF tick — simulates burst of WS msgs
+	let i = 0;
+	stressAbort = false;
+	const startTime = performance.now();
+	let lastTime = startTime;
+
+	gg.info(`Stress test: firing ${total} messages (${perFrame}/frame)…`);
+
+	function tick() {
+		if (stressAbort || i >= total) {
+			const elapsed = (performance.now() - startTime).toFixed(0);
+			gg.info(`Stress test done: ${i}/${total} msgs in ${elapsed} ms`);
+			return;
+		}
+		const end = Math.min(i + perFrame, total);
+		for (; i < end; i++) {
+			const now = performance.now();
+			const delta = (now - lastTime).toFixed(1);
+			const elapsed = ((now - startTime) / 1000).toFixed(1);
+			lastTime = now;
+			gg(`Stress #${String(i + 1).padStart(4, '0')}/${total}  +${delta}ms  @${elapsed}s`);
+		}
+		requestAnimationFrame(tick);
+	}
+
+	requestAnimationFrame(tick);
+
+	return () => {
+		stressAbort = true;
+	};
+}
