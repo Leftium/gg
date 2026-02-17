@@ -6,6 +6,7 @@ import type { CapturedEntry } from './types.js';
 export class LogBuffer {
 	private entries: CapturedEntry[] = [];
 	private maxSize: number;
+	private _totalPushed: number = 0;
 
 	constructor(maxSize: number = 2000) {
 		this.maxSize = maxSize;
@@ -16,6 +17,7 @@ export class LogBuffer {
 	 * If buffer is full, oldest entry is removed
 	 */
 	push(entry: CapturedEntry): void {
+		this._totalPushed++;
 		this.entries.push(entry);
 		if (this.entries.length > this.maxSize) {
 			this.entries.shift(); // Remove oldest
@@ -35,6 +37,7 @@ export class LogBuffer {
 	 */
 	clear(): void {
 		this.entries = [];
+		this._totalPushed = 0;
 	}
 
 	/**
@@ -42,6 +45,20 @@ export class LogBuffer {
 	 */
 	get size(): number {
 		return this.entries.length;
+	}
+
+	/**
+	 * Get total entries ever pushed (including evicted ones)
+	 */
+	get totalPushed(): number {
+		return this._totalPushed;
+	}
+
+	/**
+	 * Get number of entries evicted due to buffer overflow
+	 */
+	get evicted(): number {
+		return this._totalPushed - this.entries.length;
 	}
 
 	/**

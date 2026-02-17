@@ -1052,6 +1052,7 @@ export function createGgPlugin(
 			</div>
 				<div class="gg-filter-panel"></div>
 				<div class="gg-settings-panel"></div>
+				<div class="gg-truncation-banner" style="display: none; padding: 6px 12px; background: #7f4f00; color: #ffe0a0; font-size: 11px; align-items: center; gap: 6px; flex-shrink: 0;"></div>
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; overflow-x: hidden; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
 				<div class="gg-toast"></div>
 				<iframe class="gg-editor-iframe" hidden title="open-in-editor"></iframe>
@@ -2328,6 +2329,21 @@ export function createGgPlugin(
 	}
 
 	/** Update the copy-button count text */
+	function updateTruncationBanner() {
+		if (!$el) return;
+		const banner = $el.find('.gg-truncation-banner').get(0) as HTMLElement | undefined;
+		if (!banner) return;
+		const evicted = buffer.evicted;
+		if (evicted > 0) {
+			const total = buffer.totalPushed;
+			const retained = buffer.size;
+			banner.innerHTML = `⚠ Showing ${retained.toLocaleString()} of ${total.toLocaleString()} messages &mdash; ${evicted.toLocaleString()} truncated. Increase <code style="font-family:monospace;background:rgba(255,255,255,0.15);padding:0 3px;border-radius:3px;">maxEntries</code> to retain more.`;
+			banner.style.display = 'flex';
+		} else {
+			banner.style.display = 'none';
+		}
+	}
+
 	function updateCopyCount() {
 		if (!$el) return;
 		const copyCountSpan = $el.find('.gg-copy-count');
@@ -2402,6 +2418,7 @@ export function createGgPlugin(
 		}
 
 		updateCopyCount();
+		updateTruncationBanner();
 
 		// Re-wire expanders after rendering
 		wireUpExpanders();
@@ -2426,6 +2443,7 @@ export function createGgPlugin(
 		renderedEntries = entries;
 
 		updateCopyCount();
+		updateTruncationBanner();
 
 		if (entries.length === 0) {
 			const hasFilteredLogs = allEntries.length > 0;
