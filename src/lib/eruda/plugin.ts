@@ -246,6 +246,11 @@ export function createGgPlugin(
 			wireUpFilterUI();
 			wireUpSettingsUI();
 			wireUpToast();
+			// Discard any entries queued during early-buffer replay (before the DOM
+			// existed). renderLogs() below will do a full render from buffer, so the
+			// pending rAF batch would only duplicate those entries.
+			pendingEntries = [];
+			renderPending = false;
 			renderLogs();
 		},
 
