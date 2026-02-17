@@ -12,7 +12,8 @@ export function humanize(ms: number): string {
 	if (abs >= 3_600_000) return Math.round(ms / 3_600_000) + 'h';
 	if (abs >= 60_000) return Math.round(ms / 60_000) + 'm';
 	if (abs >= 1_000) return Math.round(ms / 1_000) + 's';
-	return ms + 'ms';
+	if (abs >= 1 || abs === 0) return Math.round(ms) + 'ms';
+	return ms.toFixed(1) + 'ms';
 }
 
 /**
@@ -163,7 +164,7 @@ export function setup(env: DebugEnv): DebugFactory {
 		const debug = function (...args: unknown[]): void {
 			if (!debug.enabled) return;
 
-			const curr = Date.now();
+			const curr = performance.now();
 			const ms = curr - (prevTime || curr);
 			debug.diff = ms;
 			prevTime = curr;

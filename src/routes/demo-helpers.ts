@@ -338,7 +338,7 @@ export function stressTest(onDone?: () => void): () => void {
 			const delta = (now - lastTime).toFixed(1);
 			const elapsed = ((now - startTime) / 1000).toFixed(1);
 			lastTime = now;
-			gg(`Stress #${String(i + 1).padStart(4, '0')}/${total}  +${delta}ms  @${elapsed}s`);
+			gg(`Stress #${String(i + 1).padStart(4, '0')}/${total}  @${elapsed}s  +${delta}ms`);
 		}
 		requestAnimationFrame(tick);
 	}

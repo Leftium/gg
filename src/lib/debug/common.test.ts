@@ -52,6 +52,11 @@ describe('humanize', () => {
 		expect(humanize(172_800_000)).toBe('2d');
 	});
 
+	it('handles sub-millisecond values', () => {
+		expect(humanize(0.5)).toBe('0.5ms');
+		expect(humanize(0.123)).toBe('0.1ms');
+	});
+
 	it('handles negative values', () => {
 		expect(humanize(-500)).toBe('-500ms');
 		expect(humanize(-5_000)).toBe('-5s');

@@ -2470,7 +2470,8 @@ export function createGgPlugin(
 		if (abs >= 3600000) return Math.round(ms / 3600000) + 'h ';
 		if (abs >= 60000) return Math.round(ms / 60000) + 'm ';
 		if (abs >= 1000) return Math.round(ms / 1000) + 's ';
-		return ms + 'ms';
+		if (abs >= 1 || abs === 0) return Math.round(ms) + 'ms';
+		return ms.toFixed(1) + 'ms';
 	}
 
 	function escapeHtml(text: string): string {
