@@ -218,6 +218,10 @@ const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 const namespaceToLogFunction = new Map<string, Debugger>();
 let maxCallpointLength = 0;
 
+// Per-namespace prevTime for diff tracking (independent of debug library's enabled state,
+// so GgConsole diffs are correct even when localStorage.debug doesn't include gg:*).
+const namespaceToPrevTime = new Map<string, number>();
+
 // Cache: raw stack line → word tuple (avoids re-hashing the same call site)
 const stackLineCache = new Map<string, string>();
 
@@ -408,6 +412,15 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		logArgs[0] = `⛔ ${logArgs[0]}`;
 	}
 
+	// Compute diff independently of the debug library's enabled state.
+	// ggLogFunction.diff only updates when the debugger is enabled (i.e. localStorage.debug
+	// matches the namespace), so relying on it would always show +0ms when console output is
+	// disabled — even though the GgConsole panel always captures entries.
+	const now = performance.now();
+	const prevTime = namespaceToPrevTime.get(namespace);
+	const diff = prevTime !== undefined ? now - prevTime : 0;
+	namespaceToPrevTime.set(namespace, now);
+
 	// Log to console via debug
 	if (logArgs.length === 1) {
 		ggLogFunction(logArgs[0]);
@@ -419,7 +432,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 	const entry: CapturedEntry = {
 		namespace,
 		color: ggLogFunction.color,
-		diff: ggLogFunction.diff || 0,
+		diff,
 		message: logArgs.length === 1 ? String(logArgs[0]) : logArgs.map(String).join(' '),
 		args: logArgs,
 		timestamp: Date.now(),
