@@ -96,10 +96,13 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		eruda.add(ggPlugin as any);
 
-		// Make GG tab the default selected tab
+		// Select GG tab as default (but don't open the panel)
 		eruda.show('GG');
-		// Expand the Eruda panel (open from minimized floating button state)
-		eruda.show();
+
+		// Open the panel if requested
+		if (options.open) {
+			eruda.show();
+		}
 
 		// Run diagnostics after Eruda is ready so they appear in Console tab
 		await runGgDiagnostics();

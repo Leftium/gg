@@ -24,6 +24,12 @@ export interface GgErudaOptions {
 	 * @default {}
 	 */
 	erudaOptions?: Record<string, unknown>;
+
+	/**
+	 * Whether to open the GgConsole panel on load (not just the floating icon)
+	 * @default false
+	 */
+	open?: boolean;
 }
 
 /** Log severity level */
