@@ -836,7 +836,8 @@ export function transformGgCalls(
 
 				// Extract the first argument (the namespace string)
 				// Look for the string literal after 'gg.ns('
-				const afterNsParen = i + 6; // position after 'gg.ns('
+				let afterNsParen = i + 6; // position after 'gg.ns('
+				while (afterNsParen < code.length && /\s/.test(code[afterNsParen])) afterNsParen++;
 				const quoteChar = code[afterNsParen];
 
 				if (quoteChar === "'" || quoteChar === '"') {

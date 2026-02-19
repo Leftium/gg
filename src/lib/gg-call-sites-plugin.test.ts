@@ -213,6 +213,14 @@ describe('edge cases', () => {
 		expect(transform(code)).toBeNull();
 	});
 
+	it('handles multi-line gg.ns() call', () => {
+		const code = `function handleClick() {\n\tgg.ns(\n\t\t'my-component:action',\n\t\tsome.value\n\t)\n}`;
+		const out = transform(code)!;
+		expect(out).toContain("ns:'my-component:action'");
+		expect(out).toContain("file:'src/routes/+page.svelte'");
+		expect(out).toContain('line:');
+	});
+
 	it('handles double-quoted ns label', () => {
 		const code = `function test() { gg.ns("ERROR:$FN", msg) }`;
 		const out = transform(code)!;
