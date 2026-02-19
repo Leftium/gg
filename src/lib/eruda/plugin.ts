@@ -158,9 +158,9 @@ export function createGgPlugin(
 		const time = new Date(entry.timestamp).toISOString().slice(11, 23);
 		// Trim namespace and strip 'gg:' prefix to save tokens
 		const ns = entry.namespace.trim().replace(/^gg:/, '');
-		// Include expression suffix when toggle is enabled
+		// Include expression on its own line above the value when toggle is enabled
 		const hasSrcExpr = !entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src);
-		const exprSuffix = includeExpressions && hasSrcExpr ? ` \u2039${entry.src}\u203A` : '';
+		const exprLine = includeExpressions && hasSrcExpr ? `\u2039${entry.src}\u203A\n` : '';
 		// Format args: compact JSON for objects, primitives as-is
 		const argsStr = entry.args
 			.map((arg) => {
@@ -171,7 +171,7 @@ export function createGgPlugin(
 				return stripAnsi(String(arg));
 			})
 			.join(' ');
-		return `${time} ${ns} ${argsStr}${exprSuffix}`;
+		return `${exprLine}${time} ${ns} ${argsStr}`;
 	}
 
 	const plugin = {
@@ -2271,12 +2271,12 @@ export function createGgPlugin(
 						// data-entry/data-arg for hover tooltip lookup, data-src for expression context
 						const srcAttr = srcExpr ? ` data-src="${srcExpr}"` : '';
 						const srcIcon = srcExpr ? `<span class="gg-src-icon">\uD83D\uDD0D</span>` : '';
-						// Show expression inline after preview when toggle is enabled
-						const inlineExpr =
+						// Show expression on its own line above the value when toggle is enabled
+						const exprAbove =
 							showExpressions && srcExpr
-								? ` <span class="gg-inline-expr">\u2039${srcExpr}\u203A</span>`
+								? `<div class="gg-inline-expr">\u2039${srcExpr}\u203A</div>`
 								: '';
-						return `<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}${inlineExpr}</span>`;
+						return `${exprAbove}<span style="color: #888; cursor: pointer; text-decoration: underline;" class="gg-expand" data-index="${uniqueId}" data-entry="${index}" data-arg="${argIdx}"${srcAttr}>${srcIcon}${preview}</span>`;
 					} else {
 						// Parse ANSI codes first, then convert URLs to clickable links
 						const argStr = String(arg);
@@ -2314,10 +2314,10 @@ export function createGgPlugin(
 		// Expression tooltip: skip table entries (tableData) -- expression is just gg.table(...) which isn't useful
 		const hasSrcExpr =
 			!entry.level && !entry.tableData && entry.src?.trim() && !/^['"`]/.test(entry.src);
-		// For primitives-only entries, append inline expression when showExpressions is enabled
-		const inlineExprForPrimitives =
+		// For primitives-only entries, show expression on its own line above the value when showExpressions is enabled
+		const exprAboveForPrimitives =
 			showExpressions && hasSrcExpr && !argsHTML.includes('gg-expand')
-				? ` <span class="gg-inline-expr">\u2039${escapeHtml(entry.src!)}\u203A</span>`
+				? `<div class="gg-inline-expr">\u2039${escapeHtml(entry.src!)}\u203A</div>`
 				: '';
 
 		return (
@@ -2327,7 +2327,7 @@ export function createGgPlugin(
 			`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
 			`<div class="gg-log-handle"></div>` +
 			`</div>` +
-			`<div class="gg-log-content"${hasSrcExpr ? ` data-src="${escapeHtml(entry.src!)}"` : ''}>${argsHTML}${inlineExprForPrimitives}${stackHTML}</div>` +
+			`<div class="gg-log-content"${hasSrcExpr ? ` data-src="${escapeHtml(entry.src!)}"` : ''}>${exprAboveForPrimitives}${argsHTML}${stackHTML}</div>` +
 			detailsHTML +
 			`</div>`
 		);
