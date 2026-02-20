@@ -325,15 +325,24 @@ export function stressTest(onDone?: () => void): () => void {
 
 	gg.info(`Stress test: firing ${total} messages (${perFrame}/frame)…`);
 
+	const splitAt = 2000; // buffer capacity
+	let splitTime = 0;
+
 	function tick() {
 		if (stressAbort || i >= total) {
-			const elapsed = (performance.now() - startTime).toFixed(0);
-			gg.info(`Stress test done: ${i}/${total} msgs in ${elapsed} ms`);
+			const now = performance.now();
+			const totalMs = (now - startTime).toFixed(0);
+			const preMs = (splitTime - startTime).toFixed(0);
+			const postMs = (now - splitTime).toFixed(0);
+			gg.info(
+				`Stress test done: ${i}/${total} in ${totalMs}ms — first ${splitAt}: ${preMs}ms, remaining ${total - splitAt}: ${postMs}ms`
+			);
 			onDone?.();
 			return;
 		}
 		const end = Math.min(i + perFrame, total);
 		for (; i < end; i++) {
+			if (i === splitAt) splitTime = performance.now();
 			const now = performance.now();
 			const delta = (now - lastTime).toFixed(1);
 			const elapsed = ((now - startTime) / 1000).toFixed(1);

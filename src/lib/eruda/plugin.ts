@@ -1,6 +1,13 @@
 import type { GgErudaOptions, CapturedEntry } from './types.js';
 import { DEV } from 'esm-env';
 import { LogBuffer } from './buffer.js';
+import {
+	Virtualizer,
+	elementScroll,
+	observeElementOffset,
+	observeElementRect,
+	measureElement
+} from '@tanstack/virtual-core';
 
 /** Compile-time flag set by ggCallSitesPlugin via Vite's `define` config. */
 declare const __GG_TAG_PLUGIN__: boolean;
@@ -41,8 +48,11 @@ export function createGgPlugin(
 	let filterPattern = '';
 	const enabledNamespaces = new Set<string>();
 
-	// Last rendered entries (for hover tooltip arg lookup)
-	let renderedEntries: CapturedEntry[] = [];
+	// Virtual scroll: filtered indices into the buffer (the "rows" the virtualizer sees)
+	let filteredIndices: number[] = [];
+
+	// Virtual scroll: the @tanstack/virtual-core Virtualizer instance
+	let virtualizer: Virtualizer<HTMLElement, HTMLElement> | null = null;
 
 	// Toast state for "namespace hidden" feedback
 	let lastHiddenPattern: string | null = null; // filterPattern before the hide (for undo)
@@ -271,8 +281,18 @@ export function createGgPlugin(
 			if (gg) {
 				gg._onLog = null;
 			}
+			// Clean up virtualizer
+			if (virtualizer && $el) {
+				const containerDom = $el.find('.gg-log-container').get(0) as HTMLElement | undefined;
+				if (containerDom) {
+					const cleanup = (containerDom as any).__ggVirtualCleanup;
+					if (cleanup) cleanup();
+				}
+				virtualizer = null;
+			}
 			buffer.clear();
 			allNamespacesSet.clear();
+			filteredIndices = [];
 		}
 	};
 
@@ -436,7 +456,10 @@ export function createGgPlugin(
 	function gridColumns(): string {
 		const ns = nsColWidth !== null ? `${nsColWidth}px` : 'auto';
 		// Grid columns: diff | ns | handle | content
-		return `auto ${ns} 4px 1fr`;
+		// Diff uses a fixed width (3.5em) instead of auto to avoid column jitter
+		// when virtual scroll swaps rows in/out — only ~50 rows are in the DOM
+		// at a time so auto would resize based on visible subset.
+		return `3.5em ${ns} 4px 1fr`;
 	}
 
 	function buildHTML(): string {
@@ -448,9 +471,11 @@ export function createGgPlugin(
 				column-gap: 0;
 				align-items: start !important;
 			}
-			/* Desktop: hide wrapper divs, show direct children */
+			/* Virtual scroll: each entry is a subgrid row with measurable height */
 			.gg-log-entry {
-				display: contents;
+				display: grid;
+				grid-template-columns: subgrid;
+				grid-column: 1 / -1;
 			}
 		.gg-log-header {
 			display: contents;
@@ -462,6 +487,11 @@ export function createGgPlugin(
 			min-width: 0;
 			align-self: start !important;
 			border-top: 1px solid rgba(0,0,0,0.05);
+		}
+		/* Virtual scroll: spacer provides total height for scrollbar */
+		.gg-virtual-spacer {
+			position: relative;
+			width: 100%;
 		}
 	.gg-reset-filter-btn:hover {
 		background: #1976D2 !important;
@@ -1812,6 +1842,11 @@ export function createGgPlugin(
 
 				if (details) {
 					details.style.display = details.style.display === 'none' ? 'block' : 'none';
+					// Re-measure the entry so virtualizer adjusts total height
+					const entryEl = details.closest('.gg-log-entry') as HTMLElement | null;
+					if (entryEl && virtualizer) {
+						virtualizer.measureElement(entryEl);
+					}
 				}
 				return;
 			}
@@ -1829,6 +1864,11 @@ export function createGgPlugin(
 					const isExpanded = stackEl.classList.contains('expanded');
 					stackEl.classList.toggle('expanded');
 					target.textContent = isExpanded ? '▶ stack' : '▼ stack';
+					// Re-measure the entry so virtualizer adjusts total height
+					const entryEl = stackEl.closest('.gg-log-entry') as HTMLElement | null;
+					if (entryEl && virtualizer) {
+						virtualizer.measureElement(entryEl);
+					}
 				}
 				return;
 			}
@@ -1994,7 +2034,7 @@ export function createGgPlugin(
 				const entryIdx = entryEl?.getAttribute('data-entry');
 				if (entryIdx === null || entryIdx === undefined) return;
 
-				const entry = renderedEntries[Number(entryIdx)];
+				const entry = buffer.get(Number(entryIdx));
 				if (!entry) return;
 
 				e.preventDefault();
@@ -2020,7 +2060,7 @@ export function createGgPlugin(
 			const argIdx = target.getAttribute('data-arg');
 			if (entryIdx === null || argIdx === null) return;
 
-			const entry = renderedEntries[Number(entryIdx)];
+			const entry = buffer.get(Number(entryIdx));
 			if (!entry) return;
 			const arg = entry.args[Number(argIdx)];
 			if (arg === undefined) return;
@@ -2187,8 +2227,11 @@ export function createGgPlugin(
 		resizeAttached = true;
 	}
 
-	/** Build the HTML string for a single log entry */
-	function renderEntryHTML(entry: CapturedEntry, index: number): string {
+	/** Build the HTML string for a single log entry.
+	 * @param index Buffer index (used for data-entry, expand IDs, tooltip lookup)
+	 * @param virtualIndex Position in filteredIndices (used by virtualizer for measurement)
+	 */
+	function renderEntryHTML(entry: CapturedEntry, index: number, virtualIndex?: number): string {
 		const color = entry.color || '#0066cc';
 		const diff = `+${humanize(entry.diff)}`;
 
@@ -2320,8 +2363,9 @@ export function createGgPlugin(
 				? `<div class="gg-inline-expr">\u2039${escapeHtml(entry.src!)}\u203A</div>`
 				: '';
 
+		const vindexAttr = virtualIndex !== undefined ? ` data-vindex="${virtualIndex}"` : '';
 		return (
-			`<div class="gg-log-entry${levelClass}" data-entry="${index}">` +
+			`<div class="gg-log-entry${levelClass}" data-entry="${index}"${vindexAttr}>` +
 			`<div class="gg-log-header">` +
 			`<div class="gg-log-diff" style="color: ${color};"${fileAttr}${lineAttr}${colAttr}>${diff}</div>` +
 			`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
@@ -2354,7 +2398,7 @@ export function createGgPlugin(
 		const copyCountSpan = $el.find('.gg-copy-count');
 		if (!copyCountSpan.length) return;
 		const allCount = buffer.size;
-		const visibleCount = renderedEntries.length;
+		const visibleCount = filteredIndices.length;
 		const countText =
 			visibleCount === allCount
 				? `Copy ${visibleCount} ${visibleCount === 1 ? 'entry' : 'entries'}`
@@ -2362,15 +2406,131 @@ export function createGgPlugin(
 		copyCountSpan.html(countText);
 	}
 
-	/** Scroll to bottom only if user is already near the bottom */
-	function autoScroll(el: HTMLElement) {
-		const threshold = 50; // px from bottom
-		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-		if (nearBottom) el.scrollTop = el.scrollHeight;
+	// ─── Virtual scroll helpers ───────────────────────────────────────────
+
+	/** Rebuild the filtered index list from the buffer. */
+	function rebuildFilteredIndices() {
+		filteredIndices = [];
+		for (let i = 0; i < buffer.size; i++) {
+			const entry = buffer.get(i)!;
+			if (enabledNamespaces.has(entry.namespace)) {
+				filteredIndices.push(i);
+			}
+		}
+	}
+
+	/** Track whether user is near bottom (for auto-scroll decisions). */
+	let userNearBottom = true;
+
+	/**
+	 * Render the visible virtual items into the DOM grid.
+	 * Called by the virtualizer's onChange and after new entries arrive.
+	 */
+	let isRendering = false;
+	function renderVirtualItems() {
+		// Guard against re-entrant calls (measureElement → onChange → renderVirtualItems)
+		if (isRendering) return;
+		if (!$el || !virtualizer) return;
+		const containerDom = $el.find('.gg-log-container').get(0) as HTMLElement | undefined;
+		if (!containerDom) return;
+		const spacer = containerDom.querySelector('.gg-virtual-spacer') as HTMLElement | null;
+		const grid = containerDom.querySelector('.gg-log-grid') as HTMLElement | null;
+		if (!spacer || !grid) return;
+
+		const items = virtualizer.getVirtualItems();
+		if (items.length === 0) {
+			grid.innerHTML = '';
+			return;
+		}
+
+		// Set the spacer's height so the scrollbar reflects the full virtual list
+		spacer.style.height = `${virtualizer.getTotalSize()}px`;
+
+		// Position the grid at the start offset of the first visible item
+		const startOffset = items[0].start;
+		grid.style.transform = `translateY(${startOffset}px)`;
+
+		// Build HTML only for visible items
+		const html = items
+			.map((item) => {
+				const bufferIdx = filteredIndices[item.index];
+				const entry = buffer.get(bufferIdx);
+				if (!entry) return '';
+				return renderEntryHTML(entry, bufferIdx, item.index);
+			})
+			.join('');
+
+		grid.innerHTML = html;
+
+		// After inserting HTML, measure each rendered entry so the virtualizer
+		// learns actual heights (drives dynamic sizing).
+		isRendering = true;
+		try {
+			const entryEls = grid.querySelectorAll('.gg-log-entry');
+			entryEls.forEach((el) => {
+				virtualizer!.measureElement(el as HTMLElement);
+			});
+		} finally {
+			isRendering = false;
+		}
 	}
 
 	/**
-	 * Incremental append: add new entries to the existing DOM without full rebuild.
+	 * Create or reconfigure the virtualizer for the current filteredIndices.
+	 * Call after filter changes or full rebuilds.
+	 */
+	function setupVirtualizer(scrollToBottom: boolean) {
+		if (!$el) return;
+		const containerDom = $el.find('.gg-log-container').get(0) as HTMLElement | undefined;
+		if (!containerDom) return;
+
+		// Tear down previous virtualizer
+		if (virtualizer) {
+			virtualizer.setOptions({
+				...virtualizer.options,
+				count: 0,
+				enabled: false
+			});
+			virtualizer = null;
+		}
+
+		const count = filteredIndices.length;
+		if (count === 0) return;
+
+		virtualizer = new Virtualizer<HTMLElement, HTMLElement>({
+			count,
+			getScrollElement: () => containerDom,
+			estimateSize: () => 24, // estimated row height in px
+			overscan: 10,
+			observeElementRect,
+			observeElementOffset,
+			scrollToFn: elementScroll,
+			measureElement: (el, entry, instance) => measureElement(el, entry, instance),
+			// Use buffer index as the stable key for each virtual row
+			getItemKey: (index) => filteredIndices[index],
+			// The data-index attribute TanStack uses to find elements for measurement
+			indexAttribute: 'data-vindex',
+			onChange: () => {
+				renderVirtualItems();
+			}
+		});
+
+		// Mount the virtualizer (attaches scroll/resize observers)
+		const cleanup = virtualizer._didMount();
+		// Store cleanup for when we tear down (TODO: call on destroy)
+		(containerDom as any).__ggVirtualCleanup = cleanup;
+
+		if (scrollToBottom) {
+			virtualizer.scrollToIndex(count - 1, { align: 'end' });
+		}
+
+		// Initial render
+		virtualizer._willUpdate();
+		renderVirtualItems();
+	}
+
+	/**
+	 * Incremental append: add new entries to the virtual scroll.
 	 * Called from the rAF-batched _onLog path.
 	 */
 	function appendLogs(newEntries: CapturedEntry[]) {
@@ -2378,58 +2538,57 @@ export function createGgPlugin(
 
 		const logContainer = $el.find('.gg-log-container');
 		if (!logContainer.length) return;
-
-		// Filter new entries to only those matching enabled namespaces
-		const visibleNew = newEntries.filter((e) => enabledNamespaces.has(e.namespace));
-
-		// If there's no grid yet (first entries, or was showing empty state), do a full render
 		const containerDom = logContainer.get(0) as HTMLElement | undefined;
-		const grid = containerDom?.querySelector('.gg-log-grid');
-		if (!grid || !containerDom) {
+		if (!containerDom) return;
+
+		// Check if we need a full render (no grid yet, or empty state showing)
+		const grid = containerDom.querySelector('.gg-log-grid');
+		if (!grid) {
 			renderLogs();
 			return;
 		}
 
-		if (visibleNew.length === 0) {
-			// New entries were all filtered out, just update count
+		// Check if any new entries pass the filter
+		const hasVisible = newEntries.some((e) => enabledNamespaces.has(e.namespace));
+		if (!hasVisible && buffer.evicted === 0) {
 			updateCopyCount();
 			return;
 		}
 
-		// Compute the starting index (position in the renderedEntries array)
-		const startIndex = renderedEntries.length;
-
-		// Add to renderedEntries
-		renderedEntries.push(...visibleNew);
-
-		// Build HTML for just the new entries
-		const html = visibleNew.map((entry, i) => renderEntryHTML(entry, startIndex + i)).join('');
-
-		// Append to existing grid (no full DOM teardown!)
-		grid.insertAdjacentHTML('beforeend', html);
-
-		// Handle buffer overflow: the buffer evicts oldest entries when full.
-		// Count DOM entries and remove excess from the front to stay in sync.
-		// This avoids an expensive buffer.getEntries() + filter call.
-		const domEntries = grid.querySelectorAll(':scope > .gg-log-entry');
-		const excess = domEntries.length - buffer.capacity;
-		if (excess > 0) {
-			for (let i = 0; i < excess; i++) {
-				// Remove the entry and any associated .gg-details siblings
-				domEntries[i].remove();
-			}
-			// Trim renderedEntries from the front to match
-			renderedEntries.splice(0, excess);
-		}
+		// Rebuild filteredIndices from scratch. This is O(buffer.size) with a
+		// Set lookup per entry — ~0.1ms for 2000 entries. Always correct even
+		// when the buffer wraps and old logical indices shift.
+		rebuildFilteredIndices();
 
 		updateCopyCount();
 		updateTruncationBanner();
 
-		// Re-wire expanders after rendering
-		wireUpExpanders();
+		// Check if user is near bottom before we update the virtualizer
+		const nearBottom =
+			containerDom.scrollHeight - containerDom.scrollTop - containerDom.clientHeight < 50;
+		userNearBottom = nearBottom;
 
-		// Smart auto-scroll
-		autoScroll(containerDom);
+		// Update virtualizer count and re-render
+		if (virtualizer) {
+			virtualizer.setOptions({
+				...virtualizer.options,
+				count: filteredIndices.length,
+				getItemKey: (index) => filteredIndices[index]
+			});
+			virtualizer._willUpdate();
+
+			if (userNearBottom) {
+				virtualizer.scrollToIndex(filteredIndices.length - 1, { align: 'end' });
+			}
+
+			renderVirtualItems();
+		} else {
+			// First entries — set up the virtualizer
+			setupVirtualizer(true);
+		}
+
+		// Re-wire expanders (idempotent — only attaches once)
+		wireUpExpanders();
 	}
 
 	/** Full render: rebuild the entire log view (used for filter changes, clear, show, etc.) */
@@ -2439,21 +2598,26 @@ export function createGgPlugin(
 		const logContainer = $el.find('.gg-log-container');
 		if (!logContainer.length) return;
 
-		const allEntries = buffer.getEntries();
-
-		// Apply filtering
-		const entries = allEntries.filter((entry: CapturedEntry) =>
-			enabledNamespaces.has(entry.namespace)
-		);
-		renderedEntries = entries;
+		// Rebuild filtered indices from scratch
+		rebuildFilteredIndices();
 
 		updateCopyCount();
 		updateTruncationBanner();
 
-		if (entries.length === 0) {
-			const hasFilteredLogs = allEntries.length > 0;
+		if (filteredIndices.length === 0) {
+			// Tear down virtualizer
+			if (virtualizer) {
+				const containerDom = logContainer.get(0) as HTMLElement | undefined;
+				if (containerDom) {
+					const cleanup = (containerDom as any).__ggVirtualCleanup;
+					if (cleanup) cleanup();
+				}
+				virtualizer = null;
+			}
+
+			const hasFilteredLogs = buffer.size > 0;
 			const message = hasFilteredLogs
-				? `All ${allEntries.length} logs filtered out.`
+				? `All ${buffer.size} logs filtered out.`
 				: 'No logs captured yet. Call gg() to see output here.';
 			const resetButton = hasFilteredLogs
 				? '<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (gg:*)</button>'
@@ -2464,26 +2628,22 @@ export function createGgPlugin(
 			return;
 		}
 
-		const logsHTML = `<div class="gg-log-grid${filterExpanded ? ' filter-mode' : ''}${showExpressions ? ' gg-show-expr' : ''}" style="grid-template-columns: ${gridColumns()};">${entries
-			.map((entry: CapturedEntry, index: number) => renderEntryHTML(entry, index))
-			.join('')}</div>`;
+		// Build the virtual scroll DOM structure:
+		// - .gg-virtual-spacer: sized to total virtual height (provides scrollbar)
+		//   - .gg-log-grid: positioned absolutely, translated to visible offset, holds only visible entries
+		const gridClasses = `gg-log-grid${filterExpanded ? ' filter-mode' : ''}${showExpressions ? ' gg-show-expr' : ''}`;
+		logContainer.html(
+			`<div class="gg-virtual-spacer">` +
+				`<div class="${gridClasses}" style="position: absolute; top: 0; left: 0; width: 100%; grid-template-columns: ${gridColumns()};"></div>` +
+				`</div>` +
+				`<div class="gg-hover-tooltip"></div>`
+		);
 
-		logContainer.html(logsHTML);
-
-		// Append hover tooltip div (destroyed by .html() each render, so re-create)
-		const containerDom = logContainer.get(0) as HTMLElement | undefined;
-		if (containerDom) {
-			const tip = document.createElement('div');
-			tip.className = 'gg-hover-tooltip';
-			containerDom.appendChild(tip);
-		}
-
-		// Re-wire expanders after rendering
+		// Re-wire event delegation (idempotent)
 		wireUpExpanders();
 
-		// Auto-scroll to bottom
-		const el = logContainer.get(0);
-		if (el) el.scrollTop = el.scrollHeight;
+		// Create virtualizer and render
+		setupVirtualizer(true);
 	}
 
 	/** Format ms like debug's `ms` package: 0ms, 500ms, 5s, 2m, 1h, 3d */
