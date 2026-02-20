@@ -2545,13 +2545,13 @@ export function createGgPlugin(
 		// Store cleanup for when we tear down (TODO: call on destroy)
 		(containerDom as any).__ggVirtualCleanup = cleanup;
 
+		// Initial render, then scroll to bottom if requested
+		virtualizer._willUpdate();
+		renderVirtualItems();
+
 		if (scrollToBottom) {
 			virtualizer.scrollToIndex(count - 1, { align: 'end' });
 		}
-
-		// Initial render
-		virtualizer._willUpdate();
-		renderVirtualItems();
 	}
 
 	/**
@@ -2602,11 +2602,12 @@ export function createGgPlugin(
 			});
 			virtualizer._willUpdate();
 
+			// Render first so spacer height is updated, then scroll
+			renderVirtualItems();
+
 			if (userNearBottom) {
 				virtualizer.scrollToIndex(filteredIndices.length - 1, { align: 'end' });
 			}
-
-			renderVirtualItems();
 		} else {
 			// First entries — set up the virtualizer
 			setupVirtualizer(true);
