@@ -54,6 +54,12 @@ export function createGgPlugin(
 	// Virtual scroll: the @tanstack/virtual-core Virtualizer instance
 	let virtualizer: Virtualizer<HTMLElement, HTMLElement> | null = null;
 
+	// Virtual scroll: track expanded state so it survives re-renders.
+	// Keys are the uniqueId strings (e.g. "42-0") for object details and
+	// stack IDs (e.g. "stack-42") for stack traces.
+	const expandedDetails = new Set<string>();
+	const expandedStacks = new Set<string>();
+
 	// Toast state for "namespace hidden" feedback
 	let lastHiddenPattern: string | null = null; // filterPattern before the hide (for undo)
 	let hasSeenToastExplanation = false; // first toast auto-expands help text
@@ -1841,7 +1847,14 @@ export function createGgPlugin(
 				) as HTMLElement | null;
 
 				if (details) {
-					details.style.display = details.style.display === 'none' ? 'block' : 'none';
+					const nowVisible = details.style.display === 'none';
+					details.style.display = nowVisible ? 'block' : 'none';
+					// Track state so it survives virtual scroll re-renders
+					if (nowVisible) {
+						expandedDetails.add(index);
+					} else {
+						expandedDetails.delete(index);
+					}
 					// Re-measure the entry so virtualizer adjusts total height
 					const entryEl = details.closest('.gg-log-entry') as HTMLElement | null;
 					if (entryEl && virtualizer) {
@@ -1864,6 +1877,12 @@ export function createGgPlugin(
 					const isExpanded = stackEl.classList.contains('expanded');
 					stackEl.classList.toggle('expanded');
 					target.textContent = isExpanded ? '▶ stack' : '▼ stack';
+					// Track state so it survives virtual scroll re-renders
+					if (isExpanded) {
+						expandedStacks.delete(stackId);
+					} else {
+						expandedStacks.add(stackId);
+					}
 					// Re-measure the entry so virtualizer adjusts total height
 					const entryEl = stackEl.closest('.gg-log-entry') as HTMLElement | null;
 					if (entryEl && virtualizer) {
@@ -2309,8 +2328,11 @@ export function createGgPlugin(
 						const uniqueId = `${index}-${argIdx}`;
 						// Expression header inside expanded details
 						const srcHeader = srcExpr ? `<div class="gg-details-src">${srcExpr}</div>` : '';
-						// Store details separately to render after the row
-						detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: none; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;">${srcHeader}<pre style="margin: 0;">${jsonStr}</pre></div>`;
+						// Store details separately to render after the row.
+						// Restore expanded state from expandedDetails set so it
+						// survives virtual scroll re-renders.
+						const detailsVisible = expandedDetails.has(uniqueId);
+						detailsHTML += `<div class="gg-details" data-index="${uniqueId}" style="display: ${detailsVisible ? 'block' : 'none'}; margin: 4px 0 8px 0; padding: 8px; background: #f8f8f8; border-left: 3px solid ${color}; font-size: 11px; overflow-x: auto;">${srcHeader}<pre style="margin: 0;">${jsonStr}</pre></div>`;
 						// data-entry/data-arg for hover tooltip lookup, data-src for expression context
 						const srcAttr = srcExpr ? ` data-src="${srcExpr}"` : '';
 						const srcIcon = srcExpr ? `<span class="gg-src-icon">\uD83D\uDD0D</span>` : '';
@@ -2345,13 +2367,16 @@ export function createGgPlugin(
 						? ' gg-level-error'
 						: '';
 
-		// Stack trace toggle (for error/trace entries with captured stacks)
+		// Stack trace toggle (for error/trace entries with captured stacks).
+		// Restore expanded state from expandedStacks set so it survives
+		// virtual scroll re-renders.
 		let stackHTML = '';
 		if (entry.stack) {
 			const stackId = `stack-${index}`;
+			const stackExpanded = expandedStacks.has(stackId);
 			stackHTML =
-				`<span class="gg-stack-toggle" data-stack-id="${stackId}">▶ stack</span>` +
-				`<div class="gg-stack-content" data-stack-id="${stackId}">${escapeHtml(entry.stack)}</div>`;
+				`<span class="gg-stack-toggle" data-stack-id="${stackId}">${stackExpanded ? '▼' : '▶'} stack</span>` +
+				`<div class="gg-stack-content${stackExpanded ? ' expanded' : ''}" data-stack-id="${stackId}">${escapeHtml(entry.stack)}</div>`;
 		}
 
 		// Expression tooltip: skip table entries (tableData) -- expression is just gg.table(...) which isn't useful
@@ -2597,6 +2622,10 @@ export function createGgPlugin(
 
 		const logContainer = $el.find('.gg-log-container');
 		if (!logContainer.length) return;
+
+		// Clear expansion state on full rebuild
+		expandedDetails.clear();
+		expandedStacks.clear();
 
 		// Rebuild filtered indices from scratch
 		rebuildFilteredIndices();
