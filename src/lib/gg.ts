@@ -289,17 +289,29 @@ interface CapturedEntry {
 
 type OnLogCallback = (entry: CapturedEntry) => void;
 
-// Overload signatures
-export function gg(): {
-	fileName: string;
-	functionName: string;
-	url: string;
-};
-export function gg<T>(arg: T, ...args: unknown[]): T;
-
-export function gg(...args: unknown[]) {
+/**
+ * Log a value and return a chainable wrapper.
+ *
+ * Chain modifiers to configure the log entry:
+ * - `.ns('label')` — set a custom namespace
+ * - `.warn()` / `.error()` / `.info()` — set log level
+ * - `.trace()` — include stack trace
+ * - `.table()` — format as ASCII table
+ * - `.v` — flush immediately and return the passthrough value
+ *
+ * Without `.v`, the log auto-flushes on the next microtask.
+ *
+ * @example
+ * gg(value)                          // log with auto namespace
+ * gg(value).ns('label').warn()       // log with namespace + warn level
+ * const x = gg(value).v              // passthrough
+ * const x = gg(value).ns('foo').v    // passthrough with namespace
+ */
+export function gg<T>(arg: T, ...args: unknown[]): GgChain<T>;
+export function gg(...args: unknown[]): GgChain<unknown> {
 	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
+		// Return a no-op chain that skips logging
+		return new GgChain(args[0], args, { ns: '' }, true);
 	}
 
 	// Without the call-sites plugin, use cheap stack hash → deterministic word tuple.
@@ -308,43 +320,35 @@ export function gg(...args: unknown[]) {
 	// Same call site always produces the same word pair (e.g. "calm-fox").
 	// depth=2: skip "Error" header [0] and gg() frame [1]
 	const callpoint = resolveCallpoint(2);
-	return ggLog({ ns: callpoint }, ...args);
+	return new GgChain(args[0], args, { ns: callpoint });
 }
 
 /**
- * gg.ns() - Log with an explicit namespace (callpoint label).
+ * gg.here() - Return call-site info for open-in-editor.
  *
- * Users call gg.ns() directly to set a meaningful label that survives
- * across builds. For the internal plugin-generated version with file
- * metadata, see gg._ns().
- *
- * The label supports template variables (substituted by the vite plugin
- * at build time, or at runtime for $NS):
- *   $NS   - auto-generated callpoint (file@fn with plugin, word-tuple without)
- *   $FN   - enclosing function name (plugin only, empty without)
- *   $FILE - short file path (plugin only, empty without)
- *   $LINE - line number (plugin only, empty without)
- *   $COL  - column number (plugin only, empty without)
- *
- * @param nsLabel - The namespace label (appears as gg:<nsLabel> in output)
- * @param args - Same arguments as gg()
- * @returns Same as gg() - the first arg, or call-site info if no args
+ * Replaces the old no-arg gg() overload. Returns an object with the
+ * file name, function name, and URL for opening the source in an editor.
  *
  * @example
- * gg.ns("auth", "login failed")        // → gg:auth
- * gg.ns("ERROR:$NS", msg)              // → gg:ERROR:routes/+page.svelte@handleClick (with plugin)
- *                                       // → gg:ERROR:calm-fox (without plugin)
- * gg.ns("$NS:validation", fieldName)   // → gg:routes/+page.svelte@handleClick:validation
+ * <OpenInEditorLink gg={gg.here()} />
  */
-gg.ns = function (nsLabel: string, ...args: unknown[]): unknown {
-	// Resolve $NS at runtime (word-tuple fallback when plugin isn't installed).
-	// With the plugin, $NS is already substituted at build time before this runs.
-	// depth=3: skip "Error" [0], resolveCallpoint [1], gg.ns [2] → caller [3]
-	if (nsLabel.includes('$NS')) {
-		const callpoint = resolveCallpoint(3);
-		nsLabel = nsLabel.replace(/\$NS/g, callpoint);
+gg.here = function (): { fileName: string; functionName: string; url: string } {
+	if (!ggConfig.enabled || isCloudflareWorker()) {
+		return { fileName: '', functionName: '', url: '' };
 	}
-	return gg._ns({ ns: nsLabel }, ...args);
+	const callpoint = resolveCallpoint(3);
+	const namespace = `gg:${callpoint}`;
+	// Log the call-site info
+	const ggLogFunction =
+		namespaceToLogFunction.get(namespace) ||
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
+	ggLogFunction(`    📝 ${callpoint}`);
+
+	return {
+		fileName: callpoint,
+		functionName: callpoint.includes('@') ? callpoint.split('@').pop() || '' : '',
+		url: ''
+	};
 };
 
 /** Internal options for the core log function */
@@ -360,11 +364,147 @@ interface LogOptions {
 }
 
 /**
+ * Resolve template variables in a namespace label using metadata from the plugin.
+ *
+ * The Vite plugin bakes the auto-generated callpoint into options.ns at build time
+ * (e.g. "routes/+page.svelte@handleClick"). This function extracts components from
+ * that callpoint and substitutes template variables:
+ *
+ *   $NS   - the full auto-generated callpoint (or runtime word-tuple fallback)
+ *   $FN   - the function name portion (after @)
+ *   $FILE - the file path portion (before @)
+ *   $LINE - the line number
+ *   $COL  - the column number
+ */
+function resolveNsTemplateVars(label: string, options: LogOptions): string {
+	if (!label.includes('$')) return label;
+
+	const ns = options.ns || '';
+	// $NS: use the full auto-generated callpoint. If no plugin, fall back to runtime stack hash.
+	if (label.includes('$NS')) {
+		const callpoint = ns || resolveCallpoint(4);
+		label = label.replace(/\$NS/g, callpoint);
+	}
+	// $FN: extract function name from "file@fn" format
+	if (label.includes('$FN')) {
+		const fn = ns.includes('@') ? ns.split('@').pop() || '' : '';
+		label = label.replace(/\$FN/g, fn);
+	}
+	// $FILE: extract file path from "file@fn" format
+	if (label.includes('$FILE')) {
+		const file = ns.includes('@') ? ns.split('@')[0] : ns;
+		label = label.replace(/\$FILE/g, file);
+	}
+	// $LINE / $COL: from plugin metadata
+	if (label.includes('$LINE')) {
+		label = label.replace(/\$LINE/g, String(options.line ?? ''));
+	}
+	if (label.includes('$COL')) {
+		label = label.replace(/\$COL/g, String(options.col ?? ''));
+	}
+	return label;
+}
+
+/**
+ * Chainable wrapper returned by gg(). Collects modifiers (.ns(), .warn(), etc.)
+ * and auto-flushes the log on the next microtask. Use `.v` to flush immediately
+ * and get the passthrough value.
+ *
+ * @example
+ * gg(value)                          // logs on microtask
+ * gg(value).ns('label').warn()       // logs with namespace + warn level
+ * const x = gg(value).v              // logs immediately, returns value
+ * const x = gg(value).ns('foo').v    // logs with namespace, returns value
+ */
+export class GgChain<T> {
+	#value: T;
+	#args: unknown[];
+	#options: LogOptions;
+	#flushed = false;
+	#disabled: boolean;
+
+	constructor(value: T, args: unknown[], options: LogOptions, disabled = false) {
+		this.#value = value;
+		this.#args = args;
+		this.#options = options;
+		this.#disabled = disabled;
+		if (!disabled) {
+			// Auto-flush on microtask if not flushed synchronously by .v or another trigger
+			queueMicrotask(() => this.#flush());
+		}
+	}
+
+	/** Set a custom namespace for this log entry.
+	 *
+	 * Supports template variables (resolved from plugin-provided metadata):
+	 *   $NS   - auto-generated callpoint (file@fn with plugin, word-tuple without)
+	 *   $FN   - enclosing function name (extracted from $NS)
+	 *   $FILE - short file path (extracted from $NS)
+	 *   $LINE - line number
+	 *   $COL  - column number
+	 */
+	ns(label: string): GgChain<T> {
+		this.#options.ns = resolveNsTemplateVars(label, this.#options);
+		return this;
+	}
+
+	/** Set log level to info (blue indicator). */
+	info(): GgChain<T> {
+		this.#options.level = 'info';
+		return this;
+	}
+
+	/** Set log level to warn (yellow indicator). */
+	warn(): GgChain<T> {
+		this.#options.level = 'warn';
+		return this;
+	}
+
+	/** Set log level to error (red indicator, captures stack trace). */
+	error(): GgChain<T> {
+		this.#options.level = 'error';
+		this.#options.stack = getErrorStack(this.#args[0], 3);
+		return this;
+	}
+
+	/** Include a full stack trace with this log entry. */
+	trace(): GgChain<T> {
+		this.#options.stack = captureStack(3);
+		return this;
+	}
+
+	/** Format the log output as an ASCII table. */
+	table(columns?: string[]): GgChain<T> {
+		const { keys, rows } = formatTable(this.#args[0], columns);
+		this.#options.tableData = { keys, rows };
+		// Override args to show '(table)' label, matching original gg.table() behavior
+		this.#args = ['(table)'];
+		// Also emit native console.table
+		if (columns) {
+			console.table(this.#value, columns);
+		} else {
+			console.table(this.#value);
+		}
+		return this;
+	}
+
+	/** Flush the log immediately and return the passthrough value. */
+	get v(): T {
+		this.#flush();
+		return this.#value;
+	}
+
+	#flush() {
+		if (this.#flushed) return;
+		this.#flushed = true;
+		ggLog(this.#options, ...this.#args);
+	}
+}
+
+/**
  * Core logging function shared by all gg methods.
  *
- * All public methods (gg, gg.ns, gg.warn, gg.error, gg.table, etc.)
- * funnel through this function. It handles namespace resolution,
- * debug output, capture hook, and passthrough return.
+ * Handles namespace resolution, debug output, capture hook, and return value.
  */
 function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 	const { ns: nsLabel, file, line, col, src, level, stack, tableData } = options;
@@ -385,23 +525,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 
 	// Prepare args for logging (console output is value-only; src is carried
 	// on CapturedEntry for the Eruda UI to display on hover)
-	let logArgs: unknown[];
-	let returnValue: unknown;
-
-	if (!args.length) {
-		// No arguments: return call-site info for open-in-editor
-		const fileName = file ? file.replace(srcRootRegex, '') : nsLabel;
-		const functionName = nsLabel.includes('@') ? nsLabel.split('@').pop() || '' : '';
-		const url = file ? openInEditorUrl(file, line, col) : '';
-		logArgs = [`    📝 ${nsLabel}`];
-		returnValue = { fileName, functionName, url };
-	} else if (args.length === 1) {
-		logArgs = [args[0]];
-		returnValue = args[0];
-	} else {
-		logArgs = [args[0], ...args.slice(1)];
-		returnValue = args[0];
-	}
+	const logArgs: unknown[] = args.length === 0 ? ['(no args)'] : [...args];
 
 	// Add level prefix emoji for info/warn/error
 	if (level === 'info') {
@@ -450,21 +574,17 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 	} else {
 		earlyLogBuffer.push(entry);
 	}
-
-	return returnValue;
 }
 
 /**
  * gg._ns() - Internal: log with namespace and source file metadata.
  *
- * Called by the ggCallSitesPlugin Vite plugin, which rewrites both bare gg()
- * calls and manual gg.ns() calls to gg._ns({ns, file, line, col}, ...) at
- * build time. This gives each call site a unique namespace plus the source
+ * Called by the ggCallSitesPlugin Vite plugin, which rewrites bare gg()
+ * calls to gg._ns({ns, file, line, col, src}, ...) at build time.
+ * This gives each call site a unique namespace plus the source
  * location for open-in-editor support.
  *
- * @param options - { ns: string; file?: string; line?: number; col?: number }
- * @param args - Same arguments as gg()
- * @returns Same as gg() - the first arg, or call-site info if no args
+ * Returns a GgChain for chaining modifiers (.ns(), .warn(), etc.)
  */
 gg._ns = function (
 	options: {
@@ -477,8 +597,35 @@ gg._ns = function (
 		stack?: string;
 	},
 	...args: unknown[]
-): unknown {
-	return ggLog(options, ...args);
+): GgChain<unknown> {
+	const disabled = !ggConfig.enabled || isCloudflareWorker();
+	return new GgChain(args[0], args, options, disabled);
+};
+
+/**
+ * gg._here() - Internal: call-site info with source metadata from Vite plugin.
+ *
+ * Called by the ggCallSitesPlugin when it rewrites gg.here() calls.
+ */
+gg._here = function (options: { ns: string; file?: string; line?: number; col?: number }): {
+	fileName: string;
+	functionName: string;
+	url: string;
+} {
+	if (!ggConfig.enabled || isCloudflareWorker()) {
+		return { fileName: '', functionName: '', url: '' };
+	}
+	const { ns: nsLabel, file, line, col } = options;
+	const namespace = `gg:${nsLabel}`;
+	const ggLogFunction =
+		namespaceToLogFunction.get(namespace) ||
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
+	ggLogFunction(`    📝 ${nsLabel}`);
+
+	const fileName = file ? file.replace(srcRootRegex, '') : nsLabel;
+	const functionName = nsLabel.includes('@') ? nsLabel.split('@').pop() || '' : '';
+	const url = file ? openInEditorUrl(file, line, col) : '';
+	return { fileName, functionName, url };
 };
 
 /**
@@ -548,209 +695,74 @@ function getErrorStack(firstArg: unknown, skipFrames: number): string | undefine
 	return captureStack(skipFrames);
 }
 
-/**
- * gg.info() - Log at info level.
- *
- * Passthrough: returns the first argument.
- * In Eruda, entries are styled with a blue/info indicator.
- *
- * @example
- * gg.info('System startup complete');
- * const config = gg.info(loadedConfig, 'loaded config');
- */
-gg.info = function (this: void, ...args: unknown[]): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : undefined;
-	}
-	const callpoint = resolveCallpoint(3);
-	return ggLog({ ns: callpoint, level: 'info' }, ...args);
-};
-
-/**
- * gg._info() - Internal: info with call-site metadata from Vite plugin.
- */
-gg._info = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-	...args: unknown[]
-): unknown {
-	return ggLog({ ...options, level: 'info' }, ...args);
-};
-
-/**
- * gg.warn() - Log at warning level.
- *
- * Passthrough: returns the first argument.
- * In Eruda, entries are styled with a yellow/warning indicator.
- *
- * @example
- * gg.warn('deprecated API used');
- * const result = gg.warn(computeValue(), 'might be slow');
- */
-gg.warn = function (this: void, ...args: unknown[]): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : undefined;
-	}
-	const callpoint = resolveCallpoint(3);
-	return ggLog({ ns: callpoint, level: 'warn' }, ...args);
-};
-
-/**
- * gg._warn() - Internal: warn with call-site metadata from Vite plugin.
- */
-gg._warn = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-	...args: unknown[]
-): unknown {
-	return ggLog({ ...options, level: 'warn' }, ...args);
-};
-
-/**
- * gg.error() - Log at error level.
- *
- * Passthrough: returns the first argument.
- * Captures a stack trace silently — visible in Eruda via a collapsible toggle.
- * If the first argument is an Error object, its .stack is used instead.
- *
- * @example
- * gg.error('connection failed');
- * gg.error(new Error('timeout'));
- * const val = gg.error(response, 'unexpected status');
- */
-gg.error = function (this: void, ...args: unknown[]): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : undefined;
-	}
-	const callpoint = resolveCallpoint(3);
-	const stack = getErrorStack(args[0], 4);
-	return ggLog({ ns: callpoint, level: 'error', stack }, ...args);
-};
-
-/**
- * gg._error() - Internal: error with call-site metadata from Vite plugin.
- */
-gg._error = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-	...args: unknown[]
-): unknown {
-	const stack = getErrorStack(args[0], 3);
-	return ggLog({ ...options, level: 'error', stack }, ...args);
-};
-
-/**
- * gg.assert() - Log only if condition is false.
- *
- * Like console.assert: if the first argument is falsy, logs the remaining
- * arguments at error level. If the condition is truthy, does nothing.
- * Passthrough: always returns the condition value.
- *
- * @example
- * gg.assert(user != null, 'user should exist');
- * gg.assert(list.length > 0, 'list is empty', list);
- */
-gg.assert = function (this: void, condition: unknown, ...args: unknown[]): unknown {
-	if (!condition) {
-		if (!ggConfig.enabled || isCloudflareWorker()) return condition;
-
-		const callpoint = resolveCallpoint(3);
-		const stack = captureStack(4);
-		const assertArgs = args.length > 0 ? args : ['Assertion failed'];
-		ggLog({ ns: callpoint, level: 'error', stack }, ...assertArgs);
-	}
-	return condition;
-};
-
-/**
- * gg._assert() - Internal: assert with call-site metadata from Vite plugin.
- */
-gg._assert = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-	condition: unknown,
-	...args: unknown[]
-): unknown {
-	if (!condition) {
-		if (!ggConfig.enabled || isCloudflareWorker()) return condition;
-
-		const stack = captureStack(3);
-		const assertArgs = args.length > 0 ? args : ['Assertion failed'];
-		ggLog({ ...options, level: 'error', stack }, ...assertArgs);
-	}
-	return condition;
-};
-
-/**
- * gg.table() - Log tabular data.
- *
- * Formats an array of objects (or an object of objects) as an ASCII table.
- * Passthrough: returns the data argument.
- *
- * @example
- * gg.table([{name: 'Alice', age: 30}, {name: 'Bob', age: 25}]);
- * gg.table({a: {x: 1}, b: {x: 2}});
- */
-gg.table = function (this: void, data: unknown, columns?: string[]): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) return data;
-
-	const callpoint = resolveCallpoint(3);
-	const { keys, rows } = formatTable(data, columns);
-	ggLog({ ns: callpoint, tableData: { keys, rows } }, '(table)');
-	// Also emit a native console.table for proper rendering in browser/Node consoles
-	if (columns) {
-		console.table(data, columns);
-	} else {
-		console.table(data);
-	}
-	return data;
-};
-
-/**
- * gg._table() - Internal: table with call-site metadata from Vite plugin.
- */
-gg._table = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-	data: unknown,
-	columns?: string[]
-): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) return data;
-	const { keys, rows } = formatTable(data, columns);
-	ggLog({ ...options, tableData: { keys, rows } }, '(table)');
-	if (columns) {
-		console.table(data, columns);
-	} else {
-		console.table(data);
-	}
-	return data;
-};
-
 // Timer storage for gg.time / gg.timeEnd / gg.timeLog
-const timers = new Map<string, number>();
+// Maps timer label → { start: number, ns?: string, options?: LogOptions }
+const timers = new Map<string, { start: number; ns?: string; options?: LogOptions }>();
 
 /**
- * gg.time() - Start a named timer.
+ * Chainable wrapper returned by gg.time(). Only supports .ns() for setting
+ * the namespace for the entire timer group (inherited by timeLog/timeEnd).
  *
  * @example
- * gg.time('fetch');
- * const data = await fetchData();
- * gg.timeEnd('fetch'); // logs "+123ms fetch: 456ms"
+ * gg.time('fetch').ns('api-pipeline')
+ * gg.time('fetch').ns('$FN:timers')    // template vars work too
  */
-gg.time = function (this: void, label = 'default'): void {
-	if (!ggConfig.enabled || isCloudflareWorker()) return;
-	timers.set(label, performance.now());
+export class GgTimerChain {
+	#label: string;
+	#options: LogOptions;
+
+	constructor(label: string, options: LogOptions) {
+		this.#label = label;
+		this.#options = options;
+	}
+
+	/** Set a custom namespace for this timer group.
+	 * Supports the same template variables as GgChain.ns().
+	 */
+	ns(label: string): GgTimerChain {
+		const resolved = resolveNsTemplateVars(label, this.#options);
+		const timer = timers.get(this.#label);
+		if (timer) timer.ns = resolved;
+		return this;
+	}
+}
+
+/**
+ * gg.time() - Start a named timer. Returns a GgTimerChain for optional .ns() chaining.
+ *
+ * @param label - Timer label (default: 'default')
+ *
+ * @example
+ * gg.time('fetch')                     // basic timer
+ * gg.time('fetch').ns('api-pipeline')  // with namespace (inherited by timeLog/timeEnd)
+ * gg.time('fetch').ns('$FN:timers')    // with template variable (plugin)
+ */
+gg.time = function (this: void, label = 'default'): GgTimerChain {
+	const options: LogOptions = { ns: resolveCallpoint(3) };
+	if (ggConfig.enabled && !isCloudflareWorker()) {
+		timers.set(label, { start: performance.now(), options });
+	}
+	return new GgTimerChain(label, options);
 };
 
 /** gg._time() - Internal: time with call-site metadata from Vite plugin. */
 gg._time = function (
-	_options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 	label = 'default'
-): void {
-	if (!ggConfig.enabled || isCloudflareWorker()) return;
-	timers.set(label, performance.now());
+): GgTimerChain {
+	if (ggConfig.enabled && !isCloudflareWorker()) {
+		timers.set(label, { start: performance.now(), options });
+	}
+	return new GgTimerChain(label, options);
 };
 
 /**
  * gg.timeLog() - Log the current elapsed time without stopping the timer.
  *
+ * Inherits the namespace set by gg.time().ns() for this timer label.
+ *
  * @example
- * gg.time('process');
+ * gg.time('process').ns('my-namespace');
  * // ... step 1 ...
  * gg.timeLog('process', 'step 1 done');
  * // ... step 2 ...
@@ -758,15 +770,15 @@ gg._time = function (
  */
 gg.timeLog = function (this: void, label = 'default', ...args: unknown[]): void {
 	if (!ggConfig.enabled || isCloudflareWorker()) return;
-	const start = timers.get(label);
-	if (start === undefined) {
+	const timer = timers.get(label);
+	if (timer === undefined) {
 		const callpoint = resolveCallpoint(3);
 		ggLog({ ns: callpoint, level: 'warn' }, `Timer '${label}' does not exist`);
 		return;
 	}
-	const elapsed = performance.now() - start;
-	const callpoint = resolveCallpoint(3);
-	ggLog({ ns: callpoint }, `${label}: ${formatElapsed(elapsed)}`, ...args);
+	const elapsed = performance.now() - timer.start;
+	const ns = timer.ns ?? timer.options?.ns ?? resolveCallpoint(3);
+	ggLog({ ...timer.options, ns }, `${label}: ${formatElapsed(elapsed)}`, ...args);
 };
 
 /** gg._timeLog() - Internal: timeLog with call-site metadata from Vite plugin. */
@@ -776,35 +788,38 @@ gg._timeLog = function (
 	...args: unknown[]
 ): void {
 	if (!ggConfig.enabled || isCloudflareWorker()) return;
-	const start = timers.get(label);
-	if (start === undefined) {
+	const timer = timers.get(label);
+	if (timer === undefined) {
 		ggLog({ ...options, level: 'warn' }, `Timer '${label}' does not exist`);
 		return;
 	}
-	const elapsed = performance.now() - start;
-	ggLog(options, `${label}: ${formatElapsed(elapsed)}`, ...args);
+	const elapsed = performance.now() - timer.start;
+	const ns = timer.ns ?? timer.options?.ns ?? options.ns;
+	ggLog({ ...options, ns }, `${label}: ${formatElapsed(elapsed)}`, ...args);
 };
 
 /**
  * gg.timeEnd() - Stop a named timer and log the elapsed time.
  *
+ * Inherits the namespace set by gg.time().ns() for this timer label.
+ *
  * @example
- * gg.time('fetch');
+ * gg.time('fetch').ns('api-pipeline');
  * const data = await fetchData();
- * gg.timeEnd('fetch'); // logs "fetch: 456.12ms"
+ * gg.timeEnd('fetch'); // logs under 'api-pipeline' namespace
  */
 gg.timeEnd = function (this: void, label = 'default'): void {
 	if (!ggConfig.enabled || isCloudflareWorker()) return;
-	const start = timers.get(label);
-	if (start === undefined) {
+	const timer = timers.get(label);
+	if (timer === undefined) {
 		const callpoint = resolveCallpoint(3);
 		ggLog({ ns: callpoint, level: 'warn' }, `Timer '${label}' does not exist`);
 		return;
 	}
-	const elapsed = performance.now() - start;
+	const elapsed = performance.now() - timer.start;
 	timers.delete(label);
-	const callpoint = resolveCallpoint(3);
-	ggLog({ ns: callpoint }, `${label}: ${formatElapsed(elapsed)}`);
+	const ns = timer.ns ?? timer.options?.ns ?? resolveCallpoint(3);
+	ggLog({ ...timer.options, ns }, `${label}: ${formatElapsed(elapsed)}`);
 };
 
 /** gg._timeEnd() - Internal: timeEnd with call-site metadata from Vite plugin. */
@@ -813,49 +828,15 @@ gg._timeEnd = function (
 	label = 'default'
 ): void {
 	if (!ggConfig.enabled || isCloudflareWorker()) return;
-	const start = timers.get(label);
-	if (start === undefined) {
+	const timer = timers.get(label);
+	if (timer === undefined) {
 		ggLog({ ...options, level: 'warn' }, `Timer '${label}' does not exist`);
 		return;
 	}
-	const elapsed = performance.now() - start;
+	const elapsed = performance.now() - timer.start;
 	timers.delete(label);
-	ggLog(options, `${label}: ${formatElapsed(elapsed)}`);
-};
-
-/**
- * gg.trace() - Log with a stack trace.
- *
- * Like console.trace: logs the arguments plus a full stack trace.
- * Passthrough: returns the first argument.
- *
- * @example
- * gg.trace('how did we get here?');
- * const val = gg.trace(result, 'call path');
- */
-gg.trace = function (this: void, ...args: unknown[]): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : undefined;
-	}
-	const callpoint = resolveCallpoint(3);
-	const stack = captureStack(4);
-	const traceArgs = args.length > 0 ? args : ['Trace'];
-	return ggLog({ ns: callpoint, stack }, ...traceArgs);
-};
-
-/**
- * gg._trace() - Internal: trace with call-site metadata from Vite plugin.
- */
-gg._trace = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-	...args: unknown[]
-): unknown {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
-		return args.length ? args[0] : undefined;
-	}
-	const stack = captureStack(3);
-	const traceArgs = args.length > 0 ? args : ['Trace'];
-	return ggLog({ ...options, stack }, ...traceArgs);
+	const ns = timer.ns ?? timer.options?.ns ?? options.ns;
+	ggLog({ ...options, ns }, `${label}: ${formatElapsed(elapsed)}`);
 };
 
 /**
@@ -1225,7 +1206,8 @@ Object.defineProperty(gg, '_onLog', {
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace gg {
 	export let _onLog: OnLogCallback | null;
-	export let ns: (nsLabel: string, ...args: unknown[]) => unknown;
+
+	// Internal plugin-rewrite target
 	export let _ns: (
 		options: {
 			ns: string;
@@ -1237,7 +1219,9 @@ export namespace gg {
 			stack?: string;
 		},
 		...args: unknown[]
-	) => unknown;
+	) => GgChain<unknown>;
+
+	// Internal: build options object without braces (for Svelte template markup)
 	export let _o: (
 		ns: string,
 		file?: string,
@@ -1246,48 +1230,29 @@ export namespace gg {
 		src?: string
 	) => { ns: string; file?: string; line?: number; col?: number; src?: string };
 
-	// Console-like methods (public API)
-	export let info: (...args: unknown[]) => unknown;
-	export let warn: (...args: unknown[]) => unknown;
-	export let error: (...args: unknown[]) => unknown;
-	export let assert: (condition: unknown, ...args: unknown[]) => unknown;
-	export let table: (data: unknown, columns?: string[]) => unknown;
-	export let time: (label?: string) => void;
+	// Introspection
+	export let here: () => { fileName: string; functionName: string; url: string };
+	export let _here: (options: { ns: string; file?: string; line?: number; col?: number }) => {
+		fileName: string;
+		functionName: string;
+		url: string;
+	};
+
+	// Control methods
+	export let enable: (ns: string) => void;
+	export let disable: () => string;
+	export let clearPersist: () => void;
+
+	// Timer methods
+	export let time: (label?: string) => GgTimerChain;
 	export let timeLog: (label?: string, ...args: unknown[]) => void;
 	export let timeEnd: (label?: string) => void;
-	export let trace: (...args: unknown[]) => unknown;
 
-	// Internal plugin-rewrite targets (same as above but with call-site metadata)
-	export let _info: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-		...args: unknown[]
-	) => unknown;
-	export let _warn: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-		...args: unknown[]
-	) => unknown;
-	export let _error: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-		...args: unknown[]
-	) => unknown;
-	export let _assert: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-		condition: unknown,
-		...args: unknown[]
-	) => unknown;
-	export let _table: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-		data: unknown,
-		columns?: string[]
-	) => unknown;
-	export let _trace: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
-		...args: unknown[]
-	) => unknown;
+	// Internal plugin-rewrite targets for timers
 	export let _time: (
 		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 		label?: string
-	) => void;
+	) => GgTimerChain;
 	export let _timeLog: (
 		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 		label?: string,

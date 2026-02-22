@@ -97,13 +97,7 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// Quick bail: no gg calls in this file
 			if (
 				!code.includes('gg(') &&
-				!code.includes('gg.ns(') &&
-				!code.includes('gg.info(') &&
-				!code.includes('gg.warn(') &&
-				!code.includes('gg.error(') &&
-				!code.includes('gg.table(') &&
-				!code.includes('gg.trace(') &&
-				!code.includes('gg.assert(') &&
+				!code.includes('gg.here(') &&
 				!code.includes('gg.time(') &&
 				!code.includes('gg.timeLog(') &&
 				!code.includes('gg.timeEnd(')
@@ -657,15 +651,18 @@ export function escapeForString(s: string): string {
 }
 
 /**
- * Transform gg() and gg.ns() calls in source code to gg._ns({ns, file, line, col, src}, ...) calls.
+ * Transform gg() calls in source code to inject call-site metadata.
  *
  * Handles:
  * - bare gg(expr) → gg._ns({ns, file, line, col, src: 'expr'}, expr)
- * - gg.ns('label', expr) → gg._ns({ns, file, line, col, src: 'expr'}, expr)
- *   - label supports template variables: $NS, $FN, $FILE, $LINE, $COL
- *   - plain label (no variables) is used as-is (no auto @fn append)
- * - gg.enable, gg.disable, gg.clearPersist, gg._onLog, gg._ns → left untouched
+ * - gg.here() → gg._here({ns, file, line, col})
+ * - gg.time/timeLog/timeEnd → gg._time/_timeLog/_timeEnd with metadata
+ * - gg.enable, gg.disable, gg.clearPersist, gg._ns, gg._onLog → left untouched
  * - gg inside strings and comments → left untouched
+ *
+ * Chain methods (.ns(), .warn(), .error(), etc.) are NOT rewritten —
+ * they run at runtime and resolve template variables from the metadata
+ * that the plugin baked into the gg._ns() options object.
  *
  * For .svelte files, `svelteInfo` (from `collectCodeRanges()`) determines which
  * positions contain JS code and provides AST-based function scope detection.
@@ -805,7 +802,7 @@ export function transformGgCalls(
 			}
 		}
 
-		// Look for 'gg' pattern — could be gg( or gg.ns(
+		// Look for 'gg' pattern — could be gg( or gg.here( or gg.time(
 		if (code[i] === 'g' && code[i + 1] === 'g') {
 			// In .svelte files, skip gg outside code ranges (prose text, etc.)
 			const range = rangeAt(i);
@@ -821,88 +818,24 @@ export function transformGgCalls(
 				continue;
 			}
 
-			// Case 1: gg.ns('label', ...) → gg._ns({ns: 'label', file, line, col, src}, ...)
-			if (code.slice(i + 2, i + 6) === '.ns(') {
+			// Case 1: gg.here() → gg._here({ns, file, line, col})
+			if (code.slice(i + 2, i + 9) === '.here()') {
 				const { line, col } = getLineCol(code, i);
 				const fnName = getFunctionName(i, range);
-				const openParenPos = i + 5; // position of '(' in 'gg.ns('
+				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+				const escapedNs = escapeForString(callpoint);
 
-				// Find matching closing paren for the entire gg.ns(...) call
-				const closeParenPos = findMatchingParen(code, openParenPos);
-				if (closeParenPos === -1) {
-					i += 6;
-					continue;
-				}
-
-				// Extract the first argument (the namespace string)
-				// Look for the string literal after 'gg.ns('
-				let afterNsParen = i + 6; // position after 'gg.ns('
-				while (afterNsParen < code.length && /\s/.test(code[afterNsParen])) afterNsParen++;
-				const quoteChar = code[afterNsParen];
-
-				if (quoteChar === "'" || quoteChar === '"') {
-					// Find the closing quote
-					let j = afterNsParen + 1;
-					while (j < code.length && code[j] !== quoteChar) {
-						if (code[j] === '\\') j++; // skip escaped chars
-						j++;
-					}
-					// j now points to closing quote
-					const nsLabelRaw = code.slice(afterNsParen + 1, j);
-
-					// Build callpoint: substitute $NS/$FN/$FILE/$LINE/$COL template variables.
-					// The auto-generated callpoint (file@fn) is what bare gg() would produce.
-					const autoCallpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
-					const callpoint = escapeForString(
-						nsLabelRaw
-							.replace(/\$NS/g, autoCallpoint)
-							.replace(/\$FN/g, fnName)
-							.replace(/\$FILE/g, shortPath)
-							.replace(/\$LINE/g, String(line))
-							.replace(/\$COL/g, String(col))
-					);
-
-					// Check if there are more args after the string
-					const afterClosingQuote = j + 1;
-					let k = afterClosingQuote;
-					while (k < code.length && /\s/.test(code[k])) k++;
-
-					if (code[k] === ')') {
-						// gg.ns('label') → gg._ns(opts)
-						result.push(code.slice(lastIndex, i));
-						result.push(`gg._ns(${buildOptions(range, callpoint, line, col)})`);
-						lastIndex = k + 1;
-						i = k + 1;
-					} else if (code[k] === ',') {
-						// gg.ns('label', args...) → gg._ns(opts, args...)
-						let argsStart = k + 1;
-						while (argsStart < closeParenPos && /\s/.test(code[argsStart])) argsStart++;
-						const argsSrc = code.slice(argsStart, closeParenPos).trim();
-						const escapedSrc = escapeForString(argsSrc);
-						result.push(code.slice(lastIndex, i));
-						result.push(`gg._ns(${buildOptions(range, callpoint, line, col, escapedSrc)}, `);
-						lastIndex = k + 1; // skip past the comma, keep args as-is
-						i = k + 1;
-					} else {
-						// Unexpected — leave untouched
-						i += 6;
-						continue;
-					}
-
-					modified = true;
-					continue;
-				}
-
-				// Non-string first arg to gg.ns — skip (can't extract ns at build time)
-				i += 6;
+				result.push(code.slice(lastIndex, i));
+				result.push(`gg._here(${buildOptions(range, escapedNs, line, col)})`);
+				lastIndex = i + 9; // skip past 'gg.here()'
+				i = lastIndex;
+				modified = true;
 				continue;
 			}
 
-			// Case 1b: gg.info/warn/error/table/trace/assert → gg._info/_warn/_error/_table/_trace/_assert
-			// These methods are rewritten like bare gg() but with their internal variant.
-			const dotMethodMatch = code
-				.slice(i + 2)
-				.match(/^\.(info|warn|error|table|trace|assert|time|timeLog|timeEnd)\(/);
+			// Case 2: gg.time/timeLog/timeEnd → gg._time/_timeLog/_timeEnd
+			// Timer methods are rewritten to inject call-site metadata.
+			const dotMethodMatch = code.slice(i + 2).match(/^\.(time|timeLog|timeEnd)\(/);
 			if (dotMethodMatch) {
 				const methodName = dotMethodMatch[1];
 				const internalName = `_${methodName}`;
@@ -925,12 +858,12 @@ export function transformGgCalls(
 				result.push(code.slice(lastIndex, i));
 
 				if (argsText === '') {
-					// gg.warn() → gg._warn(opts)
+					// gg.time() → gg._time(opts)
 					result.push(`gg.${internalName}(${buildOptions(range, escapedNs, line, col)})`);
 					lastIndex = closeParenPos + 1;
 					i = closeParenPos + 1;
 				} else {
-					// gg.warn(expr) → gg._warn(opts, expr)
+					// gg.time('label') → gg._time(opts, 'label')
 					const escapedSrc = escapeForString(argsText);
 					result.push(
 						`gg.${internalName}(${buildOptions(range, escapedNs, line, col, escapedSrc)}, `
@@ -942,13 +875,13 @@ export function transformGgCalls(
 				continue;
 			}
 
-			// Skip other gg.* calls (gg.enable, gg.disable, gg._ns, gg._onLog, gg.time, etc.)
+			// Skip other gg.* calls (gg.enable, gg.disable, gg._ns, gg._onLog, etc.)
 			if (code[i + 2] === '.') {
 				i += 3;
 				continue;
 			}
 
-			// Case 2: bare gg(...) → gg._ns({ns, file, line, col, src}, ...)
+			// Case 3: bare gg(...) → gg._ns({ns, file, line, col, src}, ...)
 			if (code[i + 2] === '(') {
 				const { line, col } = getLineCol(code, i);
 				const fnName = getFunctionName(i, range);

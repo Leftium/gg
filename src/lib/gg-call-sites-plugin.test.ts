@@ -1,8 +1,14 @@
 /**
  * Tests for the gg-call-sites vite plugin transform logic.
  *
- * Tests gg.ns() template variable substitution ($NS, $FN, $FILE, $LINE, $COL)
- * and the fix for not auto-appending @functionName to plain gg.ns() labels.
+ * The plugin rewrites:
+ * - gg(expr) → gg._ns({ns, file, line, col, src}, expr)
+ * - gg.here() → gg._here({ns, file, line, col})
+ * - gg.time/timeLog/timeEnd → gg._time/_timeLog/_timeEnd with metadata
+ *
+ * Chain methods (.ns(), .warn(), .error(), etc.) are NOT rewritten by the
+ * plugin — they run at runtime and resolve template variables from the
+ * metadata baked into the gg._ns() options object.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -27,7 +33,7 @@ function transform(
 	}
 }
 
-// ── bare gg() transforms (unchanged behavior) ─────────────────────────
+// ── bare gg() transforms ───────────────────────────────────────────────
 
 describe('bare gg() transforms', () => {
 	it('rewrites bare gg(expr) with file@fn namespace', () => {
@@ -56,117 +62,74 @@ describe('bare gg() transforms', () => {
 		const code = 'gg.enable("foo"); gg.disable();';
 		expect(transform(code)).toBeNull();
 	});
-});
 
-// ── gg.ns() plain labels (no template variables) ──────────────────────
-
-describe('gg.ns() plain labels', () => {
-	it('uses label as-is without appending @functionName', () => {
-		const code = `function handleClick() { gg.ns('ERROR', 'something broke') }`;
+	it('preserves chain methods after gg() — plugin does not rewrite chains', () => {
+		const code = `function test() { gg("hello").ns("custom").warn() }`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'ERROR'");
-		// Must NOT contain @handleClick
-		expect(out).not.toContain('@handleClick');
+		// Plugin rewrites gg("hello") but leaves .ns("custom").warn() untouched
+		expect(out).toContain("gg._ns({ns:'routes/+page.svelte@test'");
+		expect(out).toContain('.ns("custom").warn()');
 	});
 
-	it('preserves label with no args', () => {
-		const code = `function test() { gg.ns('my-label') }`;
+	it('preserves .v passthrough accessor', () => {
+		const code = `function test() { const x = gg(value).v }`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'my-label'");
-		expect(out).not.toContain('@test');
-	});
-
-	it('works at top level', () => {
-		const code = `gg.ns('auth', user)`;
-		const out = transform(code)!;
-		expect(out).toContain("ns:'auth'");
+		expect(out).toContain('gg._ns(');
+		expect(out).toContain('.v');
 	});
 });
 
-// ── gg.ns() with $NS template variable ────────────────────────────────
+// ── gg.here() transforms ──────────────────────────────────────────────
 
-describe('gg.ns() with $NS', () => {
-	it('substitutes $NS with auto-generated callpoint (file@fn)', () => {
-		const code = `function handleClick() { gg.ns('ERROR:$NS', msg) }`;
+describe('gg.here() transforms', () => {
+	it('rewrites gg.here() to gg._here() with metadata', () => {
+		const code = 'function test() { gg.here() }';
 		const out = transform(code)!;
-		expect(out).toContain("ns:'ERROR:routes/+page.svelte@handleClick'");
+		expect(out).toContain("gg._here({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("file:'src/routes/+page.svelte'");
 	});
 
-	it('substitutes $NS at top level (no fn)', () => {
-		const code = `gg.ns('tag:$NS', data)`;
+	it('rewrites gg.here() at top level', () => {
+		const code = 'const info = gg.here()';
 		const out = transform(code)!;
-		expect(out).toContain("ns:'tag:routes/+page.svelte'");
-	});
-
-	it('substitutes multiple $NS occurrences', () => {
-		const code = `function foo() { gg.ns('$NS-$NS', x) }`;
-		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte@foo-routes/+page.svelte@foo'");
-	});
-
-	it('substitutes $NS with no args', () => {
-		const code = `function bar() { gg.ns('prefix:$NS') }`;
-		const out = transform(code)!;
-		expect(out).toContain("ns:'prefix:routes/+page.svelte@bar'");
+		expect(out).toContain("gg._here({ns:'routes/+page.svelte'");
 	});
 });
 
-// ── gg.ns() with $FN template variable ────────────────────────────────
+// ── gg.time/timeLog/timeEnd transforms ────────────────────────────────
 
-describe('gg.ns() with $FN', () => {
-	it('substitutes $FN with enclosing function name', () => {
-		const code = `function handleSubmit() { gg.ns('form:$FN', data) }`;
+describe('timer transforms', () => {
+	it('rewrites gg.time() with metadata', () => {
+		const code = `function test() { gg.time('fetch') }`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'form:handleSubmit'");
+		expect(out).toContain("gg._time({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("'fetch'");
 	});
 
-	it('substitutes $FN as empty when at top level', () => {
-		const code = `gg.ns('tag:$FN', x)`;
+	it('rewrites gg.time() with no args', () => {
+		const code = `function test() { gg.time() }`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'tag:'");
-	});
-});
-
-// ── gg.ns() with $FILE template variable ──────────────────────────────
-
-describe('gg.ns() with $FILE', () => {
-	it('substitutes $FILE with short file path', () => {
-		const code = `function test() { gg.ns('$FILE:error', msg) }`;
-		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte:error'");
-	});
-});
-
-// ── gg.ns() with $LINE and $COL ───────────────────────────────────────
-
-describe('gg.ns() with $LINE/$COL', () => {
-	it('substitutes $LINE with line number', () => {
-		const code = `gg.ns('debug:$LINE', x)`;
-		const out = transform(code)!;
-		// Line 1 (first line of the code)
-		expect(out).toContain("ns:'debug:1'");
+		expect(out).toContain("gg._time({ns:'routes/+page.svelte@test'");
 	});
 
-	it('substitutes $COL with column number', () => {
-		const code = `gg.ns('debug:$COL', x)`;
+	it('rewrites gg.timeLog() with metadata', () => {
+		const code = `function test() { gg.timeLog('fetch', 'step 1') }`;
 		const out = transform(code)!;
-		expect(out).toMatch(/ns:'debug:\d+'/);
-	});
-});
-
-// ── gg.ns() with combined template variables ──────────────────────────
-
-describe('gg.ns() combined variables', () => {
-	it('substitutes $FN and $FILE together', () => {
-		const code = `function validate() { gg.ns('$FILE@$FN:check', field) }`;
-		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte@validate:check'");
+		expect(out).toContain("gg._timeLog({ns:'routes/+page.svelte@test'");
 	});
 
-	it('full combination: ERROR:$NS', () => {
-		const code = `function handleError() { gg.ns('ERROR:$NS', err) }`;
+	it('rewrites gg.timeEnd() with metadata', () => {
+		const code = `function test() { gg.timeEnd('fetch') }`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'ERROR:routes/+page.svelte@handleError'");
+		expect(out).toContain("gg._timeEnd({ns:'routes/+page.svelte@test'");
+	});
+
+	it('preserves .ns() chain after gg.time()', () => {
+		const code = `function test() { gg.time('fetch').ns('api-pipeline') }`;
+		const out = transform(code)!;
+		// Plugin rewrites gg.time() but leaves .ns() chain untouched
+		expect(out).toContain('gg._time(');
+		expect(out).toContain(".ns('api-pipeline')");
 	});
 });
 
@@ -174,15 +137,13 @@ describe('gg.ns() combined variables', () => {
 
 describe('plugin transform() filter', () => {
 	it('should not transform files in node_modules', () => {
-		// Simulate what the plugin's transform() does with a file ID check
 		const nodeModulesIds = [
 			'/project/node_modules/@leftium/gg/dist/gg.js',
 			'/Users/dev/app/node_modules/some-lib/index.js',
-			'C:/project/node_modules/package/file.ts' // Vite normalizes Windows paths to forward slashes
+			'C:/project/node_modules/package/file.ts'
 		];
 
 		for (const id of nodeModulesIds) {
-			// The plugin checks: if (id.includes('/node_modules/')) return null
 			expect(id.includes('/node_modules/')).toBe(true);
 		}
 	});
@@ -191,7 +152,7 @@ describe('plugin transform() filter', () => {
 		const userFileIds = [
 			'/project/src/routes/+page.svelte',
 			'/Users/dev/app/src/lib/utils.ts',
-			'C:/project/src/components/Button.svelte' // Vite normalizes Windows paths to forward slashes
+			'C:/project/src/components/Button.svelte'
 		];
 
 		for (const id of userFileIds) {
@@ -204,31 +165,25 @@ describe('plugin transform() filter', () => {
 
 describe('edge cases', () => {
 	it('does not transform gg inside strings', () => {
-		const code = `const s = 'gg.ns("foo", bar)'`;
+		const code = `const s = 'gg("foo")'`;
 		expect(transform(code)).toBeNull();
 	});
 
 	it('does not transform gg inside comments', () => {
-		const code = `// gg.ns("foo", bar)`;
+		const code = `// gg("foo")`;
 		expect(transform(code)).toBeNull();
 	});
 
-	it('handles multi-line gg.ns() call', () => {
-		const code = `function handleClick() {\n\tgg.ns(\n\t\t'my-component:action',\n\t\tsome.value\n\t)\n}`;
+	it('handles multi-line gg() call', () => {
+		const code = `function handleClick() {\n\tgg(\n\t\tsome.value\n\t)\n}`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'my-component:action'");
+		expect(out).toContain("ns:'routes/+page.svelte@handleClick'");
 		expect(out).toContain("file:'src/routes/+page.svelte'");
 		expect(out).toContain('line:');
 	});
 
-	it('handles double-quoted ns label', () => {
-		const code = `function test() { gg.ns("ERROR:$FN", msg) }`;
-		const out = transform(code)!;
-		expect(out).toContain("ns:'ERROR:test'");
-	});
-
 	it('preserves file and line metadata in options object', () => {
-		const code = `function test() { gg.ns('label', data) }`;
+		const code = `function test() { gg(data) }`;
 		const out = transform(code)!;
 		expect(out).toContain("file:'src/routes/+page.svelte'");
 		expect(out).toContain('line:');
@@ -236,7 +191,7 @@ describe('edge cases', () => {
 	});
 
 	it('handles .svelte file with AST-based code ranges', () => {
-		const code = `<script>\nfunction test() { gg.ns('$FN:tag', x) }\n</script>\n<p>gg.ns("label")</p>`;
+		const code = `<script>\nfunction test() { gg(x) }\n</script>\n<p>gg("label")</p>`;
 		const codeRanges = collectCodeRanges(code);
 		const result = transformGgCalls(
 			code,
@@ -246,25 +201,33 @@ describe('edge cases', () => {
 		);
 		const out = result!.code;
 		// Script: transformed with object literal syntax
-		expect(out).toContain("{ns:'test:tag'");
+		expect(out).toContain("{ns:'routes/+page.svelte@test'");
 		// Template prose: left untouched (prose text, not a code expression)
-		expect(out).toContain('gg.ns("label")');
+		expect(out).toContain('gg("label")');
 	});
 
 	it('does not let HTML apostrophes break gg() in template expressions', () => {
 		// Regression: an apostrophe in HTML prose (e.g. "Eruda's") was treated as
 		// a JS string delimiter, causing the scanner to skip over a subsequent
-		// gg.ns() call inside an onclick handler.
+		// gg() call inside an onclick handler.
 		const code = `<script>
 	import { gg } from '$lib/index.js';
 </script>
 
 <p>Check Eruda's GG tab.</p>
-<button onclick={() => gg.ns('$NS:click', 'event handler')}>Click</button>`;
+<button onclick={() => gg('event handler').ns('$NS:click')}>Click</button>`;
 		const out = transform(code)!;
 		expect(out).not.toBeNull();
-		// $NS should be expanded to the file path, not left as literal '$NS'
-		expect(out).toContain('routes/+page.svelte:click');
-		expect(out).not.toContain("'$NS:click'");
+		// gg('event handler') should be rewritten to gg._ns(...)
+		expect(out).toContain('gg._ns(');
+		// .ns('$NS:click') chain should be preserved as-is (runs at runtime)
+		expect(out).toContain(".ns('$NS:click')");
+	});
+
+	it('does not rewrite removed static methods', () => {
+		// gg.ns, gg.info, gg.warn, gg.error, gg.table, gg.trace, gg.assert
+		// are no longer rewritten by the plugin (they were removed from the API)
+		const code = `gg.ns('label', x)`;
+		expect(transform(code)).toBeNull();
 	});
 });

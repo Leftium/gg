@@ -169,15 +169,16 @@ describe('gg() in svelte template markup (AST-based)', () => {
 		expect(out).toContain('gg._ns(');
 	});
 
-	it('transforms gg.ns() in template with gg._o() syntax', () => {
-		const code = `<script>let x;</script>\n<button onclick={() => gg.ns('ERROR', 'bad')}>btn</button>`;
+	it('transforms gg() in template with chain methods preserved', () => {
+		const code = `<script>let x;</script>\n<button onclick={() => gg('bad').ns('ERROR').error()}>btn</button>`;
 		const info = collectCodeRanges(code);
 		const result = transformGgCalls(code, 'test.svelte', 'src/test.svelte', info);
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
+		// Plugin rewrites gg('bad') with gg._o() syntax, but leaves chain untouched
 		expect(out).toContain('gg._o(');
-		expect(out).toContain("'ERROR'");
+		expect(out).toContain(".ns('ERROR').error()");
 	});
 
 	it('leaves prose text gg() untouched', () => {
@@ -235,15 +236,17 @@ describe('gg() in svelte template markup (AST-based)', () => {
 		expect(out).toContain('gg._ns(');
 	});
 
-	it('transforms gg.ns() with $NS in template', () => {
-		const code = `<script>let x;</script>\n<button onclick={() => gg.ns('$NS:click', x)}>btn</button>`;
+	it('transforms gg() with .ns($NS) chain in template', () => {
+		const code = `<script>let x;</script>\n<button onclick={() => gg(x).ns('$NS:click')}>btn</button>`;
 		const info = collectCodeRanges(code);
 		const result = transformGgCalls(code, 'test.svelte', 'src/test.svelte', info);
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
+		// Plugin rewrites gg(x), leaves .ns('$NS:click') for runtime resolution
 		expect(out).toContain('gg._o(');
 		expect(out).toContain('test.svelte');
+		expect(out).toContain(".ns('$NS:click')");
 	});
 
 	it('uses AST function names, not regex (no @data/@error bugs)', () => {

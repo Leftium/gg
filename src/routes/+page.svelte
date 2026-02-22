@@ -7,7 +7,6 @@
 		testTextStyling,
 		testInfo,
 		testWarnError,
-		testAssert,
 		testTable,
 		testTimers,
 		testTrace,
@@ -52,10 +51,10 @@
 
 <div style="margin-bottom: 1rem;">
 	<button onclick={testLog}>🧪 Test gg() Log</button>
-	<button onclick={testManualNs}>🏷️ gg.ns() Templates</button>
+	<button onclick={testManualNs}>🏷️ .ns() Templates</button>
 	<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
 	<button onclick={testTextStyling}>✨ Text Styling (bold/italic)</button>
-	<button onclick={() => gg.ns('$NS:click', 'template event handler')}>🔬 Template gg()</button>
+	<button onclick={() => gg('template event handler').ns('$NS:click')}>🔬 Template gg()</button>
 	<button onclick={testNamespaceSegments}>🔗 Namespace Segments</button>
 	<button onclick={testExpressions}>🔍 Test Expressions</button>
 </div>
@@ -64,7 +63,6 @@
 <div style="margin-bottom: 1rem;">
 	<button onclick={testInfo}>ℹ️ info</button>
 	<button onclick={testWarnError}>⚠️ warn / error</button>
-	<button onclick={testAssert}>✅ assert</button>
 	<button onclick={testTable}>📊 table</button>
 	<button onclick={testTimers}>⏱️ time / timeEnd</button>
 	<button onclick={testTrace}>🔍 trace</button>
@@ -77,6 +75,6 @@
 	>
 </div>
 
-<OpenInEditorLink gg={gg()} />
+<OpenInEditorLink gg={gg.here()} />
 
-<p><small>Template expression: {gg('inline template gg()')}</small></p>
+<p><small>Template expression: {gg('inline template gg()').v}</small></p>

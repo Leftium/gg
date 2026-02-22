@@ -7,17 +7,17 @@ import { gg, fg, bg, bold, italic, underline, dim } from '$lib/index.js';
 
 export function testManualNs() {
 	// Plain label (no template variables) - used as-is
-	gg.ns('CUSTOM_NAMESPACE', 'Plain custom namespace - no @functionName appended');
+	gg('Plain custom namespace - no @functionName appended').ns('CUSTOM_NAMESPACE');
 
 	// Template variables demo
-	gg.ns('ERROR:$NS', 'Error with auto-generated callpoint suffix');
-	gg.ns('$FILE:validation', 'File path with custom tag');
-	gg.ns('TRACE:$FN', 'Custom prefix with just function name');
-	gg.ns('$NS:debug', 'Full callpoint with custom suffix');
+	gg('Error with auto-generated callpoint suffix').ns('ERROR:$NS');
+	gg('File path with custom tag').ns('$FILE:validation');
+	gg('Custom prefix with just function name').ns('TRACE:$FN');
+	gg('Full callpoint with custom suffix').ns('$NS:debug');
 
 	// Multiple calls with same custom namespace (grouped by color)
-	gg.ns('CUSTOM_NAMESPACE', 'Message 1');
-	gg.ns('CUSTOM_NAMESPACE', 'Message 2', { data: Date.now() });
+	gg('Message 1').ns('CUSTOM_NAMESPACE');
+	gg('Message 2', { data: Date.now() }).ns('CUSTOM_NAMESPACE');
 }
 
 export function testAnsiColors() {
@@ -81,84 +81,63 @@ export function testTextStyling() {
 }
 
 export function testInfo() {
-	// gg.info - informational level (blue badge)
-	gg.info('System startup complete');
-	gg.info('Connected to database', { host: 'localhost', port: 5432 });
-	gg.info('Configuration loaded', { env: 'development', debug: true });
+	// gg().info() - informational level (blue badge)
+	gg('System startup complete').info();
+	gg('Connected to database', { host: 'localhost', port: 5432 }).info();
+	gg('Configuration loaded', { env: 'development', debug: true }).info();
 
-	// Passthrough demo: info returns the first argument
-	const config = gg.info({ theme: 'dark', locale: 'en-US' });
+	// Passthrough demo: .v returns the first argument
+	const config = gg({ theme: 'dark', locale: 'en-US' }).info().v;
 	gg(`info returned:`, config);
 }
 
 export function testWarnError() {
-	// gg.warn - warning level
-	gg.warn('This API is deprecated, use v2 instead');
-	gg.warn('Slow query detected', { duration: 3200, query: 'SELECT * FROM users' });
+	// .warn() - warning level
+	gg('This API is deprecated, use v2 instead').warn();
+	gg('Slow query detected', { duration: 3200, query: 'SELECT * FROM users' }).warn();
 
-	// gg.error - error level with automatic stack capture
-	gg.error('Connection to database failed');
-	gg.error('Unexpected response', { status: 500, body: 'Internal Server Error' });
+	// .error() - error level with automatic stack capture
+	gg('Connection to database failed').error();
+	gg('Unexpected response', { status: 500, body: 'Internal Server Error' }).error();
 
-	// gg.error with an actual Error object (uses its .stack)
+	// .error() with an actual Error object (uses its .stack)
 	try {
 		JSON.parse('not json{');
 	} catch (err) {
-		gg.error(err);
+		gg(err).error();
 	}
 
-	// Passthrough demo: warn/error return the first argument
-	const value = gg.warn('returning this value');
+	// Passthrough demo: .v returns the first argument
+	const value = gg('returning this value').warn().v;
 	gg(`warn returned: ${value}`);
-}
-
-export function testAssert() {
-	const users = [{ name: 'Alice' }, { name: 'Bob' }];
-	const emptyList: unknown[] = [];
-
-	// Passing assertion - no output
-	gg.assert(users.length > 0, 'users should not be empty');
-
-	// Failing assertion - logs error with stack trace
-	gg.assert(emptyList.length > 0, 'list should not be empty', emptyList);
-
-	// Failing with no message - defaults to "Assertion failed"
-	gg.assert(false);
-
-	// Passthrough: returns the condition value
-	const result = gg.assert(42, 'this passes');
-	gg(`assert returned: ${result}`);
 }
 
 export function testTable() {
 	// Array of objects
-	gg.table([
+	gg([
 		{ name: 'Alice', age: 30, role: 'admin' },
 		{ name: 'Bob', age: 25, role: 'user' },
 		{ name: 'Charlie', age: 35, role: 'moderator' }
-	]);
+	]).table();
 
 	// Array of primitives
-	gg.table(['apple', 'banana', 'cherry']);
+	gg(['apple', 'banana', 'cherry']).table();
 
 	// Object of objects
-	gg.table({
+	gg({
 		us: { currency: 'USD', population: '331M' },
 		uk: { currency: 'GBP', population: '67M' },
 		jp: { currency: 'JPY', population: '125M' }
-	});
+	}).table();
 
 	// With column filter
-	gg.table(
-		[
-			{ name: 'Alice', age: 30, role: 'admin', email: 'alice@example.com' },
-			{ name: 'Bob', age: 25, role: 'user', email: 'bob@example.com' }
-		],
-		['name', 'role']
-	);
+	gg([
+		{ name: 'Alice', age: 30, role: 'admin', email: 'alice@example.com' },
+		{ name: 'Bob', age: 25, role: 'user', email: 'bob@example.com' }
+	]).table(['name', 'role']);
 
 	// Wide table to test horizontal scrollbar (should not overflow panel)
-	gg.table([
+	gg([
 		{
 			id: 1,
 			firstName: 'Christopher',
@@ -183,10 +162,10 @@ export function testTable() {
 			zipCode: '90001',
 			country: 'United States'
 		}
-	]);
+	]).table();
 
-	// Passthrough: returns the original data
-	const data = gg.table([{ x: 1 }, { x: 2 }]);
+	// Passthrough: .v returns the original data
+	const data = gg([{ x: 1 }, { x: 2 }]).table().v;
 	gg('table returned:', data);
 }
 
@@ -212,20 +191,26 @@ export function testTimers() {
 	// Immediate timer (near-zero elapsed)
 	gg.time('instant');
 	gg.timeEnd('instant');
+
+	// Timer with custom namespace
+	gg.time('ns-demo').ns('custom-timer-group');
+	setTimeout(() => {
+		gg.timeEnd('ns-demo');
+	}, 200);
 }
 
 export function testTrace() {
 	function innerFunction() {
 		function deeplyNested() {
 			// Trace captures the full call stack
-			gg.trace('Trace from deeply nested function');
+			gg('Trace from deeply nested function').trace();
 		}
 		deeplyNested();
 	}
 	innerFunction();
 
 	// Passthrough
-	const val = gg.trace('trace returns this', { extra: 'data' });
+	const val = gg('trace returns this', { extra: 'data' }).trace().v;
 	gg(`trace returned: ${val}`);
 }
 
@@ -251,7 +236,7 @@ export function testExpressions() {
 	gg(items);
 	gg(items.length);
 
-	gg.info('Toggle the Expr button in the toolbar to see expressions inline and in clipboard!');
+	gg('Toggle the Expr button in the toolbar to see expressions inline and in clipboard!').info();
 }
 
 export function testNamespaceSegments() {
@@ -268,40 +253,40 @@ export function testNamespaceSegments() {
 	];
 
 	// rift namespace hierarchy (gg: prefix is added automatically)
-	gg.ns('rift:transcription:interim', messages[0], { confidence: 0.85 });
-	gg.ns('rift:transcription:final', messages[1], { confidence: 0.98 });
-	gg.ns('rift:audio:recording', messages[2], { duration: '1.2s' });
-	gg.ns('rift:audio:playback', messages[3], { volume: 0.8 });
-	gg.ns('rift:websocket:connect', messages[4], { url: 'ws://localhost' });
-	gg.ns('rift:websocket:message', messages[5], { type: 'audio' });
+	gg(messages[0], { confidence: 0.85 }).ns('rift:transcription:interim');
+	gg(messages[1], { confidence: 0.98 }).ns('rift:transcription:final');
+	gg(messages[2], { duration: '1.2s' }).ns('rift:audio:recording');
+	gg(messages[3], { volume: 0.8 }).ns('rift:audio:playback');
+	gg(messages[4], { url: 'ws://localhost' }).ns('rift:websocket:connect');
+	gg(messages[5], { type: 'audio' }).ns('rift:websocket:message');
 
 	// routes namespace hierarchy
-	gg.ns('routes:home:load', messages[6]);
-	gg.ns('routes:home:render', messages[7]);
-	gg.ns('routes:about:load', messages[0]);
+	gg(messages[6]).ns('routes:home:load');
+	gg(messages[7]).ns('routes:home:render');
+	gg(messages[0]).ns('routes:about:load');
 
 	// components namespace hierarchy
-	gg.ns('components:header:mount', messages[1]);
-	gg.ns('components:footer:mount', messages[2]);
+	gg(messages[1]).ns('components:header:mount');
+	gg(messages[2]).ns('components:footer:mount');
 
 	// api namespace hierarchy
-	gg.ns('api:users:fetch', messages[3], { count: 10 });
-	gg.ns('api:users:create', messages[4], { id: 42 });
-	gg.ns('api:posts:list', messages[5], { page: 1 });
+	gg(messages[3], { count: 10 }).ns('api:users:fetch');
+	gg(messages[4], { id: 42 }).ns('api:users:create');
+	gg(messages[5], { page: 1 }).ns('api:posts:list');
 
 	// utils namespace hierarchy
-	gg.ns('utils:format:date', messages[6], { format: 'ISO8601' });
-	gg.ns('utils:format:currency', messages[7], { locale: 'en-US' });
+	gg(messages[6], { format: 'ISO8601' }).ns('utils:format:date');
+	gg(messages[7], { locale: 'en-US' }).ns('utils:format:currency');
 
 	// Test new delimiters: @ / - _
-	gg.ns('routes/dashboard/settings/+page.svelte@handleSubmit', messages[0], { action: 'save' });
-	gg.ns('routes/dashboard/settings/+page.svelte@handleCancel', messages[1], { action: 'cancel' });
-	gg.ns('routes/dashboard/profile/+page.svelte@onMount', messages[2], { loaded: true });
-	gg.ns('api-client:fetch_user_data@handle-error', messages[3], { status: 404 });
-	gg.ns('user-profile-card:render_avatar@click-handler', messages[4], { userId: 123 });
-	gg.ns('payment_processor:process-transaction@validate_card', messages[5], { valid: true });
+	gg(messages[0], { action: 'save' }).ns('routes/dashboard/settings/+page.svelte@handleSubmit');
+	gg(messages[1], { action: 'cancel' }).ns('routes/dashboard/settings/+page.svelte@handleCancel');
+	gg(messages[2], { loaded: true }).ns('routes/dashboard/profile/+page.svelte@onMount');
+	gg(messages[3], { status: 404 }).ns('api-client:fetch_user_data@handle-error');
+	gg(messages[4], { userId: 123 }).ns('user-profile-card:render_avatar@click-handler');
+	gg(messages[5], { valid: true }).ns('payment_processor:process-transaction@validate_card');
 
-	gg.info('Generated 22 test logs with multi-delimiter namespaces. Click any segment to filter!');
+	gg('Generated 22 test logs with multi-delimiter namespaces. Click any segment to filter!').info();
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +308,7 @@ export function stressTest(onDone?: () => void): () => void {
 	const startTime = performance.now();
 	let lastTime = startTime;
 
-	gg.info(`Stress test: firing ${total} messages (${perFrame}/frame)…`);
+	gg(`Stress test: firing ${total} messages (${perFrame}/frame)…`).info();
 
 	const splitAt = 2000; // buffer capacity
 	let splitTime = 0;
@@ -334,9 +319,9 @@ export function stressTest(onDone?: () => void): () => void {
 			const totalMs = (now - startTime).toFixed(0);
 			const preMs = (splitTime - startTime).toFixed(0);
 			const postMs = (now - splitTime).toFixed(0);
-			gg.info(
+			gg(
 				`Stress test done: ${i}/${total} in ${totalMs}ms — first ${splitAt}: ${preMs}ms, remaining ${total - splitAt}: ${postMs}ms`
-			);
+			).info();
 			onDone?.();
 			return;
 		}
