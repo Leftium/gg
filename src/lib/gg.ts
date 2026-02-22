@@ -1,4 +1,4 @@
-import debugFactory, { type Debugger } from './debug/index.js';
+import debugFactory, { debugReady, type Debugger } from './debug/index.js';
 import { BROWSER, DEV } from 'esm-env';
 import { toWordTuple } from './words.js';
 
@@ -1310,8 +1310,9 @@ export async function runGgDiagnostics() {
 	if (!ggConfig.showHints || isCloudflareWorker() || diagnosticsRan) return;
 	diagnosticsRan = true;
 
-	// Ensure server modules (dotenv) are loaded before diagnostics
+	// Ensure server modules (dotenv) and debug factory are loaded before diagnostics
 	await serverModulesReady;
+	await debugReady;
 
 	// Create test debugger for server-side enabled check
 	const ggLogTest = debugFactory('gg:TEST');
