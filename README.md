@@ -6,7 +6,8 @@
   - Each namespace gets a unique color for easier visual parsing.
   - Simple syntax with wildcards to filter/hide debug output at runtime.
   - Millisecond diff (timestamps) for each namespace.
-- Can be inserted into the middle of expressions (returns the value of the first argument).
+- Chainable API: `.ns()`, `.warn()`, `.error()`, `.info()`, `.trace()`, `.table()`.
+- Can be inserted into the middle of expressions (use `.v` to get the passthrough value).
 - Can output a link that opens the source file in your editor (like VS Code).
 - Simple to disable (turn all loggs into NOP's for production).
 - Diagnostics/hints in dev console & terminal to help install and configure correctly.
@@ -28,8 +29,12 @@ npm add @leftium/gg
 
 	gg('Hello world');
 
-	// Log expressions (returns first argument)
-	const result = gg(someFunction());
+	// Log with modifiers
+	gg('Connection timeout').warn();
+	gg('User authenticated', user).info();
+
+	// Passthrough with .v (returns the first argument)
+	const result = gg(someFunction()).v;
 
 	// Multiple arguments
 	gg('User:', user, 'Status:', status);
@@ -57,11 +62,10 @@ export default defineConfig({
 
 - **Call-sites plugin** -- rewrites `gg()` calls with source file/line/col metadata
 - **Open-in-editor plugin** -- adds dev server middleware for click-to-open
-- **Automatic `es2022` target** -- required for top-level await
 
 ### 3. Add the debug console (optional, recommended)
 
-An in-browser debug console (powered by Eruda) with a dedicated GG tab for filtering and inspecting logs — especially useful on mobile.
+An in-browser debug console (powered by Eruda) with a dedicated GG tab for filtering and inspecting logs -- especially useful on mobile.
 
 ```svelte
 <!-- src/routes/+layout.svelte -->
@@ -75,6 +79,173 @@ An in-browser debug console (powered by Eruda) with a dedicated GG tab for filte
 
 In development, the debug console appears automatically.
 In production, add `?gg` to the URL or use a 5-tap gesture to activate.
+
+## Chaining API
+
+`gg()` returns a `GgChain<T>` with composable modifiers. Chain any combination, in any order. The log auto-flushes on the next microtask, or use `.v` to flush immediately and get the passthrough value.
+
+```javascript
+import { gg } from '@leftium/gg';
+
+// Basic logging (auto-flushes on microtask)
+gg('hello');
+gg('multiple', 'args', { data: 42 });
+
+// Passthrough with .v (flushes immediately, returns first arg)
+const result = gg(computeValue()).v;
+const user = gg(await fetchUser()).ns('api').v;
+
+// Log levels
+gg('System ready').info(); // blue indicator
+gg('Deprecated API call').warn(); // yellow indicator
+gg('Connection failed').error(); // red indicator + stack trace
+
+// Custom namespace
+gg('Processing request').ns('api:handler');
+
+// Stack trace
+gg('Debug checkpoint').trace();
+
+// Table formatting (also emits native console.table)
+gg(arrayOfObjects).table();
+gg(data).table(['name', 'age']); // filter columns
+
+// Combine modifiers freely
+gg('Slow query', { ms: 3200 }).ns('db').warn();
+const rows = gg(queryResult).ns('db:query').table().v;
+```
+
+### `.v` -- Passthrough
+
+Use `.v` at the end of any chain to flush the log immediately and return the first argument. This lets you insert `gg()` into the middle of expressions:
+
+```javascript
+// Without .v: logs on microtask, returns GgChain (not the value!)
+gg(someValue);
+
+// With .v: logs immediately, returns someValue
+const x = gg(someValue).v;
+const y = gg(compute()).ns('math').warn().v;
+
+// Insert into expressions
+processData(gg(inputData).v);
+return gg(result).ns('output').v;
+```
+
+### `.ns(label)` -- Custom Namespace
+
+Override the auto-generated namespace (file@function) with a custom label. Useful for grouping related logs across files:
+
+```javascript
+gg('Request received').ns('api:incoming');
+gg('Response sent').ns('api:outgoing');
+gg('Cache hit').ns('api:cache');
+```
+
+Namespace labels support **template variables** that resolve from plugin-provided metadata:
+
+| Variable | Description                   | Example                           |
+| -------- | ----------------------------- | --------------------------------- |
+| `$NS`    | Full auto-generated callpoint | `routes/+page.svelte@handleClick` |
+| `$FN`    | Enclosing function name       | `handleClick`                     |
+| `$FILE`  | Source file path              | `routes/+page.svelte`             |
+| `$LINE`  | Line number                   | `42`                              |
+| `$COL`   | Column number                 | `3`                               |
+
+```javascript
+gg('debug info').ns('ERROR:$NS'); // → ERROR:routes/+page.svelte@handleClick
+gg('validation').ns('$FILE:validate'); // → routes/+page.svelte:validate
+gg('step 1').ns('TRACE:$FN'); // → TRACE:handleClick
+gg('context').ns('$NS:debug'); // → routes/+page.svelte@handleClick:debug
+```
+
+Without the Vite plugin, `$NS` falls back to a runtime word-tuple (e.g. `calm-fox`). `$FN`, `$FILE`, `$LINE`, and `$COL` require the plugin.
+
+### `.info()` / `.warn()` / `.error()` -- Log Levels
+
+```javascript
+gg('Server started on port 3000').info(); // blue badge
+gg('Rate limit approaching').warn(); // yellow badge
+gg('Unhandled exception').error(); // red badge + captures stack
+
+// .error() with an Error object uses its .stack
+try {
+	riskyOperation();
+} catch (err) {
+	gg(err).error();
+}
+```
+
+### `.trace()` -- Stack Trace
+
+Captures a full stack trace (cleaned of internal gg frames) alongside the log entry:
+
+```javascript
+gg('How did we get here?').trace();
+```
+
+### `.table(columns?)` -- Table Formatting
+
+Formats the first argument as a table. Also emits a native `console.table()` call. Optionally filter columns:
+
+```javascript
+gg([
+	{ name: 'Alice', age: 30, role: 'admin' },
+	{ name: 'Bob', age: 25, role: 'user' }
+]).table();
+
+// Filter columns
+gg(users).table(['name', 'role']);
+
+// Works with objects-of-objects and arrays of primitives too
+gg({ us: { pop: '331M' }, uk: { pop: '67M' } }).table();
+gg(['apple', 'banana', 'cherry']).table();
+```
+
+## Timers
+
+Measure elapsed time with `gg.time()`, `gg.timeLog()`, and `gg.timeEnd()`:
+
+```javascript
+import { gg } from '@leftium/gg';
+
+gg.time('fetch');
+
+// ... some work ...
+gg.timeLog('fetch', 'headers received'); // logs elapsed without stopping
+
+// ... more work ...
+gg.timeEnd('fetch'); // logs elapsed and stops timer
+```
+
+### Timer Namespaces
+
+`gg.time()` returns a `GgTimerChain` that supports `.ns()` for grouping. The namespace is inherited by subsequent `timeLog` and `timeEnd` calls for the same label:
+
+```javascript
+gg.time('fetch').ns('api-pipeline');
+
+gg.timeLog('fetch', 'step 1 done'); // logged under 'api-pipeline'
+gg.timeEnd('fetch'); // logged under 'api-pipeline'
+
+// Template variables work too
+gg.time('db-query').ns('$FN:timers');
+```
+
+## `gg.here()` -- Open in Editor
+
+Returns call-site metadata for rendering "open in editor" links. Replaces the old no-arg `gg()` introspection.
+
+```svelte
+<script>
+	import { gg } from '@leftium/gg';
+</script>
+
+<!-- Pass to a link component -->
+<OpenInEditorLink gg={gg.here()} />
+```
+
+Returns `{ fileName, functionName, url }` where `url` points to the dev server's open-in-editor endpoint.
 
 ## GgConsole Options
 
@@ -226,6 +397,40 @@ initGgEruda();
 gg('works in any framework');
 ```
 
+## API Reference
+
+### `gg(value, ...args)` -- Returns `GgChain<T>`
+
+| Method / Property | Description                                   |
+| ----------------- | --------------------------------------------- |
+| `.v`              | Flush log immediately, return first argument  |
+| `.ns(label)`      | Set custom namespace (supports template vars) |
+| `.info()`         | Set log level to info                         |
+| `.warn()`         | Set log level to warn                         |
+| `.error()`        | Set log level to error (captures stack)       |
+| `.trace()`        | Attach full stack trace                       |
+| `.table(cols?)`   | Format as table, optional column filter       |
+
+### `gg.time(label?)` -- Returns `GgTimerChain`
+
+| Method       | Description                               |
+| ------------ | ----------------------------------------- |
+| `.ns(label)` | Set namespace for timer group (inherited) |
+
+### `gg.timeLog(label?, ...args)` -- Log elapsed without stopping
+
+### `gg.timeEnd(label?)` -- Log elapsed and stop timer
+
+### `gg.here()` -- Returns `{ fileName, functionName, url }`
+
+### Control
+
+| Method              | Description                               |
+| ------------------- | ----------------------------------------- |
+| `gg.enable(ns)`     | Enable debug output for namespace pattern |
+| `gg.disable()`      | Disable all debug output                  |
+| `gg.clearPersist()` | Clear `gg-enabled` from localStorage      |
+
 ## Technical Details
 
 ### Internal Debug Implementation
@@ -247,6 +452,20 @@ Features implemented internally (~290 lines of TypeScript):
 - Browser and Node.js environments
 
 This approach eliminates the need for vendoring, patching, and bundling third-party code, resulting in better type safety and simpler maintenance.
+
+### Microtask Auto-Flush
+
+When you call `gg(value)`, the log is **deferred to the next microtask**. This means chain modifiers (`.ns()`, `.warn()`, etc.) can be added synchronously after the call. If you need the value immediately (passthrough), use `.v` which forces an immediate flush.
+
+```javascript
+// These two are equivalent:
+gg('hello').warn(); // .warn() runs sync, log flushes on microtask
+gg('hello').warn().v; // .v forces immediate flush + returns 'hello'
+
+// Auto-flush means order doesn't matter for modifiers:
+gg('x').ns('foo').warn(); // same as:
+gg('x').warn().ns('foo'); // (both set ns and level before flush)
+```
 
 ## Inspirations
 
