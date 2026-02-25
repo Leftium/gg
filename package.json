@@ -91,7 +91,6 @@
 		"@tanstack/virtual-core": "^3.13.18",
 		"@types/estree": "^1.0.8",
 		"acorn": "^8.15.0",
-		"dotenv": "^17.2.4",
 		"eruda": "^3.4.3",
 		"esm-env": "^1.2.2",
 		"launch-editor": "^2.12.0"

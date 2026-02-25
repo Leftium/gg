@@ -61,24 +61,17 @@ if (isCloudflareWorker()) {
 }
 
 // Type definitions for the modules
-type DotenvModule = typeof import('dotenv');
 type HttpModule = typeof import('http');
 type AddressInfo = import('net').AddressInfo;
 
 // Lazy-load Node.js modules to avoid top-level await (Safari compatibility).
 // The imports start immediately but don't block module evaluation.
-let dotenvModule: DotenvModule | null = null;
 let httpModule: HttpModule | null = null;
 
 function loadServerModules(): Promise<void> {
 	if (isCloudflareWorker() || BROWSER) return Promise.resolve();
 
 	return (async () => {
-		try {
-			dotenvModule = await import('dotenv');
-		} catch {
-			// dotenv not available — optional dependency
-		}
 		try {
 			httpModule = await import('http');
 		} catch {
@@ -1275,7 +1268,7 @@ export async function runGgDiagnostics() {
 	if (!ggConfig.showHints || isCloudflareWorker() || diagnosticsRan) return;
 	diagnosticsRan = true;
 
-	// Ensure server modules (dotenv) and debug factory are loaded before diagnostics
+	// Ensure server modules and debug factory are loaded before diagnostics
 	await serverModulesReady;
 	await debugReady;
 
@@ -1314,10 +1307,10 @@ export async function runGgDiagnostics() {
 
 	if (!BROWSER) {
 		// Server-side: check DEBUG env var (the only output path on the server)
-		const hint = makeHint(!ggLogTest.enabled, ' (Try `DEBUG=gg:* npm run dev`)');
-		if (dotenvModule) {
-			dotenvModule.config();
-		}
+		const hint = makeHint(
+			!ggLogTest.enabled,
+			' (Try `DEBUG=gg:* npm run dev` or use --env-file=.env)'
+		);
 		message(`${checkbox(ggLogTest.enabled)} DEBUG env variable: ${process?.env?.DEBUG}${hint}`);
 	}
 
