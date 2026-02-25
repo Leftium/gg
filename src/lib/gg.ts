@@ -138,14 +138,15 @@ void getServerPort().then((p) => {
  * 1. CloudFlare Workers → always disabled (no stack traces, no filesystem)
  * 2. ENV hard-disable → absolute override, no runtime enable possible
  * 3. DEV mode → always enabled
- * 4. PROD mode → requires runtime trigger (?gg URL param or localStorage)
+ * 4. PROD mode → requires runtime trigger (?gg URL param, localStorage, or GG_ENABLED=true)
  */
 function isGgEnabled(): boolean {
 	// CloudFlare Workers - hard disable (no Error stacks, no filesystem)
 	if (isCloudflareWorker()) return false;
 
-	// ENV hard-disable takes absolute precedence
-	// Allows completely removing gg from production builds
+	// ENV override takes absolute precedence
+	// GG_ENABLED=false: completely removes gg (even in DEV)
+	// GG_ENABLED=true: force-enables gg (even in PROD, e.g. Vercel deployments)
 	if (BROWSER) {
 		if (
 			typeof import.meta.env?.VITE_GG_ENABLED === 'string' &&
@@ -156,6 +157,9 @@ function isGgEnabled(): boolean {
 	} else {
 		if (process?.env?.GG_ENABLED === 'false') {
 			return false;
+		}
+		if (process?.env?.GG_ENABLED === 'true') {
+			return true;
 		}
 	}
 
