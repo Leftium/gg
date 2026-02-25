@@ -55,10 +55,10 @@ const isCloudflareWorker = (): boolean => {
 	);
 };
 
-// Check if we're in CloudFlare Workers and warn early
-if (isCloudflareWorker()) {
-	console.warn('gg: CloudFlare not supported.');
-}
+// Note: CloudFlare Workers have limited Node.js compatibility.
+// The debug library falls back to a no-op stub (no tty/util/process.stderr).
+// gg() calls will work but produce no log output until a worker-compatible
+// debug backend is added.
 
 // Type definitions for the modules
 type HttpModule = typeof import('http');
@@ -135,15 +135,11 @@ void getServerPort().then((p) => {
  * Determines if gg should be enabled based on environment and runtime triggers.
  *
  * Priority order:
- * 1. CloudFlare Workers → always disabled (no stack traces, no filesystem)
- * 2. ENV hard-disable → absolute override, no runtime enable possible
- * 3. DEV mode → always enabled
- * 4. PROD mode → requires runtime trigger (?gg URL param, localStorage, or GG_ENABLED=true)
+ * 1. ENV override takes absolute precedence
+ * 2. DEV mode → always enabled
+ * 3. PROD mode → requires runtime trigger (?gg URL param, localStorage, or GG_ENABLED=true)
  */
 function isGgEnabled(): boolean {
-	// CloudFlare Workers - hard disable (no Error stacks, no filesystem)
-	if (isCloudflareWorker()) return false;
-
 	// ENV override takes absolute precedence
 	// GG_ENABLED=false: completely removes gg (even in DEV)
 	// GG_ENABLED=true: force-enables gg (even in PROD, e.g. Vercel deployments)
@@ -306,7 +302,7 @@ type OnLogCallback = (entry: CapturedEntry) => void;
  */
 export function gg<T>(arg: T, ...args: unknown[]): GgChain<T>;
 export function gg(...args: unknown[]): GgChain<unknown> {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
+	if (!ggConfig.enabled) {
 		// Return a no-op chain that skips logging
 		return new GgChain(args[0], args, { ns: '' }, true);
 	}
@@ -330,7 +326,7 @@ export function gg(...args: unknown[]): GgChain<unknown> {
  * <OpenInEditorLink gg={gg.here()} />
  */
 gg.here = function (): { fileName: string; functionName: string; url: string } {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
+	if (!ggConfig.enabled) {
 		return { fileName: '', functionName: '', url: '' };
 	}
 	const callpoint = resolveCallpoint(3);
@@ -506,7 +502,7 @@ export class GgChain<T> {
 function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 	const { ns: nsLabel, file, line, col, src, level, stack, tableData } = options;
 
-	if (!ggConfig.enabled || isCloudflareWorker()) {
+	if (!ggConfig.enabled) {
 		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
 	}
 
@@ -595,7 +591,7 @@ gg._ns = function (
 	},
 	...args: unknown[]
 ): GgChain<unknown> {
-	const disabled = !ggConfig.enabled || isCloudflareWorker();
+	const disabled = !ggConfig.enabled;
 	return new GgChain(args[0], args, options, disabled);
 };
 
@@ -609,7 +605,7 @@ gg._here = function (options: { ns: string; file?: string; line?: number; col?: 
 	functionName: string;
 	url: string;
 } {
-	if (!ggConfig.enabled || isCloudflareWorker()) {
+	if (!ggConfig.enabled) {
 		return { fileName: '', functionName: '', url: '' };
 	}
 	const { ns: nsLabel, file, line, col } = options;
@@ -736,7 +732,7 @@ export class GgTimerChain {
  */
 gg.time = function (this: void, label = 'default'): GgTimerChain {
 	const options: LogOptions = { ns: resolveCallpoint(3) };
-	if (ggConfig.enabled && !isCloudflareWorker()) {
+	if (ggConfig.enabled) {
 		timers.set(label, { start: performance.now(), options });
 	}
 	return new GgTimerChain(label, options);
@@ -747,7 +743,7 @@ gg._time = function (
 	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 	label = 'default'
 ): GgTimerChain {
-	if (ggConfig.enabled && !isCloudflareWorker()) {
+	if (ggConfig.enabled) {
 		timers.set(label, { start: performance.now(), options });
 	}
 	return new GgTimerChain(label, options);
@@ -766,7 +762,7 @@ gg._time = function (
  * gg.timeEnd('process');
  */
 gg.timeLog = function (this: void, label = 'default', ...args: unknown[]): void {
-	if (!ggConfig.enabled || isCloudflareWorker()) return;
+	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
 		const callpoint = resolveCallpoint(3);
@@ -784,7 +780,7 @@ gg._timeLog = function (
 	label = 'default',
 	...args: unknown[]
 ): void {
-	if (!ggConfig.enabled || isCloudflareWorker()) return;
+	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
 		ggLog({ ...options, level: 'warn' }, `Timer '${label}' does not exist`);
@@ -806,7 +802,7 @@ gg._timeLog = function (
  * gg.timeEnd('fetch'); // logs under 'api-pipeline' namespace
  */
 gg.timeEnd = function (this: void, label = 'default'): void {
-	if (!ggConfig.enabled || isCloudflareWorker()) return;
+	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
 		const callpoint = resolveCallpoint(3);
@@ -824,7 +820,7 @@ gg._timeEnd = function (
 	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
 	label = 'default'
 ): void {
-	if (!ggConfig.enabled || isCloudflareWorker()) return;
+	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
 		ggLog({ ...options, level: 'warn' }, `Timer '${label}' does not exist`);
