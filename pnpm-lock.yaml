@@ -14,9 +14,6 @@ importers:
       '@tanstack/virtual-core':
         specifier: ^3.13.18
         version: 3.13.18
-      '@types/estree':
-        specifier: ^1.0.8
-        version: 1.0.8
       acorn:
         specifier: ^8.15.0
         version: 8.15.0
@@ -51,6 +48,9 @@ importers:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^6.2.4
         version: 6.2.4(svelte@5.50.1)(vite@7.3.1(@types/node@25.2.2)(terser@5.46.0)(yaml@2.8.1))
+      '@types/estree':
+        specifier: ^1.0.8
+        version: 1.0.8
       '@types/node':
         specifier: ^25.2.2
         version: 25.2.2
