@@ -1,5 +1,7 @@
 # gg.persist: Clipboard-Friendly Debug Capture
 
+> **Status: Superseded.** This spec has been fully superseded by the [gg-widget spec](./gg-widget.md) (Eruda plugin). The Eruda plugin automatically captures all `gg()` calls into a ring buffer with namespace-aware filtering, copy-to-clipboard, and a full UI -- without requiring a separate `ggg()` call or any API changes. See also the [two-layer filtering spec](./gg-two-layer-filtering.md) for the upcoming `gg-keep`/`gg-show` overhaul.
+
 ## Overview
 
 Add `gg.persist` - a variant of `gg` that also captures output to a global array for easy clipboard access. This is useful for debugging complex issues where console output is hard to copy (many lines, collapsed objects, etc.).
@@ -265,5 +267,7 @@ Full request isolation may be added in a future version if needed.
 
 ## References
 
-- [debug package](https://www.npmjs.com/package/debug) - underlying debug library with `extend()` method and wildcard matching
+- [gg-widget spec](./gg-widget.md) -- supersedes this spec with a full Eruda plugin implementation
+- [gg-two-layer-filtering spec](./gg-two-layer-filtering.md) -- upcoming filtering overhaul building on gg-widget
+- [debug package](https://www.npmjs.com/package/debug) - gg's internal debug implementation replaces this (see `src/lib/debug/`)
 - Chrome DevTools `copy()` function - Command Line API, only available in DevTools console
