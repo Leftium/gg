@@ -291,7 +291,8 @@ export function createGgPlugin(
 			if (virtualizer && $el) {
 				const containerDom = $el.find('.gg-log-container').get(0) as HTMLElement | undefined;
 				if (containerDom) {
-					const cleanup = (containerDom as any).__ggVirtualCleanup;
+					const cleanup = (containerDom as HTMLElement & { __ggVirtualCleanup?: () => void })
+						.__ggVirtualCleanup;
 					if (cleanup) cleanup();
 				}
 				virtualizer = null;
@@ -2543,7 +2544,8 @@ export function createGgPlugin(
 		// Mount the virtualizer (attaches scroll/resize observers)
 		const cleanup = virtualizer._didMount();
 		// Store cleanup for when we tear down (TODO: call on destroy)
-		(containerDom as any).__ggVirtualCleanup = cleanup;
+		(containerDom as HTMLElement & { __ggVirtualCleanup?: () => void }).__ggVirtualCleanup =
+			cleanup;
 
 		// Initial render, then scroll to bottom if requested
 		virtualizer._willUpdate();
@@ -2639,7 +2641,8 @@ export function createGgPlugin(
 			if (virtualizer) {
 				const containerDom = logContainer.get(0) as HTMLElement | undefined;
 				if (containerDom) {
-					const cleanup = (containerDom as any).__ggVirtualCleanup;
+					const cleanup = (containerDom as HTMLElement & { __ggVirtualCleanup?: () => void })
+						.__ggVirtualCleanup;
 					if (cleanup) cleanup();
 				}
 				virtualizer = null;

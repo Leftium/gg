@@ -414,13 +414,10 @@ export class GgChain<T> {
 	#args: unknown[];
 	#options: LogOptions;
 	#flushed = false;
-	#disabled: boolean;
-
 	constructor(value: T, args: unknown[], options: LogOptions, disabled = false) {
 		this.#value = value;
 		this.#args = args;
 		this.#options = options;
-		this.#disabled = disabled;
 		if (!disabled) {
 			// Auto-flush on microtask if not flushed synchronously by .v or another trigger
 			queueMicrotask(() => this.#flush());
