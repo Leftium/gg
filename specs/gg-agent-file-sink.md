@@ -6,7 +6,7 @@
 
 ## Overview
 
-Mirror browser-side `gg()` log entries to a local JSONL file (`.gg/logs-{port}.jsonl`) by relaying `CapturedEntry` objects over Vite's existing HMR WebSocket to a new Vite plugin that appends them to disk. This gives coding agents (and any file-reading tool) direct access to runtime log output without clipboard, browser automation, or server-side application routes.
+Capture all `gg()` log entries -- both client-side (browser) and server-side (SSR, API routes) -- to a local JSONL file (`.gg/logs-{port}.jsonl`). Browser entries relay over Vite's existing HMR WebSocket; server-side entries write directly to disk in the same Node.js process. This gives coding agents (and any file-reading tool) direct access to runtime log output without clipboard, browser automation, or server-side application routes.
 
 ## Motivation
 
@@ -35,12 +35,13 @@ This requires the developer to:
 ### Desired State
 
 ```
-gg() call → _onLog hook → HMR WebSocket → Vite plugin → .gg/logs-5173.jsonl
-                                                              ↑
-                                              Agent reads/greps this file
+CLIENT:  gg() → _onLog → HMR WebSocket → Vite plugin ──► .gg/logs-5173.jsonl
+SERVER:  gg() → _onLog → direct fs.appendFile ──────────►       (same file)
+                                                                     ↑
+                                                      Agent reads/greps this file
 ```
 
-The developer still triggers the UI action (page load, button click, etc.), but log collection is fully automatic. The agent reads `.gg/logs.jsonl` directly -- no clipboard, no paste, no browser needed.
+The developer still triggers the UI action (page load, button click, etc.), but log collection is fully automatic. The agent reads the JSONL file directly -- no clipboard, no paste, no browser needed. Both client-side and server-side `gg()` calls end up in the same file, distinguished by the `env` field.
 
 ## Research Findings
 
@@ -118,19 +119,33 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
 │       ▼                │                │       ▼                      │
 │  _onLogCallback(entry) │                │  server.hot.on('gg:log',     │
 │       │                │   WebSocket    │    (entry) => {              │
-│       ├───────────────────────────────► │      fs.appendFile(          │
-│       │  hot.send(     │  'gg:log'      │        `.gg/logs-${port}     │
-│       │   'gg:log',    │                │          .jsonl`,            │
-│       │    serialized) │                │        JSON.stringify(entry) │
-│       │                │                │        + '\n'                │
-│       ▼                │                │      )                       │
-│  LogBuffer.push(entry) │                │    })                        │
-│  (existing flow)       │                │                              │
+│       ├───────────────────────────────► │      append(entry,           │
+│       │  hot.send(     │  'gg:log'      │        env: 'client')        │
+│       │   'gg:log',    │                │    })                        │
+│       │    serialized) │                │                              │
+│       │                │                │  SERVER-SIDE gg() (SSR,      │
+│       ▼                │                │  load functions, API routes) │
+│  LogBuffer.push(entry) │                │       │                      │
+│  (existing flow)       │                │       ▼                      │
+│                        │                │  _onLog listener registered  │
+│  import.meta.hot is    │                │  in configureServer:         │
+│  undefined in prod     │                │    append(entry,             │
+│  → entire sender is    │                │      env: 'server')          │
+│    tree-shaken away    │                │       │  (direct, no HMR)    │
+│                        │                │       │                      │
+│                        │                │       ▼                      │
+│                        │                │  append = fs.appendFile(     │
+│                        │                │    `.gg/logs-${port}.jsonl`, │
+│                        │                │    JSON.stringify(entry)     │
+│                        │                │    + '\n'                    │
+│                        │                │  )                           │
+│                        │                │                              │
 │                        │                │  configureServer:            │
-│  import.meta.hot is    │                │    resolve port              │
-│  undefined in prod     │                │    truncate on start         │
-│  → entire sender is    │                │                              │
-│    tree-shaken away    │                │  middleware:                 │
+│                        │                │    resolve port              │
+│                        │                │    truncate on start         │
+│                        │                │    register gg._onLog        │
+│                        │                │                              │
+│                        │                │  middleware:                 │
 │                        │                │    DELETE /__gg/logs → clear │
 │                        │                │    GET /__gg/logs → read     │
 │                        │                │                              │
@@ -140,14 +155,18 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
                                                      │
                                                      ▼
                                           .gg/logs-5173.jsonl
-                                          ┌──────────────────────────┐
-                                          │ {"ns":"api:fetch",...}   │
-                                          │ {"ns":"auth:login",...}  │
-                                          │ {"ns":"api:fetch",...}   │
-                                          └──────────────────────────┘
+                                          ┌────────────────────────────────┐
+                                          │ {"env":"server","ns":"..."}    │
+                                          │ {"env":"client","ns":"..."}    │
+                                          │ {"env":"server","ns":"..."}    │
+                                          │ {"env":"client","ns":"..."}    │
+                                          └────────────────────────────────┘
                                                      ↑
                                           Agent reads file directly
                                           or via GET /__gg/logs
+                                          Filter by env:
+                                            grep '"env":"server"' ...
+                                            GET /__gg/logs?env=server
 ```
 
 ### Serialized Entry Format
@@ -155,7 +174,8 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
 Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent utility and safe serialization:
 
 ```jsonl
-{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567890,"lvl":"warn","file":"src/routes/+page.svelte","line":42,"src":"item","diff":12}
+{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567890,"lvl":"warn","env":"client","file":"src/routes/+page.svelte","line":42,"src":"item","diff":12}
+{"ns":"routes/+page.server.ts@load","msg":"Fetching user data","ts":1741234567885,"env":"server","file":"src/routes/+page.server.ts","line":18,"diff":0}
 ```
 
 | Field | Source | Description |
@@ -164,16 +184,21 @@ Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent ut
 | `msg` | `message` | Formatted message string |
 | `ts` | `timestamp` | Unix epoch ms |
 | `lvl` | `level` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
+| `env` | (injected) | `"client"` or `"server"` -- which runtime produced this entry |
 | `file` | `file` | Source file path |
 | `line` | `line` | Source line number |
 | `src` | `src` | Source expression text (icecream-style) |
 | `diff` | `diff` | Ms since previous log in same namespace |
 
+The `env` field is added by the transport layer, not by `gg()` itself. The client-side HMR sender stamps `"client"`; the server-side direct writer stamps `"server"`. This lets agents distinguish SSR load function logs from hydrated component logs, even when both target the same source file. Agents can filter by environment: `grep '"env":"server"' .gg/logs-5173.jsonl`.
+
 **Excluded**: `args` (may contain circular refs, DOM nodes, non-serializable objects), `color` (cosmetic), `col` (rarely useful), `stack` (large, could be opt-in), `tableData` (complex structure).
 
-### Client-Side Hook Point
+### Hook Points: Client and Server
 
-The hook inserts into the existing `_onLogCallback` flow in `gg.ts`. Rather than modifying the callback directly, the Vite plugin injects a small client module that wraps the existing hook:
+The file sink captures entries from two separate runtime environments via different transport mechanisms, both writing to the same JSONL file.
+
+#### Client-Side (Browser → HMR → File)
 
 ```
 STEP 1: Plugin injects client-side HMR sender
@@ -185,13 +210,33 @@ This runs alongside the existing Eruda hook -- both receive entries.
 STEP 2: Browser serializes and sends
 ─────────────────────────────────────
 On each gg() call, the injected code serializes the CapturedEntry
-(stripping non-serializable fields) and calls import.meta.hot.send('gg:log', data).
+(stripping non-serializable fields), stamps env: 'client',
+and calls import.meta.hot.send('gg:log', data).
 
 STEP 3: Vite plugin receives and writes
 ────────────────────────────────────────
 The plugin's configureServer hook registers server.hot.on('gg:log', ...)
-which appends the JSON line to .gg/logs.jsonl.
+which appends the JSON line to .gg/logs-{port}.jsonl.
 ```
+
+#### Server-Side (Direct Write, No Transport)
+
+```
+STEP 1: Plugin registers _onLog listener in configureServer
+────────────────────────────────────────────────────────────
+The plugin imports gg and registers a listener on gg._onLog
+directly in the Node.js process. This runs in the same process
+as SSR, SvelteKit load functions, API routes, etc.
+
+STEP 2: Direct append
+─────────────────────
+On each server-side gg() call, the listener serializes the
+CapturedEntry, stamps env: 'server', and calls fs.appendFile
+on the same .gg/logs-{port}.jsonl file. No HMR relay needed --
+gg() and the file are in the same Node.js process.
+```
+
+Server-side capture is simpler than client-side because there's no transport gap. The `_onLog` callback fires synchronously (relative to the `gg()` call) in the same process that has filesystem access. The only consideration is that the server-side listener must coexist with any other `_onLog` consumers (same multi-listener requirement as the client-side hook -- see Open Question 4).
 
 ### Agent HTTP API (`/__gg/logs`)
 
@@ -203,6 +248,9 @@ The Vite plugin exposes a middleware endpoint for agent interaction. Same path, 
 | `GET` | `/__gg/logs` | Read the JSONL file contents | `200` with `text/plain` body (raw JSONL) |
 | `GET` | `/__gg/logs?filter=api:*` | Read filtered entries (server-side grep) | `200` with matching JSONL lines |
 | `GET` | `/__gg/logs?since={ts}` | Read entries after a timestamp | `200` with matching JSONL lines |
+| `GET` | `/__gg/logs?env=server` | Read only server-side or client-side entries | `200` with matching JSONL lines |
+
+All query params can be combined: `GET /__gg/logs?filter=api:*&env=server&since=1741234567890`.
 
 **Why HTTP in addition to the file?**
 
@@ -260,10 +308,11 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 - [ ] **1.4** Server side: ensure `.gg/` directory is created if missing
 - [ ] **1.5** Server side: `/__gg/logs` middleware -- `DELETE` truncates file (204), `GET` returns file contents as `text/plain` (200)
 - [ ] **1.6** Server side: `GET /__gg/logs?filter=` glob matching and `?since=` timestamp filtering
-- [ ] **1.7** Client side: inject `import.meta.hot.send('gg:log', serialized)` into the `_onLog` pipeline, guarded by `if (import.meta.hot)` for automatic prod tree-shaking
-- [ ] **1.8** Serialization: define the `SerializedEntry` subset, handle non-serializable args gracefully
-- [ ] **1.9** Add to `ggPlugins()` in `vite.ts` as an opt-in plugin (e.g., `fileSink?: boolean | { dir?: string }`)
-- [ ] **1.10** Add diagnostics check in `runGgDiagnostics()` -- probe for plugin presence, show `ℹ️` hint with install instructions when not active, `✅` with file path and API URL when active
+- [ ] **1.7** Client side: inject `import.meta.hot.send('gg:log', serialized)` into the `_onLog` pipeline, guarded by `if (import.meta.hot)` for automatic prod tree-shaking. Stamp `env: 'client'`.
+- [ ] **1.8** Server side: register `gg._onLog` listener in `configureServer` for direct `fs.appendFile` of server-side entries. Stamp `env: 'server'`.
+- [ ] **1.9** Serialization: define the `SerializedEntry` subset (including `env` field), handle non-serializable args gracefully
+- [ ] **1.10** Add to `ggPlugins()` in `vite.ts` as an opt-in plugin (e.g., `fileSink?: boolean | { dir?: string }`)
+- [ ] **1.11** Add diagnostics check in `runGgDiagnostics()` -- probe for plugin presence, show `ℹ️` hint with install instructions when not active, `✅` with file path and API URL when active
 
 ### Phase 2: Integration and Polish
 
@@ -312,6 +361,19 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 3. Agent calls `GET /__gg/logs` to read only the entries generated by that action
 4. File contains a clean, focused set of log entries with no noise from prior interactions. This is the primary intended workflow -- more precise than relying on auto-truncate timing.
 
+### SSR + Client Hydration (Interleaved Entries)
+
+1. A SvelteKit page has `gg()` calls in both `+page.server.ts` (load function) and `+page.svelte` (component)
+2. On page load, the server-side load function runs first -- entries are written with `env: "server"`
+3. The page is sent to the browser, the component hydrates, and client-side `gg()` calls fire -- entries arrive via HMR with `env: "client"`
+4. The JSONL file contains both, naturally ordered by time. The `env` field distinguishes them:
+   ```jsonl
+   {"env":"server","ns":"routes/+page.server.ts@load","msg":"Fetching data","ts":1741234567885,...}
+   {"env":"server","ns":"routes/+page.server.ts@load","msg":"Data ready: 42 items","ts":1741234567890,...}
+   {"env":"client","ns":"routes/+page.svelte@onMount","msg":"Component mounted","ts":1741234568100,...}
+   ```
+5. Agent can see the full request lifecycle in one file, or filter to one side: `grep '"env":"server"'` or `GET /__gg/logs?env=client`.
+
 ### Multiple Browser Tabs
 
 1. Two tabs are open to the same dev server
@@ -348,14 +410,17 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 
 ## Success Criteria
 
-- [ ] With `fileSink: true` in plugin options, `gg()` calls in the browser produce lines in `.gg/logs-{port}.jsonl`
+- [ ] With `fileSink: true` in plugin options, `gg()` calls in the browser produce lines in `.gg/logs-{port}.jsonl` with `"env":"client"`
+- [ ] Server-side `gg()` calls (SSR, load functions, API routes) produce lines in the same file with `"env":"server"`
 - [ ] File is port-scoped -- multiple dev servers write to separate files
 - [ ] File is truncated on dev server start
 - [ ] Each line is valid JSON and independently parseable
+- [ ] Every line contains an `env` field (`"client"` or `"server"`)
 - [ ] `grep '"ns":"some:namespace"' .gg/logs-5173.jsonl` returns matching entries
+- [ ] `grep '"env":"server"' .gg/logs-5173.jsonl` returns only server-side entries
 - [ ] `curl -X DELETE http://localhost:5173/__gg/logs` truncates the file and returns 204
 - [ ] `curl http://localhost:5173/__gg/logs` returns the full JSONL contents
-- [ ] `curl "http://localhost:5173/__gg/logs?filter=api:*"` returns only matching entries
+- [ ] `curl "http://localhost:5173/__gg/logs?filter=api:*&env=server"` returns only matching entries
 - [ ] Eruda plugin continues to work normally (file sink does not interfere)
 - [ ] `DELETE` does not affect the browser-side ring buffer or Eruda UI
 - [ ] No file writes in production builds (client sender is tree-shaken, `configureServer` doesn't run)
