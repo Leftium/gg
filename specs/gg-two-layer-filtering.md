@@ -95,25 +95,17 @@ When enabled, native console output follows the `gg-show` filter -- the console 
 
 This eliminates the need for the current "Sync" button in Settings that copies `gg-filter` to `localStorage.debug`.
 
-## Dropping the `gg:` Namespace Prefix
+## The `gg:` Namespace Prefix
 
-Currently all namespaces are prefixed with `gg:` (e.g., `gg:routes/+page.svelte@handleClick`). This was necessary because `localStorage.debug` is shared with the `debug` npm package -- the prefix distinguishes gg namespaces from Express, Socket.io, etc.
+All namespaces are prefixed with `gg:` (e.g., `gg:routes/+page.svelte@handleClick`). This prefix:
 
-With gg using its own dedicated storage keys, this disambiguation is no longer needed. Namespaces become shorter and cleaner:
+- Distinguishes gg namespaces from any other `debug`-library users sharing `localStorage.debug`
+- Provides a universal first segment — clicking `gg` in any toast or log row targets all gg namespaces (`gg:*`)
+- Makes `-gg:*` a clean "drop everything" pattern
 
-| Before                               | After                             |
-| ------------------------------------ | --------------------------------- |
-| `gg:routes/+page.svelte@handleClick` | `routes/+page.svelte@handleClick` |
-| `gg:lib/util.ts@calculate`           | `lib/util.ts@calculate`           |
-| `gg:api:auth`                        | `api:auth`                        |
+Auto-generated callpoints (from the Vite plugin) are prefixed automatically. Manual `.ns('label')` calls are also normalised to `gg:label` at runtime if not already prefixed.
 
-Benefits:
-
-- More screen real estate in the namespace column
-- Cleaner custom namespaces
-- Default filters become `*` instead of `gg:*`
-
-The `gg:` prefix may still appear in native console output (as a visual signal that a line comes from gg), but it would not be part of the stored namespace.
+Default filters use `gg:*` (show/keep all gg namespaces).
 
 ## Dropped Namespace Tracking
 
@@ -136,7 +128,7 @@ This map does not consume ring buffer slots. It grows with the number of distinc
 
 For each namespace blocked by `gg-keep`, a **one-time sentinel entry** is rendered in the GG panel. These sentinels:
 
-1. Use the prefix `DROPPED:` before the namespace (e.g., `DROPPED:routes/+page.svelte@handleClick`)
+1. Use the prefix `DROPPED:` before the namespace (e.g., `DROPPED:gg:routes/+page.svelte@handleClick`)
 2. Are **not stored in the ring buffer** -- they are rendered from the `droppedNamespaces` map
 3. Show the count of dropped loggs (total and per-type if available)
 4. Show a preview of the most recent dropped logg so users can assess the namespace's current output
@@ -152,19 +144,19 @@ Dropped sentinels are rendered in a **fixed section at the top** of the log view
 │ Keep: [api:*,auth:*___________________] [Namespaces: 5/12]                 │
 │ Show: [*______________________________] [Namespaces: 10/12]                │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ [+]  DROPPED:routes/+page.svelte@handleClick  47 loggs (32 log, 15 warn)  │
-│        ↳ "Processing item: {id: 42, name: ...}"                           │
-│ [+]  DROPPED:lib/analytics.ts@track           203 loggs (203 log)         │
-│        ↳ "pageview: /dashboard"                                           │
+│ [+]  DROPPED:gg:routes/+page.svelte@handleClick  47 loggs (32 log, 15 warn)  │
+│        ↳ "Processing item: {id: 42, name: ...}"                             │
+│ [+]  DROPPED:gg:lib/analytics.ts@track           203 loggs (203 log)        │
+│        ↳ "pageview: /dashboard"                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ +2ms   api/users@fetchAll       [{id: 1, ...}, {id: 2, ...}]             │
-│ +5ms   auth/session@validate    token valid, expires in 3600s             │
-│ +12ms  api/users@fetchAll       cache miss, querying DB                   │
+│ +2ms   gg:api/users@fetchAll       [{id: 1, ...}, {id: 2, ...}]             │
+│ +5ms   gg:auth/session@validate    token valid, expires in 3600s            │
+│ +12ms  gg:api/users@fetchAll       cache miss, querying DB                  │
 │ ...                                                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Rationale:** Fixed-at-top ensures sentinels are always visible and never scrolled past. Since `gg-keep` defaults to `*` and users only narrow it intentionally, the number of dropped namespaces is small (typically 1-5). The fixed section doesn't consume significant viewport space.
+**Rationale:** Fixed-at-top ensures sentinels are always visible and never scrolled past. Since `gg-keep` defaults to `gg:*` and users only narrow it intentionally, the number of dropped namespaces is small (typically 1-5). The fixed section doesn't consume significant viewport space.
 
 **Sort order:** Sentinels are sorted by **decreasing logg count** (noisiest namespace first). This puts the biggest buffer-pressure offenders at the top, making it easy to identify and keep/drop the most impactful namespaces. The sort order updates on each debounced render cycle.
 
@@ -174,8 +166,8 @@ Dropped sentinels are rendered in a **fixed section at the top** of the log view
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ [+]  DROPPED:routes/+page.svelte@handleClick  47 loggs (32 log, 15 warn)   │
-│        ↳ "Processing item: {id: 42, name: ...}"                            │
+│ [+]  DROPPED:gg:routes/+page.svelte@handleClick  47 loggs (32 log, 15 warn)   │
+│        ↳ "Processing item: {id: 42, name: ...}"                               │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -192,12 +184,12 @@ Each regular logg row has two action icons. Dropped sentinels have one. The thre
 ```
 Regular logg row:
 ┌──────────────────────────────────────────────────────────────────┐
-│ [x] [-]  +5ms  api/users@fetchAll  [{id: 1, ...}, {id: 2, ...}]│
+│ [x] [-]  +5ms  gg:api/users@fetchAll  [{id: 1, ...}, {id: 2, ...}]│
 └──────────────────────────────────────────────────────────────────┘
 
 Dropped sentinel:
 ┌──────────────────────────────────────────────────────────────────┐
-│ [+]  DROPPED:api/analytics@track  203 loggs (203 log)           │
+│ [+]  DROPPED:gg:api/analytics@track  203 loggs (203 log)           │
 │        ↳ "pageview: /dashboard"                                 │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -216,24 +208,25 @@ Clicking the `[+]` keep icon on a sentinel triggers a **keep toast** -- a toast 
 
 #### How it works
 
-1. User clicks `[+]` on a sentinel for `DROPPED:routes/+page.svelte@handleClick`
+1. User clicks `[+]` on a sentinel for `DROPPED:gg:routes/+page.svelte@handleClick`
 2. A toast bar appears at the bottom of the panel:
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ [×]  Keep: [routes] / [+page.svelte] @ [handleClick]  [Undo] [?] │
-│      Click a segment to keep all matching namespaces               │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ [×]  Keep: [gg] : [routes] / [+page.svelte] @ [handleClick]  [Undo] [?] │
+│      Click a segment to keep all matching namespaces                   │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 3. The namespace is split into clickable segments using the same delimiter logic as the hide toast (`:/@ -_`)
 4. Each segment builds a progressive glob pattern:
 
-| Click target   | Pattern added to `gg-keep`        | Effect                                  |
-| -------------- | --------------------------------- | --------------------------------------- |
-| `routes`       | `routes/*`                        | Keep all loggs from `routes/` and below |
-| `+page.svelte` | `routes/+page.svelte*`            | Keep all loggs from this file           |
-| `handleClick`  | `routes/+page.svelte@handleClick` | Keep only this exact namespace          |
+| Click target   | Pattern added to `gg-keep`           | Effect                                  |
+| -------------- | ------------------------------------ | --------------------------------------- |
+| `gg`           | `gg:*`                               | Keep all gg namespaces                  |
+| `routes`       | `gg:routes/*`                        | Keep all loggs from `routes/` and below |
+| `+page.svelte` | `gg:routes/+page.svelte*`            | Keep all loggs from this file           |
+| `handleClick`  | `gg:routes/+page.svelte@handleClick` | Keep only this exact namespace          |
 
 5. Clicking a segment adds the corresponding pattern to `gg-keep` and takes effect immediately
 6. New loggs from matching namespaces enter the buffer going forward (previously dropped loggs are lost, except the preview which is already visible)
@@ -244,7 +237,7 @@ See the [full toast comparison table](#toast-anatomy-mirrors-hide-and-keep-toast
 
 #### Interaction detail
 
-- **Left-click segment:** Add the segment's glob pattern to `gg-keep`. If `gg-keep` was previously restrictive (e.g., `api:*`), the new pattern is appended: `api:*,routes/*`.
+- **Left-click segment:** Add the segment's glob pattern to `gg-keep`. If `gg-keep` was previously restrictive (e.g., `gg:api/*`), the new pattern is appended: `gg:api/*,gg:routes/*`.
 - **Undo:** Restores the previous `gg-keep` value (stored before the keep action, same pattern as `lastHiddenPattern` in the hide toast).
 - **Dismiss:** Closes the toast without making changes.
 - Only one toast (hide, drop, or keep) is visible at a time. Showing any toast dismisses any other visible toast.
@@ -263,24 +256,25 @@ Clicking the `[-]` drop icon on a regular logg triggers a **drop toast** -- a to
 
 #### How it works
 
-1. User clicks `[-]` on a logg from `api/analytics.ts@track`
+1. User clicks `[-]` on a logg from `gg:api/analytics.ts@track`
 2. A toast bar appears at the bottom of the panel:
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ [×]  Drop: [api] / [analytics.ts] @ [track]            [Undo] [?] │
-│      Click a segment to drop all matching namespaces                │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ [×]  Drop: [gg] : [api] / [analytics.ts] @ [track]        [Undo] [?] │
+│      Click a segment to drop all matching namespaces                  │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 3. The namespace is split into clickable segments using the same delimiter logic as the other toasts
 4. Each segment builds a progressive exclusion pattern:
 
-| Click target   | Pattern added to `gg-keep` | Effect                               |
-| -------------- | -------------------------- | ------------------------------------ |
-| `api`          | `-api/*`                   | Drop all loggs from `api/` and below |
-| `analytics.ts` | `-api/analytics.ts*`       | Drop all loggs from this file        |
-| `track`        | `-api/analytics.ts@track`  | Drop only this exact namespace       |
+| Click target   | Pattern added to `gg-keep`   | Effect                               |
+| -------------- | ---------------------------- | ------------------------------------ |
+| `gg`           | `-gg:*`                      | Drop all gg namespaces               |
+| `api`          | `-gg:api/*`                  | Drop all loggs from `api/` and below |
+| `analytics.ts` | `-gg:api/analytics.ts*`      | Drop all loggs from this file        |
+| `track`        | `-gg:api/analytics.ts@track` | Drop only this exact namespace       |
 
 5. Clicking a segment adds the exclusion to `gg-keep` and takes effect immediately
 6. Existing loggs from the namespace remain in the buffer (they were already kept). Only future loggs are dropped.
@@ -306,9 +300,9 @@ Clicking the `[-]` drop icon on a regular logg triggers a **drop toast** -- a to
 
 ### Filtering Dropped Sentinels
 
-- `gg-show = '*'` -- shows both kept loggs and dropped sentinels
+- `gg-show = 'gg:*'` -- shows both kept loggs and dropped sentinels (default)
 - `gg-show = 'DROPPED:*'` -- shows only dropped sentinels (useful for reviewing what's being dropped)
-- `gg-show = '*,-DROPPED:*'` -- hides all dropped sentinels (clean view of kept loggs only)
+- `gg-show = 'gg:*,-DROPPED:*'` -- hides all dropped sentinels (clean view of kept loggs only)
 - `gg-show = 'DROPPED:api:*'` -- shows only dropped sentinels from api namespaces
 
 ## Migration from Current Settings
@@ -389,13 +383,12 @@ When the GG console is empty (no loggs captured), show a helpful prompt:
 ```
 No loggs kept.
 
-[Keep All]  Sets gg-keep to * (keep all namespaces)
+[Keep All]  Sets gg-keep to gg:* (keep all namespaces)
 
 gg-keep: <current value>
-gg-show: <current value>
 ```
 
-If `gg-keep` is already `*` and the console is still empty, the issue is elsewhere (gg not enabled, no gg() calls, etc.) -- fall back to the existing diagnostics.
+If `gg-keep` is already `gg:*` (or `*`) and the console is still empty, the issue is elsewhere (gg not enabled, no gg() calls, etc.) -- fall back to the existing diagnostics.
 
 ### Toolbar Layout
 
@@ -437,9 +430,9 @@ The spec is split into three phases to allow incremental delivery. Each phase is
 Changes to `gg.ts`, `debug/browser.ts`, `debug/node.ts`, and `plugin.ts` internals. No new UI elements.
 
 - [x] **`_onLog` multi-listener** — converted from a single `OnLogCallback | null` slot to a `Set<OnLogCallback>`. New API: `gg.addLogListener(fn)` / `gg.removeLogListener(fn)`. The `_onLog` setter remains as a backward-compatible single-slot alias. Early-buffer replay fires on first listener registration. Eruda plugin updated to use `addLogListener`/`removeLogListener` with legacy fallback.
-- [x] **Drop `gg:` prefix** — removed the `gg:` prefix from all generated namespaces in `gg.ts` (`ggLog()`, `gg.here()`, `gg._here()`). Namespace construction is now `nsLabel` directly instead of `` `gg:${nsLabel}` ``. Console padding in `createGgDebugger` updated. Diagnostics updated to reference `GG_KEEP` instead of `DEBUG=gg:*`.
-- [x] **Rename `gg-filter` → `gg-show`** — renamed the localStorage key (`SHOW_KEY = 'gg-show'`), all variable names. Legacy `gg-filter` key is read as fallback on init (no migration needed). Default pattern updated from `'gg:*'` to `'*'`. Placeholder text and `isSimplePattern()` updated.
-- [x] **Add `gg-keep` layer** — `keepPattern` variable loaded from `localStorage['gg-keep']` (default `'*'`). Applied in `onEntry` handler before `buffer.push()`: loggs not matching `keepPattern` are dropped (counted but not stored). `debug/node.ts` updated to use `GG_KEEP` env var instead of `DEBUG`; defaults to `'*'` (zero-config). `debug/browser.ts` updated to use `gg-show` key.
+- [x] **`gg:` prefix retained** — all generated namespaces keep the `gg:` prefix (`gg:routes/+page.svelte@handleClick`). The Vite plugin prepends `gg:` to all callpoints. Runtime `ggLog()` and `_here()` normalise any `.ns('label')` call to `gg:label` if not already prefixed. This provides the universal `gg` first segment for toasts and a clean `-gg:*` drop-all pattern.
+- [x] **Rename `gg-filter` → `gg-show`** — renamed the localStorage key (`SHOW_KEY = 'gg-show'`), all variable names. Legacy `gg-filter` key is read as fallback on init (no migration needed). Default pattern is `gg:*`. Placeholder text and `isSimplePattern()` updated.
+- [x] **Add `gg-keep` layer** — `keepPattern` variable loaded from `localStorage['gg-keep']` (default `'gg:*'`). Applied in `onEntry` handler before `buffer.push()`: loggs not matching `keepPattern` are dropped (counted but not stored). `debug/node.ts` updated to use `GG_KEEP` env var instead of `DEBUG`; defaults to `'gg:*'` (zero-config). `debug/browser.ts` updated to use `gg-show` key.
 - [x] **Add `gg-console` toggle** — removed `localStorage.debug` usage from `debug/browser.ts` (now uses `gg-console` + `gg-show`). Eruda plugin flips `gg-console` to `false` on init if not explicitly set. Settings panel Sync/Clear buttons replaced with a single "Native console output" checkbox. Debug factory re-enabled with correct pattern on toggle change.
 
 ### Phase 2 — Dropped namespace tracking [x]
@@ -467,17 +460,19 @@ All UI changes described in the spec. Several items deviated from the original d
 
 #### Deviations from original spec design
 
-| Spec said                                            | Implemented instead                                        | Reason                                                                                  |
-| ---------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Two-row toolbar (Keep row + Show row)                | Single pipeline row with nodes + handle buttons            | More compact (~28px vs ~60px), shows data flow visually, scales to mobile via flex-wrap |
-| Truncation banner updated with dropped counts        | Banner removed; buffer node shows `size/cap ⚠`             | Pipeline node is always visible; banner was redundant and easy to miss                  |
-| Keep toast for sentinel `[+]` icon                   | `[+]` directly removes exclusion from `gg-keep` (no toast) | Simpler; the sentinel disappears immediately as confirmation                            |
-| `gg-show` persistence via `localStorage.debug` alias | `gg-show` key used directly throughout                     | Phase 1 already fully migrated away from `localStorage.debug`                           |
+| Spec said                                            | Implemented instead                                            | Reason                                                                                  |
+| ---------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Two-row toolbar (Keep row + Show row)                | Single pipeline row with nodes + handle buttons                | More compact (~28px vs ~60px), shows data flow visually, scales to mobile via flex-wrap |
+| Truncation banner updated with dropped counts        | Banner removed; buffer node shows `size/cap ⚠`                 | Pipeline node is always visible; banner was redundant and easy to miss                  |
+| ~~Keep toast for sentinel `[+]` icon~~               | ~~`[+]` directly removes exclusion from `gg-keep` (no toast)~~ | Resolved — keep toast now implemented as spec intended (see Phase 3 notes)              |
+| `gg-show` persistence via `localStorage.debug` alias | `gg-show` key used directly throughout                         | Phase 1 already fully migrated away from `localStorage.debug`                           |
 
 #### Not yet implemented (out of scope / deferred)
 
-- [ ] **Empty state update** — "Keep All" button when `gg-keep` is restrictive and buffer is empty.
-- [ ] **Segment-level keep toast** — clicking `[+]` on sentinel currently just removes the exclusion directly; the spec calls for a toast with segment-level glob choices.
+- [x] **Empty state update** — "Keep All" button (`gg:*`) shown when `gg-keep` is restrictive and buffer is empty. Falls back to existing "no loggs yet" message when keep is already `gg:*`.
+- [x] **Segment-level keep toast** — `showKeepToast()` added (`toastMode: 'hide' | 'drop' | 'keep'`). Clicking `[+]` saves pre-click `keepPattern` + `DroppedNamespaceInfo`, removes exclusion (or adds inclusion for Case B), deletes from `droppedNamespaces`, shows toast. Segment click broadens pattern and clears all matching dropped namespaces. Undo restores `keepPattern` and re-inserts the sentinel.
+- [x] **`simplifyPattern` redundancy removal** — now collapses redundant inclusions subsumed by `*`, and drops exclusions covered by a broader exclusion glob (e.g. `-gg:routes/demo-helpers.ts:x` subsumed by `-gg:routes/demo-*`).
+- [x] **`gg:` universal segment** — all auto-generated namespaces prefixed with `gg:` by Vite plugin; `.ns()` runtime normalised to `gg:label`. The `gg` first segment in every toast and log row targets all gg namespaces (`gg:*`).
 - [ ] **`DROPPED:*` show-filter support** — sentinels are rendered from a separate section, not from `filteredIndices`, so `gg-show = 'DROPPED:*'` does not currently filter them.
 
 ---
@@ -488,7 +483,7 @@ All UI changes described in the spec. Several items deviated from the original d
 
 ## Resolved Questions
 
-1. **~~`gg:` prefix in native console output.~~** No. The ms diff + colored namespace output is already visually distinct. The `gg:` prefix is dropped entirely (see "Dropping the `gg:` Namespace Prefix" section).
+1. **~~`gg:` prefix in namespaces.~~** Retained. Originally dropped for cleaner display, but re-added to enable the universal `gg` first segment in toasts and log rows (`gg:*` covers all gg namespaces cleanly). The `gg:` prefix distinguishes gg from other `debug`-library users and makes `-gg:*` a clean "drop everything" pattern.
 
 2. **~~Retroactive save.~~** No secondary buffer. Instead, the sentinel shows a preview of the first dropped logg so users can assess what a namespace produces before deciding to keep it. This is simpler and sufficient.
 

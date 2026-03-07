@@ -143,7 +143,7 @@ describe('gg() in svelte template markup (AST-based)', () => {
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
-		expect(out).toContain("gg._ns({ns:'test.svelte@handleClick'");
+		expect(out).toContain("gg._ns({ns:'gg:test.svelte@handleClick'");
 	});
 
 	it('transforms gg() in {expr} with gg._o() syntax', () => {
@@ -198,7 +198,7 @@ describe('gg() in svelte template markup (AST-based)', () => {
 		expect(result).not.toBeNull();
 		const out = result!.code;
 		// Script gg() transformed
-		expect(out).toContain("gg._ns({ns:'test.svelte@test'");
+		expect(out).toContain("gg._ns({ns:'gg:test.svelte@test'");
 		// Prose gg() untouched
 		expect(out).toContain('prose gg() text');
 	});
@@ -221,7 +221,7 @@ describe('gg() in svelte template markup (AST-based)', () => {
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
-		expect(out).toContain("gg._ns({ns:'test.ts@test'");
+		expect(out).toContain("gg._ns({ns:'gg:test.ts@test'");
 		expect(out).not.toContain('gg._o(');
 	});
 
@@ -263,7 +263,7 @@ function testLog() {
 		expect(result).not.toBeNull();
 		const out = result!.code;
 		// Should be @testLog, NOT @data or @error
-		expect(out).toContain("ns:'test.svelte@testLog'");
+		expect(out).toContain("ns:'gg:test.svelte@testLog'");
 		expect(out).not.toContain('@data');
 		expect(out).not.toContain('@error');
 	});
@@ -350,7 +350,7 @@ describe('transformGgCalls() - JS/TS files with AST', () => {
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
-		expect(out).toContain("gg._ns({ns:'test.js@handleClick'");
+		expect(out).toContain("gg._ns({ns:'gg:test.js@handleClick'");
 		expect(out).not.toContain('gg._o('); // No gg._o() in plain JS
 	});
 
@@ -361,7 +361,7 @@ describe('transformGgCalls() - JS/TS files with AST', () => {
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
-		expect(out).toContain("gg._ns({ns:'test.ts@fetchData'");
+		expect(out).toContain("gg._ns({ns:'gg:test.ts@fetchData'");
 	});
 
 	it('avoids @data/@error bugs in plain JS files', () => {
@@ -372,7 +372,7 @@ describe('transformGgCalls() - JS/TS files with AST', () => {
 		expect(result).not.toBeNull();
 		const out = result!.code;
 		// Should be @testLog, NOT @data or @error
-		expect(out).toContain("ns:'test.js@testLog'");
+		expect(out).toContain("ns:'gg:test.js@testLog'");
 		expect(out).not.toContain('@data');
 		expect(out).not.toContain('@error');
 	});
@@ -384,6 +384,6 @@ describe('transformGgCalls() - JS/TS files with AST', () => {
 
 		expect(result).not.toBeNull();
 		const out = result!.code;
-		expect(out).toContain("ns:'test.js'"); // No @fn for top-level
+		expect(out).toContain("ns:'gg:test.js'"); // No @fn for top-level
 	});
 });

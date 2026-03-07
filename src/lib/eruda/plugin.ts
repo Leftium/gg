@@ -86,8 +86,8 @@ export function createGgPlugin(
 	let settingsExpanded = false;
 
 	// Layer 1: Keep gate pattern ('gg-keep') — controls which loggs enter the ring buffer.
-	// Default '*' (keep everything). Users narrow it to reduce buffer pressure.
-	let keepPattern = '*';
+	// Default 'gg:*' (keep all gg namespaces). Users narrow it to reduce buffer pressure.
+	let keepPattern = 'gg:*';
 
 	// Native console output toggle ('gg-console')
 	// Default: true (gg works without Eruda), but Eruda flips it to false on init
@@ -239,8 +239,8 @@ export function createGgPlugin(
 			// Load filter state BEFORE registering _onLog hook, because registering
 			// triggers replay of earlyLogBuffer and each entry checks filterPattern
 			const _legacyFilter = localStorage.getItem(LEGACY_FILTER_KEY);
-			filterPattern = localStorage.getItem(SHOW_KEY) || _legacyFilter || '*';
-			keepPattern = localStorage.getItem(KEEP_KEY) || '*';
+			filterPattern = localStorage.getItem(SHOW_KEY) || _legacyFilter || 'gg:*';
+			keepPattern = localStorage.getItem(KEEP_KEY) || 'gg:*';
 			showExpressions = localStorage.getItem(SHOW_EXPRESSIONS_KEY) === 'true';
 
 			// gg-console: Eruda flips to false on init, unless user explicitly set it.
@@ -264,7 +264,7 @@ export function createGgPlugin(
 					// When console is disabled, load() in browser.ts already returns '' via
 					// the gg-console=false check, so no enable() call is needed.
 					if (ggConsoleEnabled) {
-						dbg.enable(filterPattern || '*');
+						dbg.enable(filterPattern || 'gg:*');
 					}
 				} catch {
 					// ignore
@@ -279,7 +279,7 @@ export function createGgPlugin(
 					receivedNsSet.add(entry.namespace);
 
 					// Layer 1: Keep gate — drop loggs that don't match gg-keep
-					const effectiveKeep = keepPattern || '*';
+					const effectiveKeep = keepPattern || 'gg:*';
 					if (!namespaceMatchesPattern(entry.namespace, effectiveKeep)) {
 						// Logg is dropped — not stored in ring buffer. Track it in droppedNamespaces.
 						const typeKey = entry.level ?? 'log';
@@ -309,7 +309,7 @@ export function createGgPlugin(
 					allNamespacesSet.add(entry.namespace);
 					buffer.push(entry);
 					// Layer 2: Show filter — track which namespaces are currently visible
-					const effectivePattern = filterPattern || '*';
+					const effectivePattern = filterPattern || 'gg:*';
 					if (namespaceMatchesPattern(entry.namespace, effectivePattern)) {
 						enabledNamespaces.add(entry.namespace);
 					}
@@ -429,7 +429,7 @@ export function createGgPlugin(
 	};
 
 	function toggleKeepNamespace(namespace: string, enable: boolean) {
-		const currentPattern = keepPattern || '*';
+		const currentPattern = keepPattern || 'gg:*';
 		const ns = namespace.trim();
 		const parts = currentPattern
 			.split(',')
@@ -439,7 +439,7 @@ export function createGgPlugin(
 		if (enable) {
 			// Remove exclusion — namespace is now kept
 			const filtered = parts.filter((p) => p !== `-${ns}`);
-			keepPattern = filtered.join(',') || '*';
+			keepPattern = filtered.join(',') || 'gg:*';
 			// Remove from droppedNamespaces so sentinel disappears
 			droppedNamespaces.delete(ns);
 		} else {
@@ -449,12 +449,12 @@ export function createGgPlugin(
 			keepPattern = parts.join(',');
 		}
 
-		keepPattern = simplifyPattern(keepPattern) || '*';
+		keepPattern = simplifyPattern(keepPattern) || 'gg:*';
 		localStorage.setItem(KEEP_KEY, keepPattern);
 	}
 
 	function toggleNamespace(namespace: string, enable: boolean) {
-		const currentPattern = filterPattern || '*';
+		const currentPattern = filterPattern || 'gg:*';
 		const ns = namespace.trim();
 		// Split into parts, manipulate, rejoin (avoids fragile regex on complex namespace strings)
 		const parts = currentPattern
@@ -478,7 +478,7 @@ export function createGgPlugin(
 		// Sync enabledNamespaces from the NEW pattern (don't re-read localStorage)
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || '*';
+		const effectivePattern = filterPattern || 'gg:*';
 		allNamespaces.forEach((ns) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
@@ -487,7 +487,7 @@ export function createGgPlugin(
 	}
 
 	function toggleNamespaces(namespaces: string[], enable: boolean) {
-		const currentPattern = filterPattern || '*';
+		const currentPattern = filterPattern || 'gg:*';
 		let parts = currentPattern
 			.split(',')
 			.map((p) => p.trim())
@@ -515,7 +515,7 @@ export function createGgPlugin(
 		// Sync enabledNamespaces from the NEW pattern
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || '*';
+		const effectivePattern = filterPattern || 'gg:*';
 		allNamespaces.forEach((ns) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
@@ -540,10 +540,11 @@ export function createGgPlugin(
 
 		const inclusions = parts.filter((p) => !p.startsWith('-'));
 		const exclusions = parts.filter((p) => p.startsWith('-'));
-		const hasWildcardBase = inclusions.includes('*');
+		const hasWildcardBase = inclusions.includes('gg:*') || inclusions.includes('*');
+		const wildcardBase = inclusions.includes('gg:*') ? 'gg:*' : '*';
 
-		// If there's a wildcard base (*), drop all other inclusions (they're subsumed)
-		const finalInclusions = hasWildcardBase ? ['*'] : inclusions;
+		// If there's a wildcard base (gg:* or *), drop all other inclusions (they're subsumed)
+		const finalInclusions = hasWildcardBase ? [wildcardBase] : inclusions;
 
 		// Drop exclusions that are subsumed by a broader exclusion.
 		// e.g. -routes/demo-helpers.ts:validation is subsumed by -routes/demo-*
@@ -620,11 +621,11 @@ export function createGgPlugin(
 
 		const parts = pattern.split(',').map((p) => p.trim());
 
-		// Check if it's '*' based (with exclusions)
-		const hasWildcardBase = parts.some((p) => p === '*');
+		// Check if it's '*' or 'gg:*' based (with exclusions)
+		const hasWildcardBase = parts.some((p) => p === '*' || p === 'gg:*');
 		if (hasWildcardBase) {
 			// All other parts must be plain exclusions (no wildcards in the exclusion)
-			const otherParts = parts.filter((p) => p !== '*');
+			const otherParts = parts.filter((p) => p !== '*' && p !== 'gg:*');
 			return otherParts.every((p) => p.startsWith('-') && !p.includes('*', 1));
 		}
 
@@ -1475,7 +1476,7 @@ export function createGgPlugin(
 		<div class="gg-pipeline-panel gg-keep-panel" style="display:none;">
 			<div class="gg-pipeline-panel-header">
 				<span class="gg-filter-label">Keep:</span>
-				<input class="gg-keep-input" type="text" value="${escapeHtml(keepPattern)}" placeholder="*" title="gg-keep: which loggs enter the ring buffer">
+				<input class="gg-keep-input" type="text" value="${escapeHtml(keepPattern)}" placeholder="gg:*" title="gg-keep: which loggs enter the ring buffer">
 				<span class="gg-keep-filter-summary gg-filter-count"></span>
 			</div>
 			<div class="gg-keep-filter-panel gg-filter-details-body"></div>
@@ -1483,7 +1484,7 @@ export function createGgPlugin(
 		<div class="gg-pipeline-panel gg-show-panel" style="display:none;">
 			<div class="gg-pipeline-panel-header">
 				<span class="gg-filter-label">Show:</span>
-				<input class="gg-show-input" type="text" value="${escapeHtml(filterPattern)}" placeholder="*" title="gg-show: which kept loggs to display">
+				<input class="gg-show-input" type="text" value="${escapeHtml(filterPattern)}" placeholder="gg:*" title="gg-show: which kept loggs to display">
 				<span class="gg-filter-summary gg-filter-count"></span>
 			</div>
 			<div class="gg-filter-panel gg-filter-details-body"></div>
@@ -1499,12 +1500,12 @@ export function createGgPlugin(
 	}
 
 	function applyPatternFromInput(value: string) {
-		filterPattern = value || '*';
+		filterPattern = value || 'gg:*';
 		localStorage.setItem(SHOW_KEY, filterPattern);
 		// Sync enabledNamespaces from the new pattern
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || '*';
+		const effectivePattern = filterPattern || 'gg:*';
 		allNamespaces.forEach((ns) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
@@ -1522,7 +1523,7 @@ export function createGgPlugin(
 	}
 
 	function applyKeepPatternFromInput(value: string) {
-		keepPattern = value || '*';
+		keepPattern = value || 'gg:*';
 		localStorage.setItem(KEEP_KEY, keepPattern);
 		renderKeepUI();
 		scheduleSentinelRender();
@@ -1579,13 +1580,13 @@ export function createGgPlugin(
 				const allNamespaces = getAllCapturedNamespaces();
 				if (target.checked) {
 					// Select all
-					filterPattern = '*';
+					filterPattern = 'gg:*';
 					enabledNamespaces.clear();
 					allNamespaces.forEach((ns) => enabledNamespaces.add(ns));
 				} else {
 					// Deselect all
 					const exclusions = allNamespaces.map((ns) => `-${ns}`).join(',');
-					filterPattern = `*,${exclusions}`;
+					filterPattern = `gg:*,${exclusions}`;
 					enabledNamespaces.clear();
 				}
 				localStorage.setItem(SHOW_KEY, filterPattern);
@@ -1679,7 +1680,7 @@ export function createGgPlugin(
 		if (!filterPanel) return;
 
 		const simple = isSimplePattern(filterPattern);
-		const effectivePattern = filterPattern || '*';
+		const effectivePattern = filterPattern || 'gg:*';
 
 		if (simple && allNamespaces.length > 0) {
 			const allChecked = enabledCount === totalCount;
@@ -1745,7 +1746,7 @@ export function createGgPlugin(
 		const allDropped = [...droppedNamespaces.keys()].sort();
 		// Also extract namespaces explicitly excluded in keepPattern itself — these may
 		// never have sent a logg so they won't be in allNamespacesSet or droppedNamespaces
-		const patternExcluded = (keepPattern || '*')
+		const patternExcluded = (keepPattern || 'gg:*')
 			.split(',')
 			.map((p) => p.trim())
 			.filter((p) => p.startsWith('-') && p.length > 1)
@@ -1754,7 +1755,7 @@ export function createGgPlugin(
 
 		if (simple && allNs.length > 0) {
 			const allChecked = droppedCount === 0;
-			const effectiveKeep = keepPattern || '*';
+			const effectiveKeep = keepPattern || 'gg:*';
 
 			// Count loggs per namespace (kept + dropped combined for context)
 			const allEntries = buffer.getEntries();
@@ -1964,11 +1965,11 @@ export function createGgPlugin(
 					const info = droppedNamespaces.get(namespace);
 					if (!info) return;
 
-					const previousKeep = keepPattern || '*';
+					const previousKeep = keepPattern || 'gg:*';
 
 					// Remove the exact exclusion for this namespace from keepPattern.
 					// If no exclusion exists (Case B: namespace simply not included), add it.
-					const currentKeep = keepPattern || '*';
+					const currentKeep = keepPattern || 'gg:*';
 					const exclusion = `-${namespace}`;
 					const parts = currentKeep
 						.split(',')
@@ -1976,12 +1977,12 @@ export function createGgPlugin(
 						.filter(Boolean);
 					const hasExclusion = parts.includes(exclusion);
 					if (hasExclusion) {
-						keepPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
+						keepPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
 					} else {
 						// No explicit exclusion — add an inclusion for the exact namespace
 						keepPattern = parts.some((p) => !p.startsWith('-'))
 							? `${currentKeep},${namespace}`
-							: `*,${namespace}`;
+							: `gg:*,${namespace}`;
 					}
 					keepPattern = simplifyPattern(keepPattern);
 					localStorage.setItem(KEEP_KEY, keepPattern);
@@ -2011,13 +2012,13 @@ export function createGgPlugin(
 					const allNs = [...allNamespacesSet, ...droppedNamespaces.keys()];
 					if (target.checked) {
 						// Keep all: remove all exclusions
-						keepPattern = '*';
+						keepPattern = 'gg:*';
 						droppedNamespaces.clear();
 					} else {
 						// Drop all
 						const exclusions = allNs.map((ns) => `-${ns}`).join(',');
-						keepPattern = `*,${exclusions}`;
-						keepPattern = simplifyPattern(keepPattern) || '*';
+						keepPattern = `gg:*,${exclusions}`;
+						keepPattern = simplifyPattern(keepPattern) || 'gg:*';
 					}
 					localStorage.setItem(KEEP_KEY, keepPattern);
 					renderKeepUI();
@@ -2257,7 +2258,7 @@ export function createGgPlugin(
 				// Update the debug factory's enabled pattern immediately
 				import('../debug/index.js').then(({ default: dbg }) => {
 					try {
-						const pattern = ggConsoleEnabled ? filterPattern || '*' : '';
+						const pattern = ggConsoleEnabled ? filterPattern || 'gg:*' : '';
 						dbg.enable(pattern);
 					} catch {
 						// ignore
@@ -2521,7 +2522,7 @@ export function createGgPlugin(
 			if (keepInput) keepInput.value = keepPattern;
 			// Restore enabledNamespaces from current show filter
 			enabledNamespaces.clear();
-			const effectiveShow = filterPattern || '*';
+			const effectiveShow = filterPattern || 'gg:*';
 			getAllCapturedNamespaces().forEach((ns: string) => {
 				if (namespaceMatchesPattern(ns, effectiveShow)) enabledNamespaces.add(ns);
 			});
@@ -2534,7 +2535,7 @@ export function createGgPlugin(
 			filterPattern = lastHiddenPattern;
 			localStorage.setItem(SHOW_KEY, filterPattern);
 			enabledNamespaces.clear();
-			const effectivePattern = filterPattern || '*';
+			const effectivePattern = filterPattern || 'gg:*';
 			getAllCapturedNamespaces().forEach((ns: string) => {
 				if (namespaceMatchesPattern(ns, effectivePattern)) enabledNamespaces.add(ns);
 			});
@@ -2585,7 +2586,7 @@ export function createGgPlugin(
 				if (toastMode === 'keep') {
 					// Broaden the keep: remove all exclusions whose prefix matches `filter`,
 					// then add `filter` as an inclusion if pattern has no wildcard base.
-					const currentKeep = keepPattern || '*';
+					const currentKeep = keepPattern || 'gg:*';
 					const keepParts = currentKeep
 						.split(',')
 						.map((p) => p.trim())
@@ -2597,7 +2598,7 @@ export function createGgPlugin(
 						const filterBase = filter.replace(/\*$/, '');
 						return !excl.startsWith(filterBase) && !filterBase.startsWith(excl);
 					});
-					const hasWildcardBase = narrowed.some((p) => p === '*');
+					const hasWildcardBase = narrowed.some((p) => p === '*' || p === 'gg:*');
 					if (
 						!hasWildcardBase &&
 						!narrowed.some(
@@ -2606,7 +2607,7 @@ export function createGgPlugin(
 					) {
 						narrowed.push(filter);
 					}
-					keepPattern = simplifyPattern(narrowed.join(',') || '*');
+					keepPattern = simplifyPattern(narrowed.join(',') || 'gg:*');
 					localStorage.setItem(KEEP_KEY, keepPattern);
 					const keepInput = $el?.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
 					if (keepInput) keepInput.value = keepPattern;
@@ -2622,12 +2623,12 @@ export function createGgPlugin(
 					renderLogs();
 				} else if (toastMode === 'drop') {
 					// Add exclusion to keepPattern (Layer 1)
-					const currentKeep = keepPattern || '*';
+					const currentKeep = keepPattern || 'gg:*';
 					const keepParts = currentKeep.split(',').map((p) => p.trim());
 					if (!keepParts.includes(exclusion)) {
 						keepPattern = keepParts.some((p) => !p.startsWith('-'))
 							? `${currentKeep},${exclusion}`
-							: `*,${exclusion}`;
+							: `gg:*,${exclusion}`;
 						keepPattern = simplifyPattern(keepPattern);
 					}
 					localStorage.setItem(KEEP_KEY, keepPattern);
@@ -2647,18 +2648,18 @@ export function createGgPlugin(
 					scheduleSentinelRender();
 				} else {
 					// toastMode === 'hide': add exclusion to filterPattern (Layer 2)
-					const currentPattern = filterPattern || '*';
+					const currentPattern = filterPattern || 'gg:*';
 					const parts = currentPattern.split(',').map((p) => p.trim());
 					if (parts.includes(exclusion)) {
-						filterPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
+						filterPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
 					} else {
 						filterPattern = parts.some((p) => !p.startsWith('-'))
 							? `${currentPattern},${exclusion}`
-							: `*,${exclusion}`;
+							: `gg:*,${exclusion}`;
 					}
 					filterPattern = simplifyPattern(filterPattern);
 					enabledNamespaces.clear();
-					const effectivePattern = filterPattern || '*';
+					const effectivePattern = filterPattern || 'gg:*';
 					getAllCapturedNamespaces().forEach((ns) => {
 						if (namespaceMatchesPattern(ns, effectivePattern)) enabledNamespaces.add(ns);
 					});
@@ -2685,7 +2686,7 @@ export function createGgPlugin(
 
 			// Handle reset filter button (shown when all logs filtered out by gg-show)
 			if (target?.classList?.contains('gg-reset-filter-btn')) {
-				filterPattern = '*';
+				filterPattern = 'gg:*';
 				enabledNamespaces.clear();
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				localStorage.setItem(SHOW_KEY, filterPattern);
@@ -2696,7 +2697,7 @@ export function createGgPlugin(
 
 			// Handle keep-all button (shown when gg-keep is restrictive and buffer is empty)
 			if (target?.classList?.contains('gg-keep-all-btn')) {
-				keepPattern = '*';
+				keepPattern = 'gg:*';
 				localStorage.setItem(KEEP_KEY, keepPattern);
 				const keepInput = $el?.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
 				if (keepInput) keepInput.value = keepPattern;
@@ -2767,7 +2768,7 @@ export function createGgPlugin(
 
 				// Toggle behavior: if already at this filter, restore all
 				if (filterPattern === filter) {
-					filterPattern = '*';
+					filterPattern = 'gg:*';
 					enabledNamespaces.clear();
 					getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				} else {
@@ -2796,7 +2797,7 @@ export function createGgPlugin(
 				const namespace = dropBtn.getAttribute('data-namespace');
 				if (!namespace) return;
 
-				const currentKeep = keepPattern || '*';
+				const currentKeep = keepPattern || 'gg:*';
 				const exclusion = `-${namespace}`;
 				const parts = currentKeep.split(',').map((p) => p.trim());
 				if (!parts.includes(exclusion)) {
@@ -2839,10 +2840,10 @@ export function createGgPlugin(
 
 			// Clicking background (container or grid, not a log entry) restores show filter
 			if (
-				filterPattern !== '*' &&
+				filterPattern !== 'gg:*' &&
 				(target === containerEl || target?.classList?.contains('gg-log-grid'))
 			) {
-				filterPattern = '*';
+				filterPattern = 'gg:*';
 				enabledNamespaces.clear();
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				localStorage.setItem(SHOW_KEY, filterPattern);
@@ -2892,21 +2893,21 @@ export function createGgPlugin(
 				e.preventDefault();
 
 				// Add exclusion pattern: keep current base, add -<pattern>
-				const currentPattern = filterPattern || '*';
+				const currentPattern = filterPattern || 'gg:*';
 				const exclusion = `-${filter}`;
 
 				// Check if already excluded (toggle off)
 				const parts = currentPattern.split(',').map((p) => p.trim());
 				if (parts.includes(exclusion)) {
 					// Remove the exclusion to un-hide
-					filterPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
+					filterPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
 				} else {
 					// Ensure we have a base inclusion pattern
 					const hasInclusion = parts.some((p) => !p.startsWith('-'));
 					if (hasInclusion) {
 						filterPattern = `${currentPattern},${exclusion}`;
 					} else {
-						filterPattern = `*,${exclusion}`;
+						filterPattern = `gg:*,${exclusion}`;
 					}
 				}
 
@@ -2914,7 +2915,7 @@ export function createGgPlugin(
 
 				// Sync enabledNamespaces from the new pattern
 				enabledNamespaces.clear();
-				const effectivePattern = filterPattern || '*';
+				const effectivePattern = filterPattern || 'gg:*';
 				getAllCapturedNamespaces().forEach((ns) => {
 					if (namespaceMatchesPattern(ns, effectivePattern)) {
 						enabledNamespaces.add(ns);
@@ -3536,18 +3537,19 @@ export function createGgPlugin(
 			}
 
 			const hasFilteredLogs = buffer.size > 0;
-			const keepIsRestrictive = (keepPattern || '*') !== '*';
+			const keepIsRestrictive =
+				(keepPattern || 'gg:*') !== 'gg:*' && (keepPattern || 'gg:*') !== '*';
 			let message: string;
 			let actionButton: string;
 			if (hasFilteredLogs) {
 				message = `All ${buffer.size} logs filtered out.`;
 				actionButton =
-					'<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (*)</button>';
+					'<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (gg:*)</button>';
 			} else if (keepIsRestrictive) {
 				message = 'No loggs kept.';
 				actionButton =
 					`<button class="gg-keep-all-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #4CAF50; background: #4CAF50; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Keep All</button>` +
-					`<div style="margin-top: 10px; font-size: 11px; opacity: 0.7;">gg-keep: ${escapeHtml(keepPattern || '*')}</div>`;
+					`<div style="margin-top: 10px; font-size: 11px; opacity: 0.7;">gg-keep: ${escapeHtml(keepPattern || 'gg:*')}</div>`;
 			} else {
 				message = 'No loggs captured yet. Call gg() to see output here.';
 				actionButton = '';

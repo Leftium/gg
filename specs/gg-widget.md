@@ -46,9 +46,9 @@ Eruda's Console tab can only filter by log level (All/Info/Warning/Error). The g
 ├─────────────────────────────────────┤
 │ 🔍 [*:wmo____________________] [⟳] │
 │ ┌─────────────────────────────────┐ │
-│ │ +2ms  routes/+page:wmo  code=3 │ │
-│ │ +5ms  lib/util:wmo  grouped: 3 │ │
-│ │ +12ms routes/+page:wmo  done   │ │
+│ │ +2ms  gg:routes/+page:wmo  code=3 │ │
+│ │ +5ms  gg:lib/util:wmo  grouped: 3 │ │
+│ │ +12ms gg:routes/+page:wmo  done   │ │
 │ │                                 │ │
 │ └─────────────────────────────────┘ │
 │ [📋 Copy] [🗑 Clear] [⏸ Pause]     │
@@ -233,7 +233,7 @@ The plugin installs a hook into the `gg()` function pipeline via an internal eve
 ```typescript
 // Internal hook added to gg.ts
 interface CapturedEntry {
-    namespace: string;   // e.g., "gg:routes/+page.svelte@handleClick"
+    namespace: string;   // e.g., "gg:routes/+page.svelte@handleClick" (always gg: prefixed)
     message: string;     // Formatted message string
     args: unknown[];     // Raw arguments for expandable view
     timestamp: number;   // Date.now()

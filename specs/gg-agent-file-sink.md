@@ -176,9 +176,9 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
 Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent utility and safe serialization:
 
 ```jsonl
-{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567890,"lvl":"warn","env":"client","origin":"tauri","file":"src/routes/+page.svelte","line":42,"src":"item","diff":12}
-{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567920,"env":"client","origin":"browser","file":"src/routes/+page.svelte","line":42,"src":"item","diff":30}
-{"ns":"routes/+page.server.ts@load","msg":"Fetching user data","ts":1741234567885,"env":"server","file":"src/routes/+page.server.ts","line":18,"diff":0}
+{"ns":"gg:routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567890,"lvl":"warn","env":"client","origin":"tauri","file":"src/routes/+page.svelte","line":42,"src":"item","diff":12}
+{"ns":"gg:routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567920,"env":"client","origin":"browser","file":"src/routes/+page.svelte","line":42,"src":"item","diff":30}
+{"ns":"gg:routes/+page.server.ts@load","msg":"Fetching user data","ts":1741234567885,"env":"server","file":"src/routes/+page.server.ts","line":18,"diff":0}
 ```
 
 | Field    | Source      | Description                                                                |
@@ -217,7 +217,7 @@ Agents can filter by environment and origin:
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
 
 # All entries from a specific namespace
-jq 'select(.ns | startswith("routes/+page"))' .gg/logs-5173.jsonl
+jq 'select(.ns | startswith("gg:routes/+page"))' .gg/logs-5173.jsonl
 
 # Errors only
 jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
@@ -462,9 +462,9 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 3. The page is sent to the browser, the component hydrates, and client-side `gg()` calls fire -- entries arrive via HMR with `env: "client"`
 4. The JSONL file contains both, naturally ordered by time. The `env` and `origin` fields distinguish them:
    ```jsonl
-   {"env":"server","ns":"routes/+page.server.ts@load","msg":"Fetching data","ts":1741234567885,...}
-   {"env":"server","ns":"routes/+page.server.ts@load","msg":"Data ready: 42 items","ts":1741234567890,...}
-   {"env":"client","origin":"browser","ns":"routes/+page.svelte@onMount","msg":"Component mounted","ts":1741234568100,...}
+   {"env":"server","ns":"gg:routes/+page.server.ts@load","msg":"Fetching data","ts":1741234567885,...}
+   {"env":"server","ns":"gg:routes/+page.server.ts@load","msg":"Data ready: 42 items","ts":1741234567890,...}
+   {"env":"client","origin":"browser","ns":"gg:routes/+page.svelte@onMount","msg":"Component mounted","ts":1741234568100,...}
    ```
 5. Agent can see the full request lifecycle in one file, or filter to one side: `grep '"env":"server"'` or `GET /__gg/logs?env=client`.
 
@@ -475,8 +475,8 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 3. Both the Tauri webview and the browser tab connect to the same Vite HMR WebSocket. Both send `gg:log` events.
 4. Entries from both sources are appended to the same JSONL file, distinguished by `origin`:
    ```jsonl
-   {"env":"client","origin":"tauri","ns":"routes/+page.svelte@onClick","msg":"Button clicked","ts":1741234567890,...}
-   {"env":"client","origin":"browser","ns":"routes/+page.svelte@onClick","msg":"Button clicked","ts":1741234567920,...}
+   {"env":"client","origin":"tauri","ns":"gg:routes/+page.svelte@onClick","msg":"Button clicked","ts":1741234567890,...}
+   {"env":"client","origin":"browser","ns":"gg:routes/+page.svelte@onClick","msg":"Button clicked","ts":1741234567920,...}
    ```
 5. Agent can filter: `grep '"origin":"tauri"'` or `GET /__gg/logs?origin=tauri` to see only the Tauri webview's entries.
 6. If only the Tauri webview is open (the common case), all client entries have `origin: "tauri"` and no disambiguation is needed.
@@ -579,7 +579,7 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 
 | Field    | Description                                                          |
 | -------- | -------------------------------------------------------------------- |
-| `ns`     | Namespace (file + function, e.g., `routes/+page.svelte@handleClick`) |
+| `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@handleClick`) |
 | `msg`    | Formatted message string                                             |
 | `ts`     | Unix epoch ms                                                        |
 | `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)    |
@@ -617,7 +617,7 @@ jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg
 grep '"env":"server"' .gg/logs-5173.jsonl
 
 # Entries mentioning a namespace pattern
-grep '"ns":"routes/+page' .gg/logs-5173.jsonl
+grep '"ns":"gg:routes/+page' .gg/logs-5173.jsonl
 ```
 
 **HTTP API (alternative to file access):**
