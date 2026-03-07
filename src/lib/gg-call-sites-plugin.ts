@@ -76,9 +76,18 @@ export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}
 			// Set a compile-time flag so gg() can detect the plugin is installed.
 			// Vite replaces all occurrences of __GG_TAG_PLUGIN__ with true at build time,
 			// before any code executes — no ordering issues.
+
+			// Alias GG_ENABLED → VITE_GG_ENABLED so users only need to set one variable.
+			// VITE_ prefix is required for client-side exposure via import.meta.env.
+			// If VITE_GG_ENABLED is already set explicitly, it takes precedence.
+			const ggEnabled = process.env.VITE_GG_ENABLED ?? process.env.GG_ENABLED;
+
 			return {
 				define: {
-					__GG_TAG_PLUGIN__: 'true'
+					__GG_TAG_PLUGIN__: 'true',
+					...(ggEnabled !== undefined && {
+						'import.meta.env.VITE_GG_ENABLED': JSON.stringify(ggEnabled)
+					})
 				}
 			};
 		},

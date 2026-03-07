@@ -144,11 +144,9 @@ function isGgEnabled(): boolean {
 	// GG_ENABLED=false: completely removes gg (even in DEV)
 	// GG_ENABLED=true: force-enables gg (even in PROD, e.g. Vercel deployments)
 	if (BROWSER) {
-		if (
-			typeof import.meta.env?.VITE_GG_ENABLED === 'string' &&
-			import.meta.env.VITE_GG_ENABLED === 'false'
-		) {
-			return false;
+		if (typeof import.meta.env?.VITE_GG_ENABLED === 'string') {
+			if (import.meta.env.VITE_GG_ENABLED === 'false') return false;
+			if (import.meta.env.VITE_GG_ENABLED === 'true') return true;
 		}
 	} else {
 		if (process?.env?.GG_ENABLED === 'false') {

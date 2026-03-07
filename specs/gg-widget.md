@@ -174,11 +174,19 @@ initGgEruda({
 For production builds where gg should **never** be available at runtime (even with triggers), set the environment variable:
 
 ```bash
-# Vite/Browser builds
-VITE_GG_ENABLED=false npm run build
-
-# Node.js/SSR
+# Single variable — works for both browser and SSR (recommended)
 GG_ENABLED=false npm run build
+
+# Or explicitly for browser-only builds (VITE_ prefix required without the plugin)
+VITE_GG_ENABLED=false npm run build
+```
+
+The gg Vite plugin (`ggPlugins()` / `ggCallSitesPlugin`) automatically aliases `GG_ENABLED` to `VITE_GG_ENABLED` at build time, so plain `GG_ENABLED` works for client-side code too. If `VITE_GG_ENABLED` is set explicitly it takes precedence. SSR always reads `process.env.GG_ENABLED` directly.
+
+`GG_ENABLED` can also force-enable gg in production without a runtime trigger:
+
+```bash
+GG_ENABLED=true npm run build   # or set in deployment env (e.g. Vercel)
 ```
 
 When `GG_ENABLED=false`, the gg core function is completely disabled and **cannot** be re-enabled at runtime via `?gg` or any other trigger. This takes absolute precedence over all other settings.

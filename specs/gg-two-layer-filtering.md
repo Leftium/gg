@@ -484,9 +484,7 @@ All UI changes described in the spec. Several items deviated from the original d
 
 ## Open Questions
 
-1. **`GG_ENABLED` / `VITE_GG_ENABLED` unification.** These exist as separate env vars due to Vite's `VITE_` prefix requirement for client-side exposure. Could the gg Vite plugin alias `GG_ENABLED` to `VITE_GG_ENABLED` automatically, so users only set one variable? This is orthogonal to the filtering proposal but worth addressing.
-
-2. **`gg-console` as string filter.** Currently specified as a boolean. Could be upgraded to a glob pattern string for per-namespace console output control. Boolean is simpler for v1; string filter could be added later if needed (backward compatible: `'true'`/`'false'` still work as boolean, any other string is treated as a glob pattern).
+1. **`gg-console` as string filter.** Currently specified as a boolean. Could be upgraded to a glob pattern string for per-namespace console output control. Boolean is simpler for v1; string filter could be added later if needed (backward compatible: `'true'`/`'false'` still work as boolean, any other string is treated as a glob pattern).
 
 ## Resolved Questions
 
@@ -508,7 +506,9 @@ All UI changes described in the spec. Several items deviated from the original d
 
 9. **~~Buffer pressure discovery.~~** Clicking the truncation banner opens the Keep namespace panel sorted by buffer count descending. No new UI -- just wiring the existing banner to the existing panel. The banner text includes "Adjust keep filter" to signal interactivity.
 
-10. **~~Naming.~~** `gg-keep` / `DROPPED:` / `gg-show`. Other candidates explored:
+10. **~~`GG_ENABLED` / `VITE_GG_ENABLED` unification.~~** The gg Vite plugin (`ggCallSitesPlugin`) now aliases `GG_ENABLED` → `VITE_GG_ENABLED` at build time via `define`, so users set only one variable. `VITE_GG_ENABLED` still works explicitly and takes precedence. SSR reads `process.env.GG_ENABLED` directly (unchanged). The browser path in `isGgEnabled()` now handles both `'true'` and `'false'` (previously only `'false'` was checked).
+
+11. **~~Naming.~~** `gg-keep` / `DROPPED:` / `gg-show`. Other candidates explored:
 
 | Layer 1 (buffer gate) | Sentinel prefix | Layer 2 (panel + console) |
 | --------------------- | --------------- | ------------------------- |
