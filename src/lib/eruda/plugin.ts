@@ -1630,31 +1630,46 @@ export function createGgPlugin(
 	function renderPipelineUI() {
 		if (!$el) return;
 
-		// recv node: "N total loggs (M ns)"
+		const keptNs = allNamespacesSet.size;
+		const droppedNs = droppedNamespaces.size;
+		const totalNs = keptNs + droppedNs;
+		const visNs = enabledNamespaces.size;
+
+		// recv node: "N total loggs" (no ns count — it moves to the keep button)
 		const recvNode = $el.find('.gg-pipeline-recv').get(0) as HTMLElement | undefined;
 		if (recvNode) {
-			const nsCount = receivedNsSet.size;
-			recvNode.textContent = `${receivedTotal} total loggs${nsCount ? ' (' + nsCount + ' ns)' : ''}`;
+			recvNode.textContent = `${receivedTotal} total loggs`;
 		}
 
-		// buf node: buffer.size / buffer.capacity, kept NS count
+		// keep handle: "keep N/N namespaces" (kept ns / total ns ever seen)
+		const keepHandle = $el.find('.gg-pipeline-keep-handle').get(0) as HTMLElement | undefined;
+		if (keepHandle) {
+			const countStr = totalNs ? ` ${keptNs}/${totalNs} namespaces` : '';
+			// Preserve active class — only update text content
+			keepHandle.textContent = `keep${countStr}`;
+		}
+
+		// buf node: buffer.size / buffer.capacity (no ns count — moved to keep button)
 		const bufNode = $el.find('.gg-pipeline-buf').get(0) as HTMLElement | undefined;
 		if (bufNode) {
 			const bufSize = buffer.size;
 			const bufCap = buffer.capacity;
-			const keptNs = allNamespacesSet.size;
 			const full = bufSize >= bufCap;
-			const capStr = full ? `${bufSize}/${bufCap} ⚠` : `${bufSize}/${bufCap}`;
-			bufNode.textContent = `${capStr}${keptNs ? ' · ' + keptNs + ' ns' : ''}`;
+			bufNode.textContent = full ? `${bufSize}/${bufCap} ⚠` : `${bufSize}/${bufCap}`;
 			bufNode.style.color = full ? '#b94' : '';
 		}
 
-		// vis node: "N loggs shown (M ns)"
+		// show handle: "show N/N namespaces" (visible ns / kept ns)
+		const showHandle = $el.find('.gg-pipeline-show-handle').get(0) as HTMLElement | undefined;
+		if (showHandle) {
+			const countStr = keptNs ? ` ${visNs}/${keptNs} namespaces` : '';
+			showHandle.textContent = `show${countStr}`;
+		}
+
+		// vis node: "N loggs shown" (no ns count — moved to show button)
 		const visNode = $el.find('.gg-pipeline-vis').get(0) as HTMLElement | undefined;
 		if (visNode) {
-			const visCount = filteredIndices.length;
-			const visNs = enabledNamespaces.size;
-			visNode.textContent = `${visCount} loggs shown${visNs ? ' (' + visNs + ' ns)' : ''}`;
+			visNode.textContent = `${filteredIndices.length} loggs shown`;
 		}
 	}
 
@@ -1905,6 +1920,10 @@ export function createGgPlugin(
 				input.focus();
 				input.select();
 
+				const restore = () => {
+					input.remove();
+					renderPipelineUI(); // restores text content
+				};
 				const apply = () => {
 					const val = parseInt(input.value, 10);
 					if (!isNaN(val) && val > 0 && val !== current) {
@@ -1912,7 +1931,7 @@ export function createGgPlugin(
 						localStorage.setItem(BUFFER_CAP_KEY, String(val));
 						renderLogs();
 					}
-					renderPipelineUI(); // restores text content
+					restore();
 				};
 				input.addEventListener('blur', apply);
 				input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -1922,7 +1941,7 @@ export function createGgPlugin(
 					}
 					if (e.key === 'Escape') {
 						input.removeEventListener('blur', apply);
-						renderPipelineUI();
+						restore();
 					}
 				});
 				// Stop click from immediately re-triggering
