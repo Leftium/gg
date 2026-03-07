@@ -60,6 +60,70 @@ export function shouldLoadEruda(options: GgErudaOptions): boolean {
 }
 
 /**
+ * Adjusts document.body padding-bottom to match the Eruda panel height so
+ * the page remains fully scrollable while the panel is open.
+ *
+ * Mirrors the TanStack Router devtools approach: inject padding when visible,
+ * removed when hidden. A ResizeObserver tracks panel resizes (e.g. the user
+ * drags it taller or shorter).
+ *
+ * Implementation notes:
+ * - Eruda uses shadow DOM by default, so #eruda.shadowRoot must be queried
+ * - The visible panel is .eruda-dev-tools inside .eruda-container
+ * - Eruda appends its DOM asynchronously, so we poll with rAF until it appears
+ */
+function setupBodyPadding(
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	eruda: any,
+	initiallyOpen: boolean
+): void {
+	let attempts = 0;
+
+	function trySetup(): void {
+		const host = document.getElementById('eruda');
+		const root = host?.shadowRoot ?? host;
+		const container = root?.querySelector('.eruda-container') as HTMLElement | null;
+		const panel = container?.querySelector('.eruda-dev-tools') as HTMLElement | null;
+
+		if (!panel) {
+			if (++attempts < 60) requestAnimationFrame(trySetup);
+			return;
+		}
+
+		let observer: ResizeObserver | null = null;
+
+		function applyPadding(): void {
+			const h = panel!.offsetHeight;
+			document.body.style.paddingBottom = `${h}px`;
+			// Ensure the document is tall enough to scroll even on short pages.
+			document.documentElement.style.minHeight = `calc(100vh + ${h}px)`;
+		}
+
+		function clearPadding(): void {
+			document.body.style.paddingBottom = '';
+			document.documentElement.style.minHeight = '';
+			observer?.disconnect();
+			observer = null;
+		}
+
+		function startObserving(): void {
+			if (observer) return;
+			observer = new ResizeObserver(applyPadding);
+			observer.observe(panel!);
+			applyPadding();
+		}
+
+		const devTools = eruda.get();
+		devTools.on('show', startObserving);
+		devTools.on('hide', clearPadding);
+
+		if (initiallyOpen) startObserving();
+	}
+
+	requestAnimationFrame(trySetup);
+}
+
+/**
  * Dynamically imports and initializes Eruda
  */
 export async function loadEruda(options: GgErudaOptions): Promise<void> {
@@ -103,6 +167,10 @@ export async function loadEruda(options: GgErudaOptions): Promise<void> {
 		if (options.open) {
 			eruda.show();
 		}
+
+		// Adjust body padding-bottom so the page remains fully scrollable while
+		// the panel is open — mirrors the TanStack Router devtools pattern.
+		setupBodyPadding(eruda, options.open ?? false);
 
 		// Run diagnostics after Eruda is ready so they appear in Console tab
 		await runGgDiagnostics();
