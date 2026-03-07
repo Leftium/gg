@@ -332,15 +332,18 @@ jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
 
 **Querying with `jq`:**
 
-In SSR apps, every `gg()` call in a component fires twice — once server-side, once on hydration — doubling entry count. **Default to `env=client` unless you specifically need the server side.** Only read both when investigating a hydration mismatch.
+In SSR apps, component `gg()` calls fire on both server and client — the file contains both. Pick the side you need, or use the dedup query for a full picture without duplicates:
 
 ```bash
-# Client-side only (default — avoids SSR duplicates)
+# Check the split first
+jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
+
+# Client-side only (component behavior, user interactions)
 jq 'select(.env == "client")' .gg/logs-5173.jsonl
 # or via HTTP:
 curl -s "http://localhost:5173/__gg/logs?env=client"
 
-# Server-side only (load functions, API routes)
+# Server-side only (load functions, API routes, auth)
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
 
 # Errors only
@@ -354,6 +357,17 @@ jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
 
 # Count entries by namespace
 jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
+
+# SSR full picture without duplicates — all server entries + client-only entries
+# (onMount etc). Drops client entries that have a matching server entry at the same
+# [ns, line], since the server entry is the canonical first-render value.
+jq -s '
+  (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
+  map(select(
+    .env == "server" or
+    (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
+  ))
+' .gg/logs-5173.jsonl
 
 # SSR hydration mismatches — call sites where server and client produced different values.
 # Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
@@ -385,7 +399,7 @@ curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
 curl -s http://localhost:5173/__gg/
 ```
 
-The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. In SSR apps, filter by `env=client` by default — every component `gg()` call fires on both server and client, so unfiltered reads contain twice the entries. Only read both sides when investigating a hydration mismatch. The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both are open.
+The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. In SSR apps, component `gg()` calls appear twice — once as `env:"server"`, once as `env:"client"`. Filter to the side you need, or use the dedup `jq` query above for a full picture without duplicates. The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both are open.
 
 **Add to your project's `AGENTS.md`** -- see [Agent Instructions Template](specs/gg-agent-file-sink.md#agent-instructions-template-for-consuming-projects-agentsmd) in the spec for a copy-paste-ready block to add to consuming projects.
 

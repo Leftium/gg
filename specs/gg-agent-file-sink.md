@@ -561,17 +561,26 @@ This project uses `@leftium/gg` with the file sink plugin. All `gg()` calls — 
 
 3. **Trigger** — Ask the user to perform the action under investigation (page load, button click, form submit, etc.). Wait for the user to confirm they're done.
 
-4. **Query** — Read and filter the log entries. In SSR apps, filter by `env=client` by default — every component `gg()` call fires on both server and client, so unfiltered reads contain twice the entries. Only read both sides when investigating a hydration mismatch.
+4. **Query** — Read and filter the log entries. In SSR apps, component `gg()` calls appear twice — once as `env:"server"`, once as `env:"client"`. Pick the side you need, or use the dedup query for a full picture without duplicates.
 
    ```bash
-   # Client-side only (default — avoids SSR duplicates)
+   # Check the split first
+   jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
+
+   # Client-side only (component behavior, user interactions)
    curl -s "http://localhost:5173/__gg/logs?env=client"
 
-   # Or query the file directly with jq
-   jq 'select(.env == "client")' .gg/logs-5173.jsonl
-
-   # Server-side only (load functions, API routes)
+   # Server-side only (load functions, API routes, auth)
    curl -s "http://localhost:5173/__gg/logs?env=server"
+
+   # Full picture without duplicates (server entries + client-only entries)
+   jq -s '
+     (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
+     map(select(
+       .env == "server" or
+       (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
+     ))
+   ' .gg/logs-5173.jsonl
 
    # Errors only
    jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
@@ -597,11 +606,23 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 **Querying with `jq` (preferred):**
 
 ```bash
-# Client-side only (default — avoids SSR duplicates)
+# Check the env split first (useful in SSR apps)
+jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
+
+# Client-side only (component behavior, user interactions)
 jq 'select(.env == "client")' .gg/logs-5173.jsonl
 
-# Server-side only (load functions, API routes)
+# Server-side only (load functions, API routes, auth)
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
+
+# Full picture without SSR duplicates — server entries + client-only entries (e.g. onMount)
+jq -s '
+  (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
+  map(select(
+    .env == "server" or
+    (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
+  ))
+' .gg/logs-5173.jsonl
 
 # Errors only
 jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
