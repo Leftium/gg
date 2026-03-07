@@ -261,16 +261,9 @@ if (import.meta.hot) {
 		},
 
 		configureServer(server) {
-			// Resolve port and log file path
-			const resolveLogFile = () => {
-				const port = server.config.server.port ?? 5173;
-				const dir = options.dir ? path.resolve(options.dir) : path.resolve(process.cwd(), '.gg');
-				fs.mkdirSync(dir, { recursive: true });
-				return path.join(dir, `logs-${port}.jsonl`);
-			};
-
-			// Truncate/create log file on server start
-			// Use httpServer listen event to get the actual resolved port
+			// Truncate/create log file once the actual port is known.
+			// appendEntry() guards with `if (!logFile) return` for the brief window
+			// before listening fires, so no entries are written to the wrong file.
 			server.httpServer?.once('listening', () => {
 				const addr = server.httpServer?.address();
 				const port =
@@ -280,10 +273,6 @@ if (import.meta.hot) {
 				logFile = path.join(dir, `logs-${port}.jsonl`);
 				fs.writeFileSync(logFile, '');
 			});
-
-			// Fallback: resolve before listen if httpServer not available yet
-			logFile = resolveLogFile();
-			fs.writeFileSync(logFile, '');
 
 			// Expose appendFileSync + logFile path via globalThis so the SSR-injected
 			// listener (running in Vite's separate module runner context) can write to the
