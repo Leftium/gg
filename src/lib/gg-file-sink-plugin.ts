@@ -203,6 +203,46 @@ if (import.meta.hot) {
 				}
 			});
 
+			// /__gg/ index — JSON status for agents and developers
+			server.middlewares.use('/__gg', (req, res, next) => {
+				const pathname = url.parse(req.url || '').pathname || '';
+				// Only handle exact /__gg or /__gg/ — let other /__gg/* routes fall through
+				if (pathname !== '' && pathname !== '/') return next();
+				if (req.method?.toUpperCase() !== 'GET') return next();
+
+				let entries = 0;
+				try {
+					const content = fs.readFileSync(logFile, 'utf-8');
+					entries = content.split('\n').filter((l) => l.trim()).length;
+				} catch {
+					// file not yet created — leave entries at 0
+				}
+
+				const port = (() => {
+					const addr = server.httpServer?.address();
+					return addr && typeof addr === 'object' ? addr.port : (server.config.server.port ?? 5173);
+				})();
+
+				const body = JSON.stringify(
+					{
+						plugin: 'gg-file-sink',
+						logFile: `.gg/logs-${port}.jsonl`,
+						entries,
+						endpoints: {
+							'GET /__gg/logs': 'read JSONL log entries (?filter=, ?since=, ?env=, ?origin=)',
+							'DELETE /__gg/logs': 'truncate log file',
+							'GET /__gg/project-root': 'project root path'
+						}
+					},
+					null,
+					2
+				);
+
+				res.statusCode = 200;
+				res.setHeader('Content-Type', 'application/json; charset=utf-8');
+				res.end(body);
+			});
+
 			// /__gg/logs middleware
 			server.middlewares.use('/__gg/logs', (req, res) => {
 				const method = req.method?.toUpperCase();
