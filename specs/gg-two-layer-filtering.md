@@ -325,18 +325,19 @@ No migration logic. Clean break. The old keys (`gg-filter`, `debug`) will be ign
 
 ### Browser (localStorage)
 
-| Key                   | Type         | Default       | Purpose                                           |
-| --------------------- | ------------ | ------------- | ------------------------------------------------- |
-| `gg-enabled`          | boolean      | `true` in dev | Production activation flag (unchanged)            |
-| `gg-keep`             | glob pattern | `*`           | Layer 1: which loggs enter the ring buffer        |
-| `gg-show`             | glob pattern | `*`           | Layer 2: which loggs are shown in panel + console |
-| `gg-console`          | boolean      | `true`        | Whether shown loggs also go to native console     |
-| `gg-show-expressions` | boolean      | `true`        | Expression visibility (unchanged)                 |
-| `gg-ns-action`        | string       | `'open'`      | Namespace click action (unchanged)                |
-| `gg-editor-bin`       | string       | `''`          | Editor binary for open-in-editor (unchanged)      |
-| `gg-copy-format`      | string       | `''`          | Copy format template (unchanged)                  |
-| `gg-url-format`       | string       | `''`          | URL format template (unchanged)                   |
-| `gg-project-root`     | string       | `''`          | Project root path (unchanged)                     |
+| Key                   | Type         | Default       | Purpose                                               |
+| --------------------- | ------------ | ------------- | ----------------------------------------------------- |
+| `gg-enabled`          | boolean      | `true` in dev | Production activation flag (unchanged)                |
+| `gg-keep`             | glob pattern | `*`           | Layer 1: which loggs enter the ring buffer            |
+| `gg-show`             | glob pattern | `*`           | Layer 2: which loggs are shown in panel + console     |
+| `gg-console`          | boolean      | `true`        | Whether shown loggs also go to native console         |
+| `gg-show-expressions` | boolean      | `true`        | Expression visibility (unchanged)                     |
+| `gg-buffer-cap`       | number       | `2000`        | Ring buffer capacity (overrides `options.maxEntries`) |
+| `gg-ns-action`        | string       | `'open'`      | Namespace click action (unchanged)                    |
+| `gg-editor-bin`       | string       | `''`          | Editor binary for open-in-editor (unchanged)          |
+| `gg-copy-format`      | string       | `''`          | Copy format template (unchanged)                      |
+| `gg-url-format`       | string       | `''`          | URL format template (unchanged)                       |
+| `gg-project-root`     | string       | `''`          | Project root path (unchanged)                         |
 
 ### Server (environment variables)
 
@@ -448,18 +449,36 @@ Data layer only. The tracker is wired up but sentinels are not yet rendered in t
 - [x] **`DroppedNamespaceInfo` map** — maintained outside the ring buffer in `plugin.ts`. Updated by the `gg-keep` gate on each dropped logg.
 - [x] **Sentinel data available** — `getDroppedNamespaces()` returns the map for consumers (file sink, future UI).
 
-### Phase 3 — Full UI [ ]
+### Phase 3 — Full UI [x]
 
-All UI changes described in the spec.
+All UI changes described in the spec. Several items deviated from the original design — see implementation notes below.
 
-- [ ] **New toolbar** — two rows: Keep filter input + "Namespaces: N/M" button; Show filter input + "Namespaces: N/M" button.
-- [ ] **Dropped sentinel section** — fixed-at-top section showing `DROPPED:ns` rows with `[+]` keep icon, count, and preview. Debounced updates.
-- [ ] **Per-logg icons** — `[x]` hide (existing, now targets `gg-show`), `[-]` drop (new, targets `gg-keep`). Dropped sentinels show `[+]` keep icon.
-- [ ] **Drop/Keep toasts** — segment-level control toasts mirroring existing hide toast.
-- [ ] **Truncation banner update** — include dropped counts; clickable to open Keep namespace panel.
-- [ ] **Empty state update** — show `[Keep All]` button when `gg-keep` is restrictive and buffer is empty.
-- [ ] **Settings panel update** — remove Sync/Clear buttons and `localStorage.debug` display; add `gg-console` toggle.
-- [ ] **Keep namespace panel** — separate checkbox panel for `gg-keep` (split from existing filter panel which becomes `gg-show` only).
+- [x] **Pipeline toolbar** — replaces the two-row Keep/Show inputs with a single horizontal pipeline row: `[N total loggs (M ns)] → keep → [size/cap · ns] → show → [N loggs shown (M ns)]`. The `keep` and `show` handles are clickable buttons that toggle their respective panels open/closed (mutually exclusive). Replaces the `<details>`/`<summary>` expand approach. On overflow the row wraps to two lines (CSS `flex-wrap`).
+- [x] **Keep panel** — inline panel below pipeline, hidden by default, opened by clicking `keep` handle. Contains: pattern input (persisted to `gg-keep`), namespace count summary, checkbox list (ALL + top 5 by count + other). Checkbox state reflects `gg-keep` pattern; unchecked = dropped. Namespace list includes: buffered NS (`allNamespacesSet`), runtime-dropped NS (`droppedNamespaces`), and NS extracted from pattern exclusions (so pattern-excluded NS show as unchecked even before loggs arrive).
+- [x] **Show panel** — same structure as Keep panel, opened by clicking `show` handle. Contains: pattern input (persisted to `gg-show`), checkbox list. Input value synced on every `renderFilterUI()` call so external changes (hide button, undo, right-click) are reflected immediately.
+- [x] **Dropped sentinel section** — fixed-at-top section above log container (sibling, not child — survives `logContainer.html()` re-renders). Collapsible header. Rows show namespace, drop count, type breakdown, preview of most recent dropped logg, and `[+]` keep icon. Sorted by total count descending. Updates debounced via `requestAnimationFrame`.
+- [x] **Per-logg icons** — eye-slash SVG (`gg-ns-hide`) for hide (Layer 2/`gg-show`), trash SVG (`gg-ns-drop`) for drop (Layer 1/`gg-keep`). Both use `target.closest()` for click detection (SVG child elements don't carry the class). Drop action removes NS from `enabledNamespaces` and re-renders immediately.
+- [x] **Drop toast** — `showDropToast()` added. `toastMode: 'hide' | 'drop'` state variable. Segment click handler in `wireUpToast` branches on `toastMode` to target either `filterPattern`/`SHOW_KEY` (hide) or `keepPattern`/`KEEP_KEY` (drop). `buildToastNsHTML()` shared helper.
+- [x] **`gg-show` persistence fix** — `browser.ts` `save()` no longer calls `localStorage.removeItem('gg-show')` when called with empty string. `enable('')` means console disabled (tracked via `gg-console`), not user-cleared filter. `setup()` in `common.ts` calls `enable(load())` at init; when `gg-console=false`, `load()` returns `''`, previously wiping the saved Show filter on every page load.
+- [x] **Buffer pipeline node** — shows `size/cap ⚠` (amber) when buffer full. Clicking the node replaces its text with a number input to change capacity in-place (Enter/blur applies, Escape cancels). New capacity persisted to `gg-buffer-cap` and loaded at init. `LogBuffer.resize(n)` method added — preserves existing entries up to new capacity.
+- [x] **`receivedTotal` / `receivedNsSet`** — counters incremented before the keep gate so "total loggs" reflects everything gg received, including dropped. Reset on Clear.
+- [x] **Truncation banner removed** — replaced by the buffer pipeline node (`2000/2000 ⚠`). `updateTruncationBanner()` stubbed as no-op.
+- [x] **Settings panel** — `gg-console` toggle present (Phase 1). Sync/Clear buttons removed.
+
+#### Deviations from original spec design
+
+| Spec said                                            | Implemented instead                                        | Reason                                                                                  |
+| ---------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Two-row toolbar (Keep row + Show row)                | Single pipeline row with nodes + handle buttons            | More compact (~28px vs ~60px), shows data flow visually, scales to mobile via flex-wrap |
+| Truncation banner updated with dropped counts        | Banner removed; buffer node shows `size/cap ⚠`             | Pipeline node is always visible; banner was redundant and easy to miss                  |
+| Keep toast for sentinel `[+]` icon                   | `[+]` directly removes exclusion from `gg-keep` (no toast) | Simpler; the sentinel disappears immediately as confirmation                            |
+| `gg-show` persistence via `localStorage.debug` alias | `gg-show` key used directly throughout                     | Phase 1 already fully migrated away from `localStorage.debug`                           |
+
+#### Not yet implemented (out of scope / deferred)
+
+- [ ] **Empty state update** — "Keep All" button when `gg-keep` is restrictive and buffer is empty.
+- [ ] **Segment-level keep toast** — clicking `[+]` on sentinel currently just removes the exclusion directly; the spec calls for a toast with segment-level glob choices.
+- [ ] **`DROPPED:*` show-filter support** — sentinels are rendered from a separate section, not from `filteredIndices`, so `gg-show = 'DROPPED:*'` does not currently filter them.
 
 ---
 

@@ -44,11 +44,13 @@ describe('browser debug', () => {
 			expect(storage.get('gg-show')).toBe('foo,bar');
 		});
 
-		it('save removes localStorage[gg-show] when empty', () => {
+		it('save preserves localStorage[gg-show] when enable called with empty (console disabled)', () => {
 			debug.enable('foo');
 			expect(storage.get('gg-show')).toBe('foo');
+			// enable('') means console is disabled, not that the user cleared the filter.
+			// gg-show must NOT be wiped — it is the persisted Show filter pattern.
 			debug.enable('');
-			expect(storage.has('gg-show')).toBe(false);
+			expect(storage.get('gg-show')).toBe('foo');
 		});
 
 		it('load reads from localStorage[gg-show]', () => {

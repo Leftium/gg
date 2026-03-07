@@ -66,11 +66,13 @@ function formatArgs(this: Debugger, args: unknown[]): void {
 
 function save(namespaces: string): void {
 	try {
+		// Only persist non-empty patterns. Empty string means "console disabled"
+		// (gg-console=false), not a user-set filter — don't wipe gg-show in that case.
 		if (namespaces) {
 			localStorage.setItem('gg-show', namespaces);
-		} else {
-			localStorage.removeItem('gg-show');
 		}
+		// Intentionally no removeItem: gg-show is the Show filter, persisted independently.
+		// Console-disabled state is tracked via gg-console, not by clearing gg-show.
 	} catch {
 		// localStorage may not be available
 	}

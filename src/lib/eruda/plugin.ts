@@ -40,7 +40,13 @@ export function createGgPlugin(
 		removeLogListener?: (callback: (entry: CapturedEntry) => void) => void;
 	}
 ) {
-	const buffer = new LogBuffer(options.maxEntries ?? 2000);
+	const _savedCap =
+		typeof localStorage !== 'undefined'
+			? parseInt(localStorage.getItem('gg-buffer-cap') ?? '', 10)
+			: NaN;
+	const buffer = new LogBuffer(
+		!isNaN(_savedCap) && _savedCap > 0 ? _savedCap : (options.maxEntries ?? 2000)
+	);
 	// The licia jQuery-like wrapper Eruda passes to init()
 	let $el: LiciaElement | null = null;
 	let expanderAttached = false;
@@ -48,7 +54,6 @@ export function createGgPlugin(
 	// null = auto (fit content), number = user-dragged px width
 	let nsColWidth: number | null = null;
 	// Filter UI state
-	let filterExpanded = false;
 	let filterPattern = '';
 	const enabledNamespaces = new Set<string>();
 
@@ -64,9 +69,16 @@ export function createGgPlugin(
 	const expandedDetails = new Set<string>();
 	const expandedStacks = new Set<string>();
 
-	// Toast state for "namespace hidden" feedback
+	// Toast state
 	let lastHiddenPattern: string | null = null; // filterPattern before the hide (for undo)
+	let lastDroppedPattern: string | null = null; // keepPattern before the drop (for undo)
+	let toastMode: 'hide' | 'drop' = 'hide'; // which layer the current toast targets
 	let hasSeenToastExplanation = false; // first toast auto-expands help text
+
+	// Sentinel section debounce: pending rAF for re-rendering dropped sentinels
+	let sentinelRenderPending = false;
+	// Whether the sentinel section is expanded (persists across re-renders)
+	let sentinelExpanded = true;
 
 	// Settings UI state
 	let settingsExpanded = false;
@@ -88,6 +100,7 @@ export function createGgPlugin(
 	const KEEP_KEY = 'gg-keep'; // Layer 1: which loggs enter the ring buffer
 	const CONSOLE_KEY = 'gg-console'; // Whether shown loggs also go to native console
 	const SHOW_EXPRESSIONS_KEY = 'gg-show-expressions';
+	const BUFFER_CAP_KEY = 'gg-buffer-cap'; // Ring buffer capacity (maxEntries)
 
 	// Backward-compat alias (old key name — ignored after migration)
 	const LEGACY_FILTER_KEY = 'gg-filter';
@@ -109,6 +122,10 @@ export function createGgPlugin(
 	// Phase 2: loggs dropped by the keep gate, tracked outside the ring buffer.
 	// Key: namespace string. Grows with distinct dropped namespaces (expected: tens, not thousands).
 	const droppedNamespaces = new Map<string, DroppedNamespaceInfo>();
+
+	// Total loggs ever received (kept + dropped), and distinct namespaces ever seen (including dropped).
+	let receivedTotal = 0;
+	const receivedNsSet = new Set<string>();
 
 	// Plugin detection state (probed once at init)
 	let openInEditorPluginDetected: boolean | null = null; // null = not yet probed
@@ -219,8 +236,10 @@ export function createGgPlugin(
 
 			// Load filter state BEFORE registering _onLog hook, because registering
 			// triggers replay of earlyLogBuffer and each entry checks filterPattern
-			filterPattern =
-				localStorage.getItem(SHOW_KEY) || localStorage.getItem(LEGACY_FILTER_KEY) || '*';
+			const _legacyFilter = localStorage.getItem(LEGACY_FILTER_KEY);
+			// Strip old gg: prefix from legacy values (Phase 1 dropped the namespace prefix)
+			const _legacyNormalized = _legacyFilter ? _legacyFilter.replace(/\bgg:/g, '') || '*' : null;
+			filterPattern = localStorage.getItem(SHOW_KEY) || _legacyNormalized || '*';
 			keepPattern = localStorage.getItem(KEEP_KEY) || '*';
 			showExpressions = localStorage.getItem(SHOW_EXPRESSIONS_KEY) === 'true';
 
@@ -240,8 +259,13 @@ export function createGgPlugin(
 			// Re-calling enable() with the right pattern updates which namespaces output to console.
 			import('../debug/index.js').then(({ default: dbg }) => {
 				try {
-					const pattern = ggConsoleEnabled ? filterPattern || '*' : '';
-					dbg.enable(pattern);
+					// Only call enable() when console output is on — enable('') would
+					// call localStorage.removeItem('gg-show'), wiping the persisted Show filter.
+					// When console is disabled, load() in browser.ts already returns '' via
+					// the gg-console=false check, so no enable() call is needed.
+					if (ggConsoleEnabled) {
+						dbg.enable(filterPattern || '*');
+					}
 				} catch {
 					// ignore
 				}
@@ -250,6 +274,10 @@ export function createGgPlugin(
 			// Register the capture hook on gg (prefer multi-listener API, fall back to legacy)
 			if (gg) {
 				const onEntry = (entry: CapturedEntry) => {
+					// Track total received (before any filtering)
+					receivedTotal++;
+					receivedNsSet.add(entry.namespace);
+
 					// Layer 1: Keep gate — drop loggs that don't match gg-keep
 					const effectiveKeep = keepPattern || '*';
 					if (!namespaceMatchesPattern(entry.namespace, effectiveKeep)) {
@@ -271,6 +299,8 @@ export function createGgPlugin(
 								preview: entry
 							});
 						}
+						// Schedule debounced sentinel re-render
+						scheduleSentinelRender();
 						return;
 					}
 
@@ -339,6 +369,7 @@ export function createGgPlugin(
 			wireUpExpanders();
 			wireUpResize();
 			wireUpFilterUI();
+			wireUpKeepUI();
 			wireUpSettingsUI();
 			wireUpToast();
 			// Discard any entries queued during early-buffer replay (before the DOM
@@ -387,6 +418,8 @@ export function createGgPlugin(
 			allNamespacesSet.clear();
 			droppedNamespaces.clear();
 			filteredIndices = [];
+			receivedTotal = 0;
+			receivedNsSet.clear();
 		},
 
 		/** Returns a read-only view of the dropped-namespace tracking map (Phase 2 data layer). */
@@ -394,6 +427,31 @@ export function createGgPlugin(
 			return droppedNamespaces;
 		}
 	};
+
+	function toggleKeepNamespace(namespace: string, enable: boolean) {
+		const currentPattern = keepPattern || '*';
+		const ns = namespace.trim();
+		const parts = currentPattern
+			.split(',')
+			.map((p) => p.trim())
+			.filter(Boolean);
+
+		if (enable) {
+			// Remove exclusion — namespace is now kept
+			const filtered = parts.filter((p) => p !== `-${ns}`);
+			keepPattern = filtered.join(',') || '*';
+			// Remove from droppedNamespaces so sentinel disappears
+			droppedNamespaces.delete(ns);
+		} else {
+			// Add exclusion — namespace is dropped
+			const exclusion = `-${ns}`;
+			if (!parts.includes(exclusion)) parts.push(exclusion);
+			keepPattern = parts.join(',');
+		}
+
+		keepPattern = simplifyPattern(keepPattern) || '*';
+		localStorage.setItem(KEEP_KEY, keepPattern);
+	}
 
 	function toggleNamespace(namespace: string, enable: boolean) {
 		const currentPattern = filterPattern || '*';
@@ -560,6 +618,37 @@ export function createGgPlugin(
 		return `3.5em ${ns} 4px 1fr`;
 	}
 
+	// ─── Inline SVG icons ────────────────────────────────────────────────────
+	// All icons use currentColor so they inherit the namespace color on log rows
+	// or the green tint on sentinel keep buttons.
+	const SVG_ATTR = `viewBox="0 0 12 12" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"`;
+
+	/** Eye with diagonal slash — hide from view (Layer 2 / gg-show) */
+	const ICON_HIDE =
+		`<svg ${SVG_ATTR}>` +
+		`<path d="M1 6 C2.5 2.5 9.5 2.5 11 6 C9.5 9.5 2.5 9.5 1 6"/>` +
+		`<circle cx="6" cy="6" r="1.5" fill="currentColor" stroke="none"/>` +
+		`<line x1="9.5" y1="1.5" x2="2.5" y2="10.5"/>` +
+		`</svg>`;
+
+	/** Trash can — drop from buffer (Layer 1 / gg-keep) */
+	const ICON_DROP =
+		`<svg ${SVG_ATTR}>` +
+		`<line x1="2" y1="3.5" x2="10" y2="3.5"/>` +
+		`<path d="M4.5 3.5V2.5h3v1"/>` +
+		`<path d="M3 3.5l.5 7h5l.5-7"/>` +
+		`<line x1="5" y1="5.5" x2="5" y2="9"/>` +
+		`<line x1="7" y1="5.5" x2="7" y2="9"/>` +
+		`</svg>`;
+
+	/** Plus inside a circle — keep in buffer (Layer 1 / gg-keep) */
+	const ICON_KEEP =
+		`<svg ${SVG_ATTR}>` +
+		`<circle cx="6" cy="6" r="4.5"/>` +
+		`<line x1="6" y1="3.5" x2="6" y2="8.5"/>` +
+		`<line x1="3.5" y1="6" x2="8.5" y2="6"/>` +
+		`</svg>`;
+
 	function buildHTML(): string {
 		return `
 			<style>
@@ -652,25 +741,213 @@ export function createGgPlugin(
 			text-overflow: ellipsis;
 			min-width: 0;
 		}
-	.gg-ns-hide {
+	.gg-ns-hide,
+	.gg-ns-drop {
 		all: unset;
 		cursor: pointer;
 		opacity: 0;
-		font-size: 14px;
-		font-weight: bold;
-		line-height: 1;
-		padding: 1px 4px;
-		transition: opacity 0.15s;
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 3px;
+		border-radius: 3px;
+		transition: opacity 0.15s, background 0.1s;
 		flex-shrink: 0;
 	}
-		.gg-log-ns:hover .gg-ns-hide {
-			opacity: 0.4;
+	.gg-ns-hide svg,
+	.gg-ns-drop svg,
+	.gg-sentinel-keep svg {
+		pointer-events: none;
+	}
+		.gg-log-ns:hover .gg-ns-hide,
+		.gg-log-ns:hover .gg-ns-drop {
+			opacity: 0.35;
 		}
 		.gg-ns-hide:hover {
 			opacity: 1 !important;
 			background: rgba(0,0,0,0.08);
-			border-radius: 3px;
 		}
+		.gg-ns-drop:hover {
+			opacity: 1 !important;
+			background: rgba(200,50,0,0.12);
+		}
+	/* Sentinel section: collapsible above log container */
+	.gg-sentinel-section {
+		flex-shrink: 0;
+		background: #f9f9f9;
+		border-bottom: 2px solid rgba(0,0,0,0.1);
+	}
+	.gg-sentinel-header {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 10px;
+		cursor: pointer;
+		font-size: 11px;
+		opacity: 0.6;
+		user-select: none;
+	}
+	.gg-sentinel-header:hover {
+		opacity: 1;
+		background: rgba(0,0,0,0.03);
+	}
+	.gg-sentinel-toggle {
+		font-size: 10px;
+	}
+	.gg-sentinel-rows {
+		max-height: 120px;
+		overflow-y: auto;
+	}
+	.gg-sentinel-rows.collapsed {
+		display: none;
+	}
+	.gg-sentinel-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 6px;
+		padding: 5px 10px 4px;
+		border-bottom: 1px solid rgba(0,0,0,0.04);
+		color: #888;
+		font-family: monospace;
+		font-size: 12px;
+	}
+	.gg-sentinel-row:last-child {
+		border-bottom: none;
+	}
+	.gg-sentinel-keep {
+		all: unset;
+		cursor: pointer;
+		color: #4caf50;
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 3px;
+		border-radius: 3px;
+		transition: background 0.1s;
+	}
+	.gg-sentinel-keep:hover {
+		background: rgba(76,175,80,0.15);
+	}
+	.gg-sentinel-ns {
+		font-weight: bold;
+		color: #777;
+	}
+	.gg-sentinel-count {
+		color: #999;
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+	.gg-sentinel-preview {
+		color: #aaa;
+		font-style: italic;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
+		flex: 1;
+	}
+	/* Pipeline row */
+	.gg-pipeline {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 2px;
+		padding: 3px 2px;
+		flex-shrink: 0;
+		margin-bottom: 2px;
+	}
+	.gg-pipeline-arrow {
+		font-size: 11px;
+		opacity: 0.35;
+		flex-shrink: 0;
+		user-select: none;
+	}
+	.gg-pipeline-node {
+		font-size: 11px;
+		font-family: monospace;
+		background: rgba(0,0,0,0.06);
+		border-radius: 4px;
+		padding: 2px 6px;
+		white-space: nowrap;
+		color: #444;
+		border: none;
+		cursor: default;
+	}
+	button.gg-pipeline-node {
+		cursor: pointer;
+	}
+	button.gg-pipeline-node:hover {
+		background: rgba(0,0,0,0.11);
+	}
+	.gg-buf-size-input {
+		width: 5em;
+		font-family: monospace;
+		font-size: 11px;
+		padding: 1px 4px;
+		border: 1px solid rgba(0,0,0,0.25);
+		border-radius: 3px;
+		background: #fff;
+	}
+	.gg-pipeline-handle {
+		all: unset;
+		font-size: 10px;
+		font-family: monospace;
+		color: #888;
+		cursor: pointer;
+		padding: 1px 5px;
+		border-radius: 3px;
+		border: 1px solid rgba(0,0,0,0.15);
+		white-space: nowrap;
+		transition: background 0.1s, color 0.1s;
+		user-select: none;
+	}
+	.gg-pipeline-handle:hover,
+	.gg-pipeline-handle.active {
+		background: rgba(0,0,0,0.08);
+		color: #222;
+	}
+	.gg-pipeline-handle.active {
+		border-color: rgba(0,0,0,0.3);
+	}
+	/* Pipeline panels (keep / show) */
+	.gg-pipeline-panel {
+		flex-shrink: 0;
+		margin-bottom: 4px;
+	}
+	.gg-pipeline-panel-header {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 2px 2px 4px;
+	}
+	.gg-filter-label {
+		font-size: 11px;
+		opacity: 0.6;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.gg-keep-input,
+	.gg-show-input {
+		flex: 1;
+		min-width: 0;
+		padding: 3px 6px;
+		font-family: monospace;
+		font-size: 13px;
+		border: 1px solid rgba(0,0,0,0.2);
+		border-radius: 3px;
+		background: transparent;
+	}
+	.gg-filter-count {
+		font-size: 11px;
+		opacity: 0.5;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.gg-filter-details-body {
+		background: #f5f5f5;
+		padding: 8px 10px;
+		border-radius: 4px;
+		margin-bottom: 4px;
+	}
 	/* Toast bar for "namespace hidden" feedback */
 	.gg-toast {
 		display: none;
@@ -963,25 +1240,7 @@ export function createGgPlugin(
 				.gg-stack-content.expanded {
 					display: block;
 				}
-			.gg-filter-panel {
-					background: #f5f5f5;
-					padding: 10px;
-					margin-bottom: 8px;
-					border-radius: 4px;
-					flex-shrink: 0;
-					display: none;
-				}
-				.gg-filter-panel.expanded {
-					display: block;
-				}
-				.gg-filter-pattern {
-					width: 100%;
-					padding: 4px 8px;
-					font-family: monospace;
-					font-size: 16px;
-					margin-bottom: 8px;
-				}
-				.gg-filter-checkboxes {
+		.gg-filter-checkboxes {
 					display: flex;
 					flex-wrap: wrap;
 					gap: 8px;
@@ -1164,11 +1423,6 @@ export function createGgPlugin(
 					<span class="gg-btn-text">📋 <span class="gg-copy-count">Copy 0 entries</span></span>
 					<span class="gg-btn-icon" title="Copy">📋</span>
 				</button>
-			<button class="gg-filter-btn" style="text-align: left; white-space: nowrap;">
-				<span class="gg-btn-text">Namespaces: </span>
-				<span class="gg-btn-icon">NS: </span>
-				<span class="gg-filter-summary"></span>
-			</button>
 			<button class="gg-expressions-btn" style="background: ${showExpressions ? '#e8f5e9' : 'transparent'};" title="Toggle expression visibility in logs and clipboard">
 				<span class="gg-btn-text">\uD83D\uDD0D Expr</span>
 				<span class="gg-btn-icon" title="Expressions">\uD83D\uDD0D</span>
@@ -1183,9 +1437,36 @@ export function createGgPlugin(
 					<span class="gg-btn-icon" title="Clear">⊘</span>
 				</button>
 			</div>
-				<div class="gg-filter-panel"></div>
+		<div class="gg-pipeline">
+		<span class="gg-pipeline-node gg-pipeline-recv" title="Total loggs received by gg"></span>
+		<span class="gg-pipeline-arrow">→</span>
+		<button class="gg-pipeline-handle gg-pipeline-keep-handle" title="Edit keep filter (Layer 1: ring buffer gate)">keep</button>
+		<span class="gg-pipeline-arrow">→</span>
+		<button class="gg-pipeline-node gg-pipeline-buf" title="Click to change buffer size"></button>
+		<span class="gg-pipeline-arrow">→</span>
+		<button class="gg-pipeline-handle gg-pipeline-show-handle" title="Edit show filter (Layer 2: display filter)">show</button>
+		<span class="gg-pipeline-arrow">→</span>
+		<span class="gg-pipeline-node gg-pipeline-vis" title="Loggs currently visible"></span>
+		</div>
+		<div class="gg-pipeline-panel gg-keep-panel" style="display:none;">
+			<div class="gg-pipeline-panel-header">
+				<span class="gg-filter-label">Keep:</span>
+				<input class="gg-keep-input" type="text" value="${escapeHtml(keepPattern)}" placeholder="*" title="gg-keep: which loggs enter the ring buffer">
+				<span class="gg-keep-filter-summary gg-filter-count"></span>
+			</div>
+			<div class="gg-keep-filter-panel gg-filter-details-body"></div>
+		</div>
+		<div class="gg-pipeline-panel gg-show-panel" style="display:none;">
+			<div class="gg-pipeline-panel-header">
+				<span class="gg-filter-label">Show:</span>
+				<input class="gg-show-input" type="text" value="${escapeHtml(filterPattern)}" placeholder="*" title="gg-show: which kept loggs to display">
+				<span class="gg-filter-summary gg-filter-count"></span>
+			</div>
+			<div class="gg-filter-panel gg-filter-details-body"></div>
+		</div>
 				<div class="gg-settings-panel"></div>
-				<div class="gg-truncation-banner" style="display: none; padding: 6px 12px; background: #7f4f00; color: #ffe0a0; font-size: 11px; align-items: center; gap: 6px; flex-shrink: 0;"></div>
+				<div class="gg-sentinel-section" style="display: none;"></div>
+	
 				<div class="gg-log-container" style="flex: 1; overflow-y: auto; overflow-x: hidden; font-family: monospace; font-size: 12px; touch-action: pan-y; overscroll-behavior: contain;"></div>
 				<div class="gg-toast"></div>
 				<iframe class="gg-editor-iframe" hidden title="open-in-editor"></iframe>
@@ -1194,7 +1475,7 @@ export function createGgPlugin(
 	}
 
 	function applyPatternFromInput(value: string) {
-		filterPattern = value;
+		filterPattern = value || '*';
 		localStorage.setItem(SHOW_KEY, filterPattern);
 		// Sync enabledNamespaces from the new pattern
 		const allNamespaces = getAllCapturedNamespaces();
@@ -1205,49 +1486,65 @@ export function createGgPlugin(
 				enabledNamespaces.add(ns);
 			}
 		});
+		// Sync toolbar Show input value
+		if ($el) {
+			const showInput = $el.find('.gg-show-input').get(0) as HTMLInputElement | undefined;
+			if (showInput && document.activeElement !== showInput) {
+				showInput.value = filterPattern;
+			}
+		}
 		renderFilterUI();
 		renderLogs();
+	}
+
+	function applyKeepPatternFromInput(value: string) {
+		keepPattern = value || '*';
+		localStorage.setItem(KEEP_KEY, keepPattern);
+		renderKeepUI();
+		scheduleSentinelRender();
 	}
 
 	function wireUpFilterUI() {
 		if (!$el) return;
 
-		const filterBtn = $el.find('.gg-filter-btn').get(0) as HTMLElement;
 		const filterPanel = $el.find('.gg-filter-panel').get(0) as HTMLElement;
-		if (!filterBtn || !filterPanel) return;
+		if (!filterPanel) return;
 
 		renderFilterUI();
 
-		// Wire up button toggle (close settings if opening filter)
-		filterBtn.addEventListener('click', () => {
-			filterExpanded = !filterExpanded;
-			if (filterExpanded) {
-				settingsExpanded = false;
-				renderSettingsUI();
-			}
-			renderFilterUI();
-			renderLogs(); // Re-render to update grid columns
-		});
-
-		// Wire up pattern input - apply on blur or Enter
-		filterPanel.addEventListener(
-			'blur',
-			(e: FocusEvent) => {
-				const target = e.target as HTMLInputElement;
-				if (target.classList.contains('gg-filter-pattern')) {
-					applyPatternFromInput(target.value);
+		// Show handle toggles the show panel
+		const showHandle = $el.find('.gg-pipeline-show-handle').get(0) as HTMLElement | undefined;
+		const showPanel = $el.find('.gg-show-panel').get(0) as HTMLElement | undefined;
+		if (showHandle && showPanel) {
+			showHandle.addEventListener('click', () => {
+				const open = showPanel.style.display !== 'none';
+				showPanel.style.display = open ? 'none' : '';
+				showHandle.classList.toggle('active', !open);
+				// Close keep panel when opening show
+				if (!open) {
+					const keepPanel = $el?.find('.gg-keep-panel').get(0) as HTMLElement | undefined;
+					const keepHandle = $el?.find('.gg-pipeline-keep-handle').get(0) as
+						| HTMLElement
+						| undefined;
+					if (keepPanel) keepPanel.style.display = 'none';
+					if (keepHandle) keepHandle.classList.remove('active');
 				}
-			},
-			true
-		); // useCapture for blur (doesn't bubble)
+			});
+		}
 
-		filterPanel.addEventListener('keydown', (e: KeyboardEvent) => {
-			const target = e.target as HTMLInputElement;
-			if (target.classList.contains('gg-filter-pattern') && e.key === 'Enter') {
-				applyPatternFromInput(target.value);
-				target.blur();
-			}
-		});
+		// Wire up the Show input (blur or Enter)
+		const showInput = $el.find('.gg-show-input').get(0) as HTMLInputElement | undefined;
+		if (showInput) {
+			showInput.addEventListener('blur', () => {
+				applyPatternFromInput(showInput.value);
+			});
+			showInput.addEventListener('keydown', (e: KeyboardEvent) => {
+				if (e.key === 'Enter') {
+					applyPatternFromInput(showInput.value);
+					showInput.blur();
+				}
+			});
+		}
 
 		// Wire up checkboxes
 		filterPanel.addEventListener('change', (e: Event) => {
@@ -1264,7 +1561,7 @@ export function createGgPlugin(
 				} else {
 					// Deselect all
 					const exclusions = allNamespaces.map((ns) => `-${ns}`).join(',');
-					filterPattern = `gg:*,${exclusions}`;
+					filterPattern = `*,${exclusions}`;
 					enabledNamespaces.clear();
 				}
 				localStorage.setItem(SHOW_KEY, filterPattern);
@@ -1304,104 +1601,414 @@ export function createGgPlugin(
 		});
 	}
 
+	/** Update the three pipeline node labels with current counts. */
+	function renderPipelineUI() {
+		if (!$el) return;
+
+		// recv node: "N total loggs (M ns)"
+		const recvNode = $el.find('.gg-pipeline-recv').get(0) as HTMLElement | undefined;
+		if (recvNode) {
+			const nsCount = receivedNsSet.size;
+			recvNode.textContent = `${receivedTotal} total loggs${nsCount ? ' (' + nsCount + ' ns)' : ''}`;
+		}
+
+		// buf node: buffer.size / buffer.capacity, kept NS count
+		const bufNode = $el.find('.gg-pipeline-buf').get(0) as HTMLElement | undefined;
+		if (bufNode) {
+			const bufSize = buffer.size;
+			const bufCap = buffer.capacity;
+			const keptNs = allNamespacesSet.size;
+			const full = bufSize >= bufCap;
+			const capStr = full ? `${bufSize}/${bufCap} ⚠` : `${bufSize}/${bufCap}`;
+			bufNode.textContent = `${capStr}${keptNs ? ' · ' + keptNs + ' ns' : ''}`;
+			bufNode.style.color = full ? '#b94' : '';
+		}
+
+		// vis node: "N loggs shown (M ns)"
+		const visNode = $el.find('.gg-pipeline-vis').get(0) as HTMLElement | undefined;
+		if (visNode) {
+			const visCount = filteredIndices.length;
+			const visNs = enabledNamespaces.size;
+			visNode.textContent = `${visCount} loggs shown${visNs ? ' (' + visNs + ' ns)' : ''}`;
+		}
+	}
+
 	function renderFilterUI() {
 		if (!$el) return;
+
+		renderPipelineUI();
 
 		const allNamespaces = getAllCapturedNamespaces();
 		const enabledCount = enabledNamespaces.size;
 		const totalCount = allNamespaces.length;
 
-		// Update button summary with count of enabled namespaces
-		const filterSummary = $el.find('.gg-filter-summary').get(0) as HTMLElement;
-		if (filterSummary) {
-			filterSummary.textContent = `${enabledCount}/${totalCount}`;
-		}
+		// Sync input value (may have changed via hide/undo/right-click)
+		const showInput = $el.find('.gg-show-input').get(0) as HTMLInputElement | undefined;
+		if (showInput && document.activeElement !== showInput) showInput.value = filterPattern;
 
-		// Update panel
+		// Update count in summary
+		const filterSummary = $el.find('.gg-filter-summary').get(0) as HTMLElement;
+		if (filterSummary) filterSummary.textContent = `${enabledCount}/${totalCount}`;
+
+		// Always render panel body — <details> open state handles visibility
 		const filterPanel = $el.find('.gg-filter-panel').get(0) as HTMLElement;
 		if (!filterPanel) return;
 
-		if (filterExpanded) {
-			// Show panel
-			filterPanel.classList.add('expanded');
+		const simple = isSimplePattern(filterPattern);
+		const effectivePattern = filterPattern || '*';
 
-			// Render expanded view
-			const allNamespaces = getAllCapturedNamespaces();
-			const simple = isSimplePattern(filterPattern);
-			const effectivePattern = filterPattern || '*';
+		if (simple && allNamespaces.length > 0) {
+			const allChecked = enabledCount === totalCount;
+			const allEntries = buffer.getEntries();
+			const nsCounts = new Map<string, number>();
+			allEntries.forEach((entry: CapturedEntry) => {
+				nsCounts.set(entry.namespace, (nsCounts.get(entry.namespace) || 0) + 1);
+			});
+			const sortedAll = [...allNamespaces].sort(
+				(a, b) => (nsCounts.get(b) || 0) - (nsCounts.get(a) || 0)
+			);
+			const displayed = sortedAll.slice(0, 5);
+			const displayedSet = new Set(displayed);
+			const others = allNamespaces.filter((ns) => !displayedSet.has(ns));
+			const otherChecked = others.some((ns) => enabledNamespaces.has(ns));
+			const otherCount = others.reduce((sum, ns) => sum + (nsCounts.get(ns) || 0), 0);
 
-			let checkboxesHTML = '';
-			if (simple && allNamespaces.length > 0) {
-				const allChecked = enabledCount === totalCount;
-
-				// Count frequency of each namespace in the buffer
-				const allEntries = buffer.getEntries();
-				const nsCounts = new Map<string, number>();
-				allEntries.forEach((entry: CapturedEntry) => {
-					nsCounts.set(entry.namespace, (nsCounts.get(entry.namespace) || 0) + 1);
-				});
-
-				// Sort ALL namespaces by frequency (most common first)
-				const sortedAllNamespaces = [...allNamespaces].sort(
-					(a, b) => (nsCounts.get(b) || 0) - (nsCounts.get(a) || 0)
-				);
-
-				// Take top 5 most common (regardless of enabled state)
-				const displayedNamespaces = sortedAllNamespaces.slice(0, 5);
-
-				// Calculate "other" namespaces (not in top 5)
-				const displayedSet = new Set(displayedNamespaces);
-				const otherNamespaces = allNamespaces.filter((ns) => !displayedSet.has(ns));
-				const otherEnabledCount = otherNamespaces.filter((ns) => enabledNamespaces.has(ns)).length;
-				const otherTotalCount = otherNamespaces.length;
-				const otherChecked = otherEnabledCount > 0;
-				const otherCount = otherNamespaces.reduce((sum, ns) => sum + (nsCounts.get(ns) || 0), 0);
-
-				checkboxesHTML = `
-			<div class="gg-filter-checkboxes">
-				<label class="gg-filter-checkbox" style="font-weight: bold;">
-					<input type="checkbox" class="gg-all-checkbox" ${allChecked ? 'checked' : ''}>
-					<span>ALL</span>
-				</label>
-				${displayedNamespaces
+			filterPanel.innerHTML =
+				`<div style="font-size: 11px; opacity: 0.6; margin-bottom: 6px;">Layer 2: controls which kept loggs are displayed.</div>` +
+				`<div class="gg-filter-checkboxes">` +
+				`<label class="gg-filter-checkbox" style="font-weight: bold;"><input type="checkbox" class="gg-all-checkbox" ${allChecked ? 'checked' : ''}><span>ALL</span></label>` +
+				displayed
 					.map((ns) => {
-						// Check if namespace matches the current pattern
 						const checked = namespaceMatchesPattern(ns, effectivePattern);
-						const count = nsCounts.get(ns) || 0;
-						return `
-						<label class="gg-filter-checkbox">
-							<input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}>
-							<span>${escapeHtml(ns)} (${count})</span>
-						</label>
-					`;
+						return `<label class="gg-filter-checkbox"><input type="checkbox" class="gg-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}><span>${escapeHtml(ns)} (${nsCounts.get(ns) || 0})</span></label>`;
 					})
-					.join('')}
-				${
-					otherTotalCount > 0
-						? `
-				<label class="gg-filter-checkbox" style="opacity: 0.7;">
-					<input type="checkbox" class="gg-other-checkbox" ${otherChecked ? 'checked' : ''} data-other-namespaces='${JSON.stringify(otherNamespaces)}'>
-					<span>other (${otherCount})</span>
-				</label>
-				`
-						: ''
-				}
-			</div>
-		`;
-			} else if (!simple) {
-				checkboxesHTML = `<div style="opacity: 0.6; font-size: 11px; margin: 8px 0;">⚠️ Complex pattern - edit manually (quick filters disabled)</div>`;
+					.join('') +
+				(others.length > 0
+					? `<label class="gg-filter-checkbox" style="opacity: 0.7;"><input type="checkbox" class="gg-other-checkbox" ${otherChecked ? 'checked' : ''} data-other-namespaces='${JSON.stringify(others)}'><span>other (${otherCount})</span></label>`
+					: '') +
+				`</div>`;
+		} else if (!simple) {
+			filterPanel.innerHTML = `<div style="opacity: 0.6; font-size: 11px;">⚠️ Complex pattern — edit directly in the input above</div>`;
+		} else {
+			filterPanel.innerHTML = '';
+		}
+	}
+
+	/** Render the Keep filter UI (count + panel body) */
+	function renderKeepUI() {
+		if (!$el) return;
+
+		renderPipelineUI();
+
+		const droppedCount = droppedNamespaces.size;
+		const keptCount = allNamespacesSet.size;
+		const totalCount = keptCount + droppedCount;
+
+		// Sync input value
+		const keepInput = $el.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+		if (keepInput && document.activeElement !== keepInput) keepInput.value = keepPattern;
+
+		// Update count in summary (keep panel header)
+		const keepSummary = $el.find('.gg-keep-filter-summary').get(0) as HTMLElement;
+		if (keepSummary) keepSummary.textContent = `${keptCount}/${totalCount}`;
+
+		// Always render panel body — <details> open state handles visibility
+		const keepPanel = $el.find('.gg-keep-filter-panel').get(0) as HTMLElement;
+		if (!keepPanel) return;
+
+		const simple = isSimplePattern(keepPattern);
+		const allKept = [...allNamespacesSet].sort();
+		const allDropped = [...droppedNamespaces.keys()].sort();
+		// Also extract namespaces explicitly excluded in keepPattern itself — these may
+		// never have sent a logg so they won't be in allNamespacesSet or droppedNamespaces
+		const patternExcluded = (keepPattern || '*')
+			.split(',')
+			.map((p) => p.trim())
+			.filter((p) => p.startsWith('-') && p.length > 1)
+			.map((p) => p.slice(1));
+		const allNs = [...new Set([...allKept, ...allDropped, ...patternExcluded])];
+
+		if (simple && allNs.length > 0) {
+			const allChecked = droppedCount === 0;
+			const effectiveKeep = keepPattern || '*';
+
+			// Count loggs per namespace (kept + dropped combined for context)
+			const allEntries = buffer.getEntries();
+			const nsCounts = new Map<string, number>();
+			allEntries.forEach((entry: CapturedEntry) => {
+				nsCounts.set(entry.namespace, (nsCounts.get(entry.namespace) || 0) + 1);
+			});
+			// Also add dropped counts
+			droppedNamespaces.forEach((info, ns) => {
+				nsCounts.set(ns, (nsCounts.get(ns) || 0) + info.total);
+			});
+
+			const sorted = allNs.sort((a, b) => (nsCounts.get(b) || 0) - (nsCounts.get(a) || 0));
+			const displayed = sorted.slice(0, 5);
+			const displayedSet = new Set(displayed);
+			const others = allNs.filter((ns) => !displayedSet.has(ns));
+			const otherKept = others.filter((ns) => namespaceMatchesPattern(ns, effectiveKeep));
+			const otherCount = others.reduce((sum, ns) => sum + (nsCounts.get(ns) || 0), 0);
+
+			keepPanel.innerHTML =
+				`<div style="font-size: 11px; opacity: 0.6; margin-bottom: 6px;">Layer 1: controls which loggs enter the ring buffer.</div>` +
+				`<div class="gg-filter-checkboxes">` +
+				`<label class="gg-filter-checkbox" style="font-weight: bold;"><input type="checkbox" class="gg-keep-all-checkbox" ${allChecked ? 'checked' : ''}><span>ALL</span></label>` +
+				displayed
+					.map((ns) => {
+						const checked = namespaceMatchesPattern(ns, effectiveKeep);
+						return `<label class="gg-filter-checkbox"><input type="checkbox" class="gg-keep-ns-checkbox" data-namespace="${escapeHtml(ns)}" ${checked ? 'checked' : ''}><span>${escapeHtml(ns)} (${nsCounts.get(ns) || 0})</span></label>`;
+					})
+					.join('') +
+				(others.length > 0
+					? `<label class="gg-filter-checkbox" style="opacity: 0.7;"><input type="checkbox" class="gg-keep-other-checkbox" ${otherKept.length > 0 ? 'checked' : ''} data-other-namespaces='${JSON.stringify(others)}'><span>other (${otherCount})</span></label>`
+					: '') +
+				`</div>`;
+		} else if (!simple) {
+			keepPanel.innerHTML = `<div style="opacity: 0.6; font-size: 11px;">⚠️ Complex pattern — edit directly in the input above</div>`;
+		} else {
+			keepPanel.innerHTML = '';
+		}
+	}
+
+	/** Schedule a debounced re-render of the sentinel section (via rAF) */
+	function scheduleSentinelRender() {
+		if (sentinelRenderPending) return;
+		sentinelRenderPending = true;
+		requestAnimationFrame(() => {
+			sentinelRenderPending = false;
+			renderSentinelSection();
+		});
+	}
+
+	/** Render the dropped-namespace sentinel section above the log container */
+	function renderSentinelSection() {
+		if (!$el) return;
+		const sentinelSection = $el.find('.gg-sentinel-section').get(0) as HTMLElement | undefined;
+		if (!sentinelSection) return;
+
+		if (droppedNamespaces.size === 0) {
+			sentinelSection.style.display = 'none';
+			sentinelSection.innerHTML = '';
+			return;
+		}
+
+		// Sort by total dropped count descending (noisiest first)
+		const sorted = [...droppedNamespaces.values()].sort((a, b) => b.total - a.total);
+		const total = sorted.reduce((sum, i) => sum + i.total, 0);
+
+		// Header: "▼ Dropped: 3 namespaces, 47 loggs" — click to collapse
+		const arrow = sentinelExpanded ? '▼' : '▶';
+		const headerText = `${sorted.length} dropped namespace${sorted.length === 1 ? '' : 's'}, ${total} logg${total === 1 ? '' : 's'}`;
+		let html = `<div class="gg-sentinel-header"><span class="gg-sentinel-toggle">${arrow}</span> ${escapeHtml(headerText)}</div>`;
+		html += `<div class="gg-sentinel-rows${sentinelExpanded ? '' : ' collapsed'}">`;
+
+		for (const info of sorted) {
+			const ns = escapeHtml(info.namespace);
+			const typeEntries = Object.entries(info.byType);
+			const breakdown =
+				typeEntries.length > 1 ? ` (${typeEntries.map(([t, n]) => `${n} ${t}`).join(', ')})` : '';
+			const countStr = `${info.total} logg${info.total === 1 ? '' : 's'}${breakdown}`;
+
+			let previewStr = '';
+			if (info.preview.args && info.preview.args.length > 0) {
+				const raw = info.preview.args
+					.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
+					.join(' ');
+				previewStr = raw.length > 80 ? raw.slice(0, 77) + '...' : raw;
 			}
 
-			filterPanel.innerHTML = `
-			<div style="margin-bottom: 8px;">
-				<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="*" style="width: 100%;">
-			</div>
-			${checkboxesHTML}
-		`;
-		} else {
-			// Hide panel
-			filterPanel.classList.remove('expanded');
+			html +=
+				`<div class="gg-sentinel-row" data-namespace="${ns}">` +
+				`<button class="gg-sentinel-keep" data-namespace="${ns}" title="Keep this namespace (start capturing its loggs)">${ICON_KEEP}</button>` +
+				`<span class="gg-sentinel-ns">DROPPED:${ns}</span>` +
+				`<span class="gg-sentinel-count">${escapeHtml(countStr)}</span>` +
+				(previewStr
+					? `<span class="gg-sentinel-preview">\u21b3 ${escapeHtml(previewStr)}</span>`
+					: '') +
+				`</div>`;
 		}
+
+		html += `</div>`;
+		sentinelSection.innerHTML = html;
+		sentinelSection.style.display = 'block';
+
+		// Update keep UI summary too
+		renderKeepUI();
+	}
+
+	/** Wire up the Keep input + sentinel section */
+	function wireUpKeepUI() {
+		if (!$el) return;
+
+		// Keep handle toggles the keep panel
+		const keepHandle = $el.find('.gg-pipeline-keep-handle').get(0) as HTMLElement | undefined;
+		const keepPanelEl = $el.find('.gg-keep-panel').get(0) as HTMLElement | undefined;
+		if (keepHandle && keepPanelEl) {
+			keepHandle.addEventListener('click', () => {
+				const open = keepPanelEl.style.display !== 'none';
+				keepPanelEl.style.display = open ? 'none' : '';
+				keepHandle.classList.toggle('active', !open);
+				// Close show panel when opening keep
+				if (!open) {
+					const showPanel = $el?.find('.gg-show-panel').get(0) as HTMLElement | undefined;
+					const showHandle = $el?.find('.gg-pipeline-show-handle').get(0) as
+						| HTMLElement
+						| undefined;
+					if (showPanel) showPanel.style.display = 'none';
+					if (showHandle) showHandle.classList.remove('active');
+				}
+			});
+		}
+
+		// Buf node click: replace node text with an inline input to change capacity
+		const bufNode = $el.find('.gg-pipeline-buf').get(0) as HTMLElement | undefined;
+		if (bufNode) {
+			bufNode.addEventListener('click', () => {
+				// Already editing?
+				if (bufNode.querySelector('.gg-buf-size-input')) return;
+				const current = buffer.capacity;
+				const input = document.createElement('input');
+				input.type = 'number';
+				input.className = 'gg-buf-size-input';
+				input.value = String(current);
+				input.min = '100';
+				input.max = '100000';
+				input.title = 'Buffer capacity (Enter to apply, Escape to cancel)';
+				bufNode.textContent = '';
+				bufNode.appendChild(input);
+				input.focus();
+				input.select();
+
+				const apply = () => {
+					const val = parseInt(input.value, 10);
+					if (!isNaN(val) && val > 0 && val !== current) {
+						buffer.resize(val);
+						localStorage.setItem(BUFFER_CAP_KEY, String(val));
+						renderLogs();
+					}
+					renderPipelineUI(); // restores text content
+				};
+				input.addEventListener('blur', apply);
+				input.addEventListener('keydown', (e: KeyboardEvent) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						input.blur();
+					}
+					if (e.key === 'Escape') {
+						input.removeEventListener('blur', apply);
+						renderPipelineUI();
+					}
+				});
+				// Stop click from immediately re-triggering
+				input.addEventListener('click', (e) => e.stopPropagation());
+			});
+		}
+
+		const keepInput = $el.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+
+		if (keepInput) {
+			keepInput.addEventListener('blur', () => {
+				applyKeepPatternFromInput(keepInput.value);
+			});
+			keepInput.addEventListener('keydown', (e: KeyboardEvent) => {
+				if (e.key === 'Enter') {
+					applyKeepPatternFromInput(keepInput.value);
+					keepInput.blur();
+				}
+			});
+		}
+
+		// Wire up sentinel section: collapse toggle + [+] keep buttons
+		const sentinelSection = $el.find('.gg-sentinel-section').get(0) as HTMLElement | undefined;
+		if (sentinelSection) {
+			sentinelSection.addEventListener('click', (e: MouseEvent) => {
+				const target = e.target as HTMLElement;
+
+				// Header click: toggle collapse
+				if (target?.closest?.('.gg-sentinel-header')) {
+					sentinelExpanded = !sentinelExpanded;
+					renderSentinelSection();
+					return;
+				}
+
+				const keepBtn = target?.closest?.('.gg-sentinel-keep') as HTMLElement | null;
+				if (keepBtn) {
+					const namespace = keepBtn.getAttribute('data-namespace');
+					if (!namespace) return;
+
+					// Remove the exclusion for this namespace from keepPattern
+					const currentKeep = keepPattern || '*';
+					const exclusion = `-${namespace}`;
+					const parts = currentKeep
+						.split(',')
+						.map((p) => p.trim())
+						.filter(Boolean);
+					const filtered = parts.filter((p) => p !== exclusion);
+					keepPattern = filtered.join(',') || '*';
+					keepPattern = simplifyPattern(keepPattern);
+					localStorage.setItem(KEEP_KEY, keepPattern);
+
+					// Sync keep input
+					if (keepInput) keepInput.value = keepPattern;
+
+					// Remove from droppedNamespaces map so sentinel disappears
+					droppedNamespaces.delete(namespace);
+
+					renderKeepUI();
+					renderSentinelSection();
+				}
+			});
+		}
+
+		// Wire up Keep panel checkboxes
+		const keepPanel = $el.find('.gg-keep-filter-panel').get(0) as HTMLElement;
+		if (keepPanel) {
+			keepPanel.addEventListener('change', (e: Event) => {
+				const target = e.target as HTMLInputElement;
+
+				if (target.classList.contains('gg-keep-all-checkbox')) {
+					const allNs = [...allNamespacesSet, ...droppedNamespaces.keys()];
+					if (target.checked) {
+						// Keep all: remove all exclusions
+						keepPattern = '*';
+						droppedNamespaces.clear();
+					} else {
+						// Drop all
+						const exclusions = allNs.map((ns) => `-${ns}`).join(',');
+						keepPattern = `*,${exclusions}`;
+						keepPattern = simplifyPattern(keepPattern) || '*';
+					}
+					localStorage.setItem(KEEP_KEY, keepPattern);
+					renderKeepUI();
+					renderLogs();
+					renderSentinelSection();
+					return;
+				}
+
+				if (target.classList.contains('gg-keep-other-checkbox')) {
+					const otherNs = JSON.parse(
+						target.getAttribute('data-other-namespaces') || '[]'
+					) as string[];
+					otherNs.forEach((ns) => toggleKeepNamespace(ns, target.checked));
+					renderKeepUI();
+					renderLogs();
+					renderSentinelSection();
+					return;
+				}
+
+				if (target.classList.contains('gg-keep-ns-checkbox')) {
+					const namespace = target.getAttribute('data-namespace');
+					if (!namespace) return;
+					toggleKeepNamespace(namespace, target.checked);
+					renderKeepUI();
+					renderLogs();
+					renderSentinelSection();
+				}
+			});
+		}
+
+		renderKeepUI();
 	}
 
 	/** Render the format field + $ROOT field shared by "Copy to clipboard" and "Open as URL" */
@@ -1534,7 +2141,6 @@ export function createGgPlugin(
 		settingsBtn.addEventListener('click', () => {
 			settingsExpanded = !settingsExpanded;
 			if (settingsExpanded) {
-				filterExpanded = false;
 				renderFilterUI();
 				renderLogs();
 			}
@@ -1630,6 +2236,8 @@ export function createGgPlugin(
 			allNamespacesSet.clear();
 			droppedNamespaces.clear();
 			renderLogs();
+			renderSentinelSection();
+			renderKeepUI();
 		});
 
 		$el.find('.gg-copy-btn').on('click', async () => {
@@ -1723,15 +2331,8 @@ export function createGgPlugin(
 	}
 
 	/** Show toast bar after hiding a namespace via the x button */
-	function showHideToast(namespace: string, previousPattern: string) {
-		if (!$el) return;
-
-		lastHiddenPattern = previousPattern;
-
-		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
-		if (!toast) return;
-
-		// Split namespace into segments with delimiters (same logic as log row rendering)
+	/** Build clickable segment HTML for a namespace (shared by hide/drop toasts) */
+	function buildToastNsHTML(namespace: string): string {
 		const parts = namespace.split(/([:/@ \-_])/);
 		const segments: string[] = [];
 		const delimiters: string[] = [];
@@ -1742,30 +2343,30 @@ export function createGgPlugin(
 				delimiters.push(parts[i]);
 			}
 		}
-
-		// Build clickable segment HTML
 		let nsHTML = '';
 		for (let i = 0; i < segments.length; i++) {
-			const segment = escapeHtml(segments[i]);
-
-			// Build filter pattern for this segment level
 			let segFilter = '';
 			for (let j = 0; j <= i; j++) {
 				segFilter += segments[j];
-				if (j < i) {
-					segFilter += delimiters[j];
-				} else if (j < segments.length - 1) {
-					segFilter += delimiters[j] + '*';
-				}
+				if (j < i) segFilter += delimiters[j];
+				else if (j < segments.length - 1) segFilter += delimiters[j] + '*';
 			}
-
-			nsHTML += `<span class="gg-toast-segment" data-filter="${escapeHtml(segFilter)}">${segment}</span>`;
-			if (i < segments.length - 1) {
+			nsHTML += `<span class="gg-toast-segment" data-filter="${escapeHtml(segFilter)}">${escapeHtml(segments[i])}</span>`;
+			if (i < segments.length - 1)
 				nsHTML += `<span class="gg-toast-delim">${escapeHtml(delimiters[i])}</span>`;
-			}
 		}
+		return nsHTML;
+	}
 
-		// Auto-expand explanation on first use
+	function showHideToast(namespace: string, previousPattern: string) {
+		if (!$el) return;
+		toastMode = 'hide';
+		lastHiddenPattern = previousPattern;
+
+		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
+		if (!toast) return;
+
+		const nsHTML = buildToastNsHTML(namespace);
 		const showExplanation = !hasSeenToastExplanation;
 
 		toast.innerHTML =
@@ -1782,10 +2383,34 @@ export function createGgPlugin(
 			`</div>`;
 
 		toast.classList.add('visible');
+		if (showExplanation) hasSeenToastExplanation = true;
+	}
 
-		if (showExplanation) {
-			hasSeenToastExplanation = true;
-		}
+	function showDropToast(namespace: string, previousKeep: string) {
+		if (!$el) return;
+		toastMode = 'drop';
+		lastDroppedPattern = previousKeep;
+
+		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
+		if (!toast) return;
+
+		const nsHTML = buildToastNsHTML(namespace);
+		const showExplanation = !hasSeenToastExplanation;
+
+		toast.innerHTML =
+			`<button class="gg-toast-btn gg-toast-dismiss" title="Dismiss">\u00d7</button>` +
+			`<span class="gg-toast-label">Dropped:</span>` +
+			`<span class="gg-toast-ns">${nsHTML}</span>` +
+			`<span class="gg-toast-actions">` +
+			`<button class="gg-toast-btn gg-toast-undo">Undo</button>` +
+			`<button class="gg-toast-btn gg-toast-help" title="Toggle help">?</button>` +
+			`</span>` +
+			`<div class="gg-toast-explanation${showExplanation ? ' visible' : ''}">` +
+			`Click a segment above to drop all matching namespaces from the buffer (e.g. click "api" to drop api/*).` +
+			`</div>`;
+
+		toast.classList.add('visible');
+		if (showExplanation) hasSeenToastExplanation = true;
 	}
 
 	/** Dismiss the toast bar */
@@ -1796,28 +2421,42 @@ export function createGgPlugin(
 			toast.classList.remove('visible');
 		}
 		lastHiddenPattern = null;
+		lastDroppedPattern = null;
 	}
 
-	/** Undo the last namespace hide */
+	/** Undo the last namespace hide or drop */
 	function undoHide() {
-		if (!$el || lastHiddenPattern === null) return;
+		if (!$el) return;
 
-		// Restore the previous filter pattern
-		filterPattern = lastHiddenPattern;
-		localStorage.setItem(SHOW_KEY, filterPattern);
-
-		// Sync enabledNamespaces from the restored pattern
-		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || '*';
-		getAllCapturedNamespaces().forEach((ns: string) => {
-			if (namespaceMatchesPattern(ns, effectivePattern)) {
-				enabledNamespaces.add(ns);
-			}
-		});
-
-		dismissToast();
-		renderFilterUI();
-		renderLogs();
+		if (toastMode === 'drop' && lastDroppedPattern !== null) {
+			// Restore keepPattern
+			keepPattern = lastDroppedPattern;
+			localStorage.setItem(KEEP_KEY, keepPattern);
+			const keepInput = $el.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+			if (keepInput) keepInput.value = keepPattern;
+			// Restore enabledNamespaces from current show filter
+			enabledNamespaces.clear();
+			const effectiveShow = filterPattern || '*';
+			getAllCapturedNamespaces().forEach((ns: string) => {
+				if (namespaceMatchesPattern(ns, effectiveShow)) enabledNamespaces.add(ns);
+			});
+			dismissToast();
+			renderKeepUI();
+			renderFilterUI();
+			renderLogs();
+		} else if (toastMode === 'hide' && lastHiddenPattern !== null) {
+			// Restore filterPattern
+			filterPattern = lastHiddenPattern;
+			localStorage.setItem(SHOW_KEY, filterPattern);
+			enabledNamespaces.clear();
+			const effectivePattern = filterPattern || '*';
+			getAllCapturedNamespaces().forEach((ns: string) => {
+				if (namespaceMatchesPattern(ns, effectivePattern)) enabledNamespaces.add(ns);
+			});
+			dismissToast();
+			renderFilterUI();
+			renderLogs();
+		}
 	}
 
 	/** Wire up toast event handlers (called once after init) */
@@ -1851,43 +2490,60 @@ export function createGgPlugin(
 				return;
 			}
 
-			// Segment click: add exclusion for that pattern
+			// Segment click: add exclusion to the appropriate layer
 			if (target.classList?.contains('gg-toast-segment')) {
 				const filter = target.getAttribute('data-filter');
 				if (!filter) return;
 
-				// Add exclusion pattern (same logic as right-click segment)
-				const currentPattern = filterPattern || '*';
 				const exclusion = `-${filter}`;
-				const parts = currentPattern.split(',').map((p) => p.trim());
 
-				if (parts.includes(exclusion)) {
-					// Already excluded, toggle off
-					filterPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
+				if (toastMode === 'drop') {
+					// Add exclusion to keepPattern (Layer 1)
+					const currentKeep = keepPattern || '*';
+					const keepParts = currentKeep.split(',').map((p) => p.trim());
+					if (!keepParts.includes(exclusion)) {
+						keepPattern = keepParts.some((p) => !p.startsWith('-'))
+							? `${currentKeep},${exclusion}`
+							: `*,${exclusion}`;
+						keepPattern = simplifyPattern(keepPattern);
+					}
+					localStorage.setItem(KEEP_KEY, keepPattern);
+					const keepInput = $el?.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+					if (keepInput) keepInput.value = keepPattern;
+					// Remove newly-dropped namespace from visible list
+					// (the segment pattern may match multiple namespaces)
+					getAllCapturedNamespaces().forEach((ns) => {
+						if (!namespaceMatchesPattern(ns, keepPattern)) {
+							enabledNamespaces.delete(ns);
+						}
+					});
+					dismissToast();
+					renderKeepUI();
+					renderFilterUI();
+					renderLogs();
+					scheduleSentinelRender();
 				} else {
-					const hasInclusion = parts.some((p) => !p.startsWith('-'));
-					if (hasInclusion) {
-						filterPattern = `${currentPattern},${exclusion}`;
+					// Add exclusion to filterPattern (Layer 2 / hide)
+					const currentPattern = filterPattern || '*';
+					const parts = currentPattern.split(',').map((p) => p.trim());
+					if (parts.includes(exclusion)) {
+						filterPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
 					} else {
-						filterPattern = `gg:*,${exclusion}`;
+						filterPattern = parts.some((p) => !p.startsWith('-'))
+							? `${currentPattern},${exclusion}`
+							: `*,${exclusion}`;
 					}
+					filterPattern = simplifyPattern(filterPattern);
+					enabledNamespaces.clear();
+					const effectivePattern = filterPattern || '*';
+					getAllCapturedNamespaces().forEach((ns) => {
+						if (namespaceMatchesPattern(ns, effectivePattern)) enabledNamespaces.add(ns);
+					});
+					localStorage.setItem(SHOW_KEY, filterPattern);
+					dismissToast();
+					renderFilterUI();
+					renderLogs();
 				}
-
-				filterPattern = simplifyPattern(filterPattern);
-
-				// Sync enabledNamespaces
-				enabledNamespaces.clear();
-				const effectivePattern = filterPattern || '*';
-				getAllCapturedNamespaces().forEach((ns) => {
-					if (namespaceMatchesPattern(ns, effectivePattern)) {
-						enabledNamespaces.add(ns);
-					}
-				});
-
-				localStorage.setItem(SHOW_KEY, filterPattern);
-				dismissToast();
-				renderFilterUI();
-				renderLogs();
 				return;
 			}
 		});
@@ -2000,9 +2656,38 @@ export function createGgPlugin(
 				return;
 			}
 
+			// Handle clicking drop button for namespace (Layer 1: gg-keep)
+			const dropBtn = target?.closest?.('.gg-ns-drop') as HTMLElement | null;
+			if (dropBtn) {
+				const namespace = dropBtn.getAttribute('data-namespace');
+				if (!namespace) return;
+
+				const currentKeep = keepPattern || '*';
+				const exclusion = `-${namespace}`;
+				const parts = currentKeep.split(',').map((p) => p.trim());
+				if (!parts.includes(exclusion)) {
+					const previousKeep = keepPattern;
+					keepPattern = `${currentKeep},${exclusion}`;
+					keepPattern = simplifyPattern(keepPattern);
+					localStorage.setItem(KEEP_KEY, keepPattern);
+					// Sync keep input
+					const keepInput = $el?.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+					if (keepInput) keepInput.value = keepPattern;
+					// Remove from visible loggs (Layer 1 drop hides from display too)
+					enabledNamespaces.delete(namespace);
+					renderKeepUI();
+					renderFilterUI();
+					renderLogs();
+					scheduleSentinelRender();
+					showDropToast(namespace, previousKeep);
+				}
+				return;
+			}
+
 			// Handle clicking hide button for namespace
-			if (target?.classList?.contains('gg-ns-hide')) {
-				const namespace = target.getAttribute('data-namespace');
+			const hideBtn = target?.closest?.('.gg-ns-hide') as HTMLElement | null;
+			if (hideBtn) {
+				const namespace = hideBtn.getAttribute('data-namespace');
 				if (!namespace) return;
 
 				// Save current pattern for undo before hiding
@@ -2018,9 +2703,8 @@ export function createGgPlugin(
 				return;
 			}
 
-			// Clicking background (container or grid, not a log element) restores all
+			// Clicking background (container or grid, not a log entry) restores show filter
 			if (
-				filterExpanded &&
 				filterPattern !== '*' &&
 				(target === containerEl || target?.classList?.contains('gg-log-grid'))
 			) {
@@ -2088,7 +2772,7 @@ export function createGgPlugin(
 					if (hasInclusion) {
 						filterPattern = `${currentPattern},${exclusion}`;
 					} else {
-						filterPattern = `gg:*,${exclusion}`;
+						filterPattern = `*,${exclusion}`;
 					}
 				}
 
@@ -2471,7 +3155,7 @@ export function createGgPlugin(
 			`<div class="gg-log-entry${levelClass}" data-entry="${index}"${vindexAttr}>` +
 			`<div class="gg-log-header">` +
 			`<div class="gg-log-diff" style="color: ${color};"${fileAttr}${lineAttr}${colAttr}>${diff}</div>` +
-			`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">\u00d7</button></div>` +
+			`<div class="gg-log-ns" style="color: ${color};" data-namespace="${escapeHtml(entry.namespace)}"><span class="gg-ns-text">${nsHTML}</span><button class="gg-ns-drop" data-namespace="${escapeHtml(entry.namespace)}" title="Drop this namespace (stop buffering its loggs)">${ICON_DROP}</button><button class="gg-ns-hide" data-namespace="${escapeHtml(entry.namespace)}" title="Hide this namespace">${ICON_HIDE}</button></div>` +
 			`<div class="gg-log-handle"></div>` +
 			`</div>` +
 			`<div class="gg-log-content"${hasSrcExpr ? ` data-src="${escapeHtml(entry.src!)}"` : ''}>${exprAboveForPrimitives}${argsHTML}${stackHTML}</div>` +
@@ -2482,18 +3166,7 @@ export function createGgPlugin(
 
 	/** Update the copy-button count text */
 	function updateTruncationBanner() {
-		if (!$el) return;
-		const banner = $el.find('.gg-truncation-banner').get(0) as HTMLElement | undefined;
-		if (!banner) return;
-		const evicted = buffer.evicted;
-		if (evicted > 0) {
-			const total = buffer.totalPushed;
-			const retained = buffer.size;
-			banner.innerHTML = `⚠ Showing ${retained.toLocaleString()} of ${total.toLocaleString()} messages &mdash; ${evicted.toLocaleString()} truncated. Increase <code style="font-family:monospace;background:rgba(255,255,255,0.15);padding:0 3px;border-radius:3px;">maxEntries</code> to retain more.`;
-			banner.style.display = 'flex';
-		} else {
-			banner.style.display = 'none';
-		}
+		// Truncation info is now shown in the pipeline buffer node (buf/cap ⚠).
 	}
 
 	function updateCopyCount() {
@@ -2656,6 +3329,7 @@ export function createGgPlugin(
 		const hasVisible = newEntries.some((e) => enabledNamespaces.has(e.namespace));
 		if (!hasVisible && buffer.evicted === 0) {
 			updateCopyCount();
+			renderPipelineUI();
 			return;
 		}
 
@@ -2666,6 +3340,7 @@ export function createGgPlugin(
 
 		updateCopyCount();
 		updateTruncationBanner();
+		renderPipelineUI();
 
 		// Check if user is near bottom before we update the virtualizer
 		const nearBottom =
@@ -2710,6 +3385,7 @@ export function createGgPlugin(
 		// Rebuild filtered indices from scratch
 		rebuildFilteredIndices();
 
+		renderPipelineUI();
 		updateCopyCount();
 		updateTruncationBanner();
 
@@ -2730,7 +3406,7 @@ export function createGgPlugin(
 				? `All ${buffer.size} logs filtered out.`
 				: 'No logs captured yet. Call gg() to see output here.';
 			const resetButton = hasFilteredLogs
-				? '<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (gg:*)</button>'
+				? '<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (*)</button>'
 				: '';
 			logContainer.html(
 				`<div style="padding: 20px; text-align: center; opacity: 0.5;">${message}<div>${resetButton}</div></div>`
@@ -2741,7 +3417,7 @@ export function createGgPlugin(
 		// Build the virtual scroll DOM structure:
 		// - .gg-virtual-spacer: sized to total virtual height (provides scrollbar)
 		//   - .gg-log-grid: positioned absolutely, translated to visible offset, holds only visible entries
-		const gridClasses = `gg-log-grid${filterExpanded ? ' filter-mode' : ''}${showExpressions ? ' gg-show-expr' : ''}`;
+		const gridClasses = `gg-log-grid${showExpressions ? ' gg-show-expr' : ''}`;
 		logContainer.html(
 			`<div class="gg-virtual-spacer">` +
 				`<div class="${gridClasses}" style="position: absolute; top: 0; left: 0; width: 100%; grid-template-columns: ${gridColumns()};"></div>` +

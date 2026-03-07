@@ -111,4 +111,21 @@ export class LogBuffer {
 	get capacity(): number {
 		return this.maxSize;
 	}
+
+	/**
+	 * Resize the buffer. Existing entries are preserved up to newCapacity (oldest dropped if shrinking).
+	 */
+	resize(newCapacity: number): void {
+		const entries = this.getEntries(); // oldest→newest, up to current count
+		this.maxSize = newCapacity;
+		this.buf = new Array(newCapacity);
+		this.head = 0;
+		this.count = 0;
+		this._totalPushed = 0;
+		// Re-push entries, keeping the most recent up to newCapacity
+		const start = entries.length > newCapacity ? entries.length - newCapacity : 0;
+		for (let i = start; i < entries.length; i++) {
+			this.push(entries[i]!);
+		}
+	}
 }
