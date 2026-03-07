@@ -221,10 +221,10 @@ Agents can filter by environment and origin:
 
 **Basic filtering:**
 
-In SSR apps, component `gg()` calls appear in the file twice — once as `env:"server"` (first render) and once as `env:"client"` (hydration). Pick the side you need, or use the dedup query for a full picture without duplicates.
+The JSONL file always contains all entries (both server and client sides). For SSR dedup and mismatch detection, prefer the HTTP API (`GET /__gg/logs`, `?mismatch`, `?all`) — it handles those cases server-side so agents don't need multi-pass `jq`. Use `jq` directly on the file for aggregation, field extraction, and queries the HTTP API doesn't cover.
 
 ```bash
-# Check the env split first (useful in SSR apps)
+# Check the env split (useful in SSR apps)
 jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
 
 # Client-side only (component behavior, user interactions)
@@ -232,15 +232,6 @@ jq 'select(.env == "client")' .gg/logs-5173.jsonl
 
 # Server-side only (load functions, API routes, auth)
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
-
-# Full picture without SSR duplicates — server entries + client-only entries (e.g. onMount)
-jq -s '
-  (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
-  map(select(
-    .env == "server" or
-    (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
-  ))
-' .gg/logs-5173.jsonl
 
 # All entries from a specific namespace
 jq 'select(.ns | startswith("gg:routes/+page"))' .gg/logs-5173.jsonl
@@ -287,8 +278,13 @@ jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg
 
 **SSR hydration mismatches:**
 
+The HTTP API handles this directly — prefer it over multi-pass `jq`:
+
 ```bash
-# Call sites where server and client produced different values.
+# Via HTTP (recommended)
+curl -s "http://localhost:5173/__gg/logs?mismatch"
+
+# Via jq on the file — call sites where server and client produced different values.
 # Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
 # Call sites that only run server-side (auth) or client-side (onMount) are ignored.
 jq -s '
@@ -309,8 +305,11 @@ jq -s '
 # Last 20 entries, pretty-printed
 tail -20 .gg/logs-5173.jsonl | jq .
 
-# Pipe HTTP API response through jq
+# Pipe HTTP API through jq for further filtering
 curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
+
+# Mismatches, errors only
+curl -s "http://localhost:5173/__gg/logs?mismatch" | jq 'select(.lvl == "error")'
 ```
 
 **`grep` vs `jq` trade-offs:**
@@ -396,23 +395,36 @@ Guarded by import.meta.env.DEV — tree-shaken in production.
 
 The Vite plugin exposes a middleware endpoint for agent interaction. Same path, different HTTP methods:
 
-| Method   | Endpoint                  | Description                                    | Response                                 |
-| -------- | ------------------------- | ---------------------------------------------- | ---------------------------------------- |
-| `DELETE` | `/__gg/logs`              | Truncate the JSONL file                        | `204 No Content`                         |
-| `GET`    | `/__gg/logs`              | Read the JSONL file contents                   | `200` with `text/plain` body (raw JSONL) |
-| `GET`    | `/__gg/logs?filter=api:*` | Read filtered entries (server-side grep)       | `200` with matching JSONL lines          |
-| `GET`    | `/__gg/logs?since={ts}`   | Read entries after a timestamp                 | `200` with matching JSONL lines          |
-| `GET`    | `/__gg/logs?env=server`   | Read only server-side or client-side entries   | `200` with matching JSONL lines          |
-| `GET`    | `/__gg/logs?origin=tauri` | Read only Tauri webview or browser tab entries | `200` with matching JSONL lines          |
+| Method   | Endpoint                  | Description                                                          | Response                   |
+| -------- | ------------------------- | -------------------------------------------------------------------- | -------------------------- |
+| `DELETE` | `/__gg/logs`              | Truncate the JSONL file                                              | `204 No Content`           |
+| `GET`    | `/__gg/logs`              | Deduplicated entries (server wins; identical client entries dropped) | `200` `text/plain` JSONL   |
+| `GET`    | `/__gg/logs?all`          | All entries, both sides, no dedup (raw file contents)                | `200` `text/plain` JSONL   |
+| `GET`    | `/__gg/logs?mismatch`     | Only call sites where server and client produced different values    | `200` `text/plain` JSONL   |
+| `GET`    | `/__gg/logs?filter=api:*` | Filter by namespace glob (composes with dedup)                       | `200` matching JSONL lines |
+| `GET`    | `/__gg/logs?since={ts}`   | Entries after a timestamp (composes with dedup)                      | `200` matching JSONL lines |
+| `GET`    | `/__gg/logs?env=server`   | Only server-side or client-side entries (composes with dedup)        | `200` matching JSONL lines |
+| `GET`    | `/__gg/logs?origin=tauri` | Only Tauri webview or browser tab entries (composes with dedup)      | `200` matching JSONL lines |
 
-All query params can be combined: `GET /__gg/logs?filter=api:*&env=client&origin=tauri&since=1741234567890`.
+All query params compose: `GET /__gg/logs?filter=api:*&env=client&origin=tauri&since=1741234567890`. Field filters (`filter=`, `since=`, `env=`, `origin=`) are applied first; dedup/mismatch runs on the surviving entries.
+
+**Dedup logic (default):**
+
+In SSR apps, component `gg()` calls fire on both server and client — the file always contains both. The HTTP endpoint deduplicates so agents get a clean view by default:
+
+- Server entries always pass through.
+- A client entry is dropped when a server entry at the same `[ns, line]` produced the identical `msg`.
+- Client entries at call sites with no server counterpart (e.g. `onMount`, event handlers) are always kept.
+- Client entries where `msg` differs from the server entry at the same `[ns, line]` are kept — they surface as hydration mismatches alongside the server entry.
+
+Use `?all` to opt out and see raw file contents. Use `?mismatch` to see only the differing pairs.
 
 **Why HTTP in addition to the file?**
 
 - The agent doesn't need to know the file path or port-based naming convention
 - Works even if the file path is customized via plugin options
 - Follows the same pattern as `/__open-in-editor` and `/__gg/project-root` that already exist
-- Enables `filter` and `since` query params for server-side filtering (more efficient than the agent grepping the whole file)
+- Default dedup means agents don't need to write multi-pass `jq` to suppress SSR duplicates
 
 **Typical agent workflow:**
 
@@ -422,14 +434,18 @@ curl -X DELETE http://localhost:5173/__gg/logs
 
 # 2. Dev triggers the action (page load, button click, etc.)
 
-# 3. Read only the relevant logs
-curl http://localhost:5173/__gg/logs
+# 3. Read logs — SSR duplicates removed by default
+curl -s http://localhost:5173/__gg/logs
 
-# Or with filtering:
-curl "http://localhost:5173/__gg/logs?filter=notify:*"
+# Check for hydration mismatches
+curl -s "http://localhost:5173/__gg/logs?mismatch"
+
+# See everything (raw file)
+curl -s "http://localhost:5173/__gg/logs?all"
+
+# Combine with namespace filter
+curl -s "http://localhost:5173/__gg/logs?filter=notify:*"
 ```
-
-The `GET` endpoint reads the JSONL file and returns it as `text/plain`. When `filter` is provided, each line is parsed and matched against the namespace using the same glob matching as the Eruda UI. When `since` is provided, only entries with `ts >= since` are returned. Both can be combined.
 
 **`DELETE` does not clear the browser ring buffer** -- it only truncates the file. The Eruda UI retains its entries. This is intentional: the agent controls the file, the developer controls the UI.
 
@@ -618,26 +634,20 @@ This project uses `@leftium/gg` with the file sink plugin. All `gg()` calls — 
 
 3. **Trigger** — Ask the user to perform the action under investigation (page load, button click, form submit, etc.). Wait for the user to confirm they're done.
 
-4. **Query** — Read and filter the log entries. In SSR apps, component `gg()` calls appear twice — once as `env:"server"`, once as `env:"client"`. Pick the side you need, or use the dedup query for a full picture without duplicates.
+4. **Query** — Read and filter the log entries. The HTTP endpoint deduplicates SSR entries by default: server entries are canonical; identical client entries are dropped. Client-only call sites (e.g. `onMount`) and hydration mismatches (same call site, different value) are always kept.
 
    ```bash
-   # Check the split first
+   # Default — deduplicated (server wins for identical entries)
+   curl -s http://localhost:5173/__gg/logs
+
+   # Check the env split
    jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
 
-   # Client-side only (component behavior, user interactions)
-   curl -s "http://localhost:5173/__gg/logs?env=client"
+   # Hydration mismatches only (call sites where server and client produced different values)
+   curl -s "http://localhost:5173/__gg/logs?mismatch"
 
-   # Server-side only (load functions, API routes, auth)
-   curl -s "http://localhost:5173/__gg/logs?env=server"
-
-   # Full picture without duplicates (server entries + client-only entries)
-   jq -s '
-     (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
-     map(select(
-       .env == "server" or
-       (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
-     ))
-   ' .gg/logs-5173.jsonl
+   # All entries, both sides (raw file)
+   curl -s "http://localhost:5173/__gg/logs?all"
 
    # Errors only
    jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
@@ -660,26 +670,34 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 | `file`   | Source file path                                                        |
 | `line`   | Source line number                                                      |
 
-**Querying with `jq` (preferred):**
+**HTTP API (primary — handles dedup automatically):**
 
 ```bash
-# Check the env split first (useful in SSR apps)
+# Default — deduplicated (server wins; identical client entries dropped)
+curl -s http://localhost:5173/__gg/logs
+
+# Hydration mismatches only (call sites where server and client produced different values)
+curl -s "http://localhost:5173/__gg/logs?mismatch"
+
+# All entries, both sides, no dedup (raw file contents)
+curl -s "http://localhost:5173/__gg/logs?all"
+
+# Filter by namespace glob, environment, origin — all compose with dedup
+curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
+curl -s "http://localhost:5173/__gg/logs?origin=tauri"
+curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
+
+# Pipe through jq for further filtering
+curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
+```
+
+**Querying the file directly with `jq` (aggregation, field extraction):**
+
+The JSONL file always contains all entries. Use `jq` on the file for queries the HTTP API doesn't cover:
+
+```bash
+# Check the env split
 jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
-
-# Client-side only (component behavior, user interactions)
-jq 'select(.env == "client")' .gg/logs-5173.jsonl
-
-# Server-side only (load functions, API routes, auth)
-jq 'select(.env == "server")' .gg/logs-5173.jsonl
-
-# Full picture without SSR duplicates — server entries + client-only entries (e.g. onMount)
-jq -s '
-  (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
-  map(select(
-    .env == "server" or
-    (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
-  ))
-' .gg/logs-5173.jsonl
 
 # Errors only
 jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
@@ -695,51 +713,11 @@ jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
 
 # Count entries by namespace
 jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
-
-# SSR hydration mismatches — call sites where server and client produced different values.
-# Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
-# Call sites that only run server-side (auth checks) or client-side (onMount) are ignored.
-jq -s '
-  group_by([.ns, .line]) |
-  map(select(map(.env) | (contains(["server"]) and contains(["client"])))) |
-  map({
-    ns: .[0].ns, line: .[0].line,
-    server: (map(select(.env=="server")) | .[0].msg),
-    client: (map(select(.env=="client")) | .[0].msg)
-  }) |
-  map(select(.server != .client))
-' .gg/logs-5173.jsonl
-```
-
-**Querying with `grep` (fallback):**
-
-```bash
-# Server-side entries only (less precise — may false-match message content)
-grep '"env":"server"' .gg/logs-5173.jsonl
-
-# Entries mentioning a namespace pattern
-grep '"ns":"gg:routes/+page' .gg/logs-5173.jsonl
-```
-
-**HTTP API (alternative to file access):**
-
-```bash
-# Read all logs
-curl -s http://localhost:5173/__gg/logs
-
-# Filter by namespace glob, environment, origin
-curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
-curl -s "http://localhost:5173/__gg/logs?origin=tauri"
-
-# Entries after a timestamp
-curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
-
-# Pipe through jq for further filtering
-curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
 ```
 
 **Key details:**
 
+- The HTTP endpoint deduplicates SSR entries by default. The JSONL file always contains both sides.
 - The `env` field distinguishes server-side (SSR, load functions, API routes) from client-side (browser, Tauri webview) entries.
 - The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both connect to the same dev server. Only present on client entries.
 - The file is truncated on dev server start. Use `DELETE /__gg/logs` to clear mid-session.

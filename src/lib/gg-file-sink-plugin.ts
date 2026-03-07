@@ -72,7 +72,11 @@ function matchesPattern(ns: string, pattern: string): boolean {
 	return included && !excluded;
 }
 
-function filterLine(line: string, params: URLSearchParams): boolean {
+/**
+ * Pre-dedup field filters: namespace glob and timestamp.
+ * Applied before dedup/mismatch so the index sees all entries for a call site.
+ */
+function filterLinePreDedup(line: string, params: URLSearchParams): boolean {
 	let entry: SerializedEntry;
 	try {
 		entry = JSON.parse(line);
@@ -86,6 +90,15 @@ function filterLine(line: string, params: URLSearchParams): boolean {
 	const since = params.get('since');
 	if (since && entry.ts < Number(since)) return false;
 
+	return true;
+}
+
+/**
+ * Post-dedup field filters: env and origin.
+ * Applied after dedup/mismatch so cross-env comparisons see both sides first.
+ * e.g. ?mismatch&env=server correctly returns the server half of mismatch pairs.
+ */
+function filterEntryPostDedup(entry: SerializedEntry, params: URLSearchParams): boolean {
 	const env = params.get('env');
 	if (env && entry.env !== env) return false;
 
@@ -93,6 +106,72 @@ function filterLine(line: string, params: URLSearchParams): boolean {
 	if (origin && entry.origin !== origin) return false;
 
 	return true;
+}
+
+/**
+ * Dedup key for an entry: namespace + line number.
+ * Two entries with the same key are the "same call site" — server and client
+ * rendering the same gg() call. If their msg also matches they're identical;
+ * if msg differs they're a hydration mismatch.
+ */
+function dedupKey(entry: SerializedEntry): string {
+	return `${entry.ns}\0${entry.line ?? ''}`;
+}
+
+/**
+ * Apply dedup / mismatch logic to an already-field-filtered list of entries.
+ *
+ * Default (all=false, mismatch=false):
+ *   Server entries always pass. A client entry is dropped when a server entry
+ *   at the same [ns, line] produced the same msg (exact duplicate). Client
+ *   entries at call sites with no server counterpart (onMount, event handlers)
+ *   are kept. Client entries where msg differs from the server entry are kept —
+ *   they surface as hydration mismatches alongside the server entry.
+ *
+ * all=true:
+ *   No dedup. Every entry is returned as written.
+ *
+ * mismatch=true:
+ *   Return only entries from call sites where BOTH envs exist AND msg differs.
+ *   Entries from server-only or client-only call sites are suppressed.
+ */
+function applyDedup(
+	entries: SerializedEntry[],
+	all: boolean,
+	mismatch: boolean
+): SerializedEntry[] {
+	if (all) return entries;
+
+	// Build index: dedupKey → { serverMsgs, clientMsgs }
+	const index = new Map<string, { serverMsgs: Set<string>; clientMsgs: Set<string> }>();
+	for (const e of entries) {
+		const k = dedupKey(e);
+		if (!index.has(k)) index.set(k, { serverMsgs: new Set(), clientMsgs: new Set() });
+		const slot = index.get(k)!;
+		if (e.env === 'server') slot.serverMsgs.add(e.msg);
+		else slot.clientMsgs.add(e.msg);
+	}
+
+	if (mismatch) {
+		// Keep only entries from call sites where both envs exist and at least one
+		// msg is present in one env but not the other (i.e. any difference exists).
+		return entries.filter((e) => {
+			const slot = index.get(dedupKey(e))!;
+			if (slot.serverMsgs.size === 0 || slot.clientMsgs.size === 0) return false;
+			// Check for any msg that exists on one side but not the other
+			for (const m of slot.serverMsgs) if (!slot.clientMsgs.has(m)) return true;
+			for (const m of slot.clientMsgs) if (!slot.serverMsgs.has(m)) return true;
+			return false;
+		});
+	}
+
+	// Default dedup: drop client entries that are exact duplicates of a server entry.
+	return entries.filter((e) => {
+		if (e.env !== 'client') return true;
+		const slot = index.get(dedupKey(e));
+		if (!slot || slot.serverMsgs.size === 0) return true; // no server counterpart — keep
+		return !slot.serverMsgs.has(e.msg); // keep only if msg differs (mismatch)
+	});
 }
 
 export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugin {
@@ -273,7 +352,8 @@ if (import.meta.hot) {
 						logFile: `.gg/logs-${port}.jsonl`,
 						entries,
 						endpoints: {
-							'GET /__gg/logs': 'read JSONL log entries (?filter=, ?since=, ?env=, ?origin=)',
+							'GET /__gg/logs':
+								'read deduplicated JSONL entries (?filter=, ?since=, ?env=, ?origin=, ?all, ?mismatch)',
 							'DELETE /__gg/logs': 'truncate log file',
 							'GET /__gg/project-root': 'project root path'
 						}
@@ -313,26 +393,34 @@ if (import.meta.hot) {
 				if (method === 'GET') {
 					try {
 						const params = new URLSearchParams(url.parse(req.url || '').query || '');
-						const hasFilters =
-							params.has('filter') ||
-							params.has('since') ||
-							params.has('env') ||
-							params.has('origin');
+						const all = params.has('all');
+						const mismatch = params.has('mismatch');
 
 						res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
-						if (!hasFilters) {
-							// No filters — stream the whole file
-							const content = fs.readFileSync(logFile, 'utf-8');
-							res.statusCode = 200;
-							res.end(content);
-						} else {
-							const raw = fs.readFileSync(logFile, 'utf-8');
-							const lines = raw.split('\n').filter((l) => l.trim());
-							const filtered = lines.filter((l) => filterLine(l, params));
-							res.statusCode = 200;
-							res.end(filtered.join('\n') + (filtered.length ? '\n' : ''));
-						}
+						const raw = fs.readFileSync(logFile, 'utf-8');
+						const lines = raw.split('\n').filter((l) => l.trim());
+
+						// Pre-dedup filters: namespace glob and timestamp (symmetric — don't affect cross-env index)
+						const preFiltered = lines.filter((l) => filterLinePreDedup(l, params));
+
+						// Parse surviving lines for dedup/mismatch pass
+						const entries = preFiltered.flatMap((l) => {
+							try {
+								return [JSON.parse(l) as SerializedEntry];
+							} catch {
+								return [];
+							}
+						});
+
+						// Apply dedup / mismatch logic (default: dedup on)
+						const deduped = applyDedup(entries, all, mismatch);
+
+						// Post-dedup filters: env and origin (applied after so cross-env index is intact)
+						const result = deduped.filter((e) => filterEntryPostDedup(e, params));
+
+						res.statusCode = 200;
+						res.end(result.map((e) => JSON.stringify(e)).join('\n') + (result.length ? '\n' : ''));
 					} catch (err) {
 						res.statusCode = 500;
 						res.end(String(err));

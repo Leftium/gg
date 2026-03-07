@@ -310,7 +310,7 @@ curl -X DELETE http://localhost:5173/__gg/logs
 
 # 2. Trigger the action (page load, button click, etc.)
 
-# 3. Read the logs
+# 3. Read the logs — SSR duplicates are removed by default
 curl -s http://localhost:5173/__gg/logs
 
 # Or query the file directly with jq
@@ -330,21 +330,36 @@ jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
 | `file`   | Source file path                                                  |
 | `line`   | Source line number                                                |
 
-**Querying with `jq`:**
+**HTTP API:**
 
-In SSR apps, component `gg()` calls fire on both server and client — the file contains both. Pick the side you need, or use the dedup query for a full picture without duplicates:
+In SSR apps, component `gg()` calls fire on both server and client. The HTTP endpoint deduplicates by default: server entries are canonical; a client entry at the same `[ns, line]` is dropped if its `msg` is identical. Client-only call sites (e.g. `onMount`) and hydration mismatches (same `[ns, line]`, different `msg`) are always kept.
 
 ```bash
-# Check the split first
+# Default — deduplicated (server wins for identical entries)
+curl -s http://localhost:5173/__gg/logs
+
+# All entries, both sides (raw file contents)
+curl -s "http://localhost:5173/__gg/logs?all"
+
+# Only call sites where server and client produced different values (hydration mismatches)
+curl -s "http://localhost:5173/__gg/logs?mismatch"
+
+# Filter by namespace glob, environment, origin, or timestamp — all compose with dedup
+curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
+curl -s "http://localhost:5173/__gg/logs?origin=tauri"
+curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
+
+# Status and endpoint list
+curl -s http://localhost:5173/__gg/
+```
+
+**Querying the file directly with `jq`:**
+
+The JSONL file always contains all entries (both sides). Use `jq` when you need aggregation, field extraction, or queries the HTTP API doesn't cover:
+
+```bash
+# Check the env split (useful in SSR apps)
 jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
-
-# Client-side only (component behavior, user interactions)
-jq 'select(.env == "client")' .gg/logs-5173.jsonl
-# or via HTTP:
-curl -s "http://localhost:5173/__gg/logs?env=client"
-
-# Server-side only (load functions, API routes, auth)
-jq 'select(.env == "server")' .gg/logs-5173.jsonl
 
 # Errors only
 jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
@@ -357,49 +372,9 @@ jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
 
 # Count entries by namespace
 jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
-
-# SSR full picture without duplicates — all server entries + client-only entries
-# (onMount etc). Drops client entries that have a matching server entry at the same
-# [ns, line], since the server entry is the canonical first-render value.
-jq -s '
-  (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
-  map(select(
-    .env == "server" or
-    (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
-  ))
-' .gg/logs-5173.jsonl
-
-# SSR hydration mismatches — call sites where server and client produced different values.
-# Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
-# Call sites that only run server-side (auth checks) or client-side (onMount) are ignored.
-jq -s '
-  group_by([.ns, .line]) |
-  map(select(map(.env) | (contains(["server"]) and contains(["client"])))) |
-  map({
-    ns: .[0].ns, line: .[0].line,
-    server: (map(select(.env=="server")) | .[0].msg),
-    client: (map(select(.env=="client")) | .[0].msg)
-  }) |
-  map(select(.server != .client))
-' .gg/logs-5173.jsonl
 ```
 
-**HTTP API (alternative to file access):**
-
-```bash
-# Read all logs
-curl -s http://localhost:5173/__gg/logs
-
-# Filter by namespace glob, environment, or origin
-curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
-curl -s "http://localhost:5173/__gg/logs?origin=tauri"
-curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
-
-# Status and endpoints
-curl -s http://localhost:5173/__gg/
-```
-
-The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. In SSR apps, component `gg()` calls appear twice — once as `env:"server"`, once as `env:"client"`. Filter to the side you need, or use the dedup `jq` query above for a full picture without duplicates. The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both are open.
+The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both are open.
 
 **Add to your project's `AGENTS.md`** -- see [Agent Instructions Template](specs/gg-agent-file-sink.md#agent-instructions-template-for-consuming-projects-agentsmd) in the spec for a copy-paste-ready block to add to consuming projects.
 
