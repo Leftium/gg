@@ -253,7 +253,7 @@ if (import.meta.hot) {
 		if (entry.line !== undefined) s.line = entry.line;
 		if (entry.src) s.src = entry.src;
 		if (entry.tableData) s.table = entry.tableData;
-		import.meta.hot.send('gg:log', { entry: s, origin: __ggFileSinkOrigin });
+		import.meta.hot.send('gg:log', { entry: s });
 	});
 }
 `;
@@ -290,12 +290,12 @@ if (import.meta.hot) {
 			};
 
 			// Client-side entries arrive via HMR custom event
-			server.hot.on('gg:log', (data: { entry: SerializedEntry; origin: 'tauri' | 'browser' }) => {
+			server.hot.on('gg:log', (data: { entry: SerializedEntry }) => {
 				if (!data?.entry) return;
 				const serialized: SerializedEntry = {
 					...data.entry,
 					env: 'client',
-					origin: data.origin ?? 'browser'
+					origin: data.entry.origin ?? 'browser'
 				};
 				appendEntry(serialized);
 			});
