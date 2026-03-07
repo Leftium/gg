@@ -22,6 +22,7 @@ interface SerializedEntry {
 	line?: number;
 	src?: string;
 	diff: number;
+	table?: { keys: string[]; rows: Array<Record<string, unknown>> };
 }
 
 function serializeEntry(
@@ -41,6 +42,7 @@ function serializeEntry(
 	if (entry.file) out.file = entry.file;
 	if (entry.line !== undefined) out.line = entry.line;
 	if (entry.src) out.src = entry.src;
+	if (entry.tableData) out.table = entry.tableData;
 	return out;
 }
 
@@ -141,6 +143,7 @@ if (import.meta.hot) {
 		if (entry.file) s.file = entry.file;
 		if (entry.line !== undefined) s.line = entry.line;
 		if (entry.src) s.src = entry.src;
+		if (entry.tableData) s.table = entry.tableData;
 		import.meta.hot.send('gg:log', { entry: s, origin: __ggFileSinkOrigin });
 	});
 }
@@ -175,7 +178,7 @@ if (import.meta.hot) {
 
 			const appendEntry = (serialized: SerializedEntry) => {
 				if (!logFile) return;
-				fs.appendFile(logFile, JSON.stringify(serialized) + '\n', () => {});
+				fs.appendFileSync(logFile, JSON.stringify(serialized) + '\n');
 			};
 
 			// Client-side entries arrive via HMR custom event
