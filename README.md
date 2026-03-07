@@ -347,6 +347,20 @@ jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
 
 # Count entries by namespace
 jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
+
+# SSR hydration mismatches — call sites where server and client produced different values.
+# Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
+# Call sites that only run server-side (auth checks) or client-side (onMount) are ignored.
+jq -s '
+  group_by([.ns, .line]) |
+  map(select(map(.env) | (contains(["server"]) and contains(["client"])))) |
+  map({
+    ns: .[0].ns, line: .[0].line,
+    server: (map(select(.env=="server")) | .[0].msg),
+    client: (map(select(.env=="client")) | .[0].msg)
+  }) |
+  map(select(.server != .client))
+' .gg/logs-5173.jsonl
 ```
 
 **HTTP API (alternative to file access):**
