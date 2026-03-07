@@ -49,10 +49,10 @@ The developer still triggers the UI action (page load, button click, etc.), but 
 
 Vite's HMR WebSocket supports custom event types in both directions:
 
-| Direction | Browser API | Server API |
-|-----------|-------------|------------|
-| Browser → Server | `import.meta.hot.send(event, data)` | `server.hot.on(event, callback)` |
-| Server → Browser | `import.meta.hot.on(event, callback)` | `server.hot.send(event, data)` |
+| Direction        | Browser API                           | Server API                       |
+| ---------------- | ------------------------------------- | -------------------------------- |
+| Browser → Server | `import.meta.hot.send(event, data)`   | `server.hot.on(event, callback)` |
+| Server → Browser | `import.meta.hot.on(event, callback)` | `server.hot.send(event, data)`   |
 
 **Key finding**: The WebSocket connection is already open for HMR. Custom messages add zero connection overhead. Payload size is the only cost.
 
@@ -60,11 +60,11 @@ Vite's HMR WebSocket supports custom event types in both directions:
 
 ### File Write Performance
 
-| Operation | Typical latency | Notes |
-|-----------|----------------|-------|
-| `fs.appendFile` (async) | 0.01-0.1ms | Non-blocking, suitable for hot path |
-| `fs.appendFileSync` | 0.05-0.5ms | Blocks event loop, avoid |
-| Batched write (100 entries) | ~0.1ms | Amortizes syscall overhead |
+| Operation                   | Typical latency | Notes                               |
+| --------------------------- | --------------- | ----------------------------------- |
+| `fs.appendFile` (async)     | 0.01-0.1ms      | Non-blocking, suitable for hot path |
+| `fs.appendFileSync`         | 0.05-0.5ms      | Blocks event loop, avoid            |
+| Batched write (100 entries) | ~0.1ms          | Amortizes syscall overhead          |
 
 **Key finding**: At typical dev logging volumes (1-50 entries/sec), async `appendFile` is negligible. Even at 100 entries/sec, the file I/O cost is unmeasurable against normal Vite dev server work.
 
@@ -72,14 +72,14 @@ Vite's HMR WebSocket supports custom event types in both directions:
 
 ### JSONL vs SQLite
 
-| Dimension | JSONL | SQLite |
-|-----------|-------|--------|
-| Agent readability | `grep` / `cat` -- universally available | Requires `sqlite3` CLI or library |
-| Structured queries | Manual (jq, custom parsing) | Native (time ranges, aggregation, COUNT) |
-| Append performance | `fs.appendFile` -- trivial | Transaction overhead per write |
-| Concurrent access | Safe for small appends (< 4KB, POSIX atomic) | Built-in locking, but write contention possible |
-| File inspection | Human-readable in any editor | Binary format, requires tooling |
-| Corruption risk | One bad line, rest is fine | Corruption can affect entire DB |
+| Dimension          | JSONL                                        | SQLite                                          |
+| ------------------ | -------------------------------------------- | ----------------------------------------------- |
+| Agent readability  | `grep` / `cat` -- universally available      | Requires `sqlite3` CLI or library               |
+| Structured queries | Manual (jq, custom parsing)                  | Native (time ranges, aggregation, COUNT)        |
+| Append performance | `fs.appendFile` -- trivial                   | Transaction overhead per write                  |
+| Concurrent access  | Safe for small appends (< 4KB, POSIX atomic) | Built-in locking, but write contention possible |
+| File inspection    | Human-readable in any editor                 | Binary format, requires tooling                 |
+| Corruption risk    | One bad line, rest is fine                   | Corruption can affect entire DB                 |
 
 **Key finding**: Every coding agent has `grep` and `cat`. Not every agent has `sqlite3`. For the primary use case -- "show me logs matching this pattern" -- `grep` on JSONL is equivalent to a SQL query and has zero dependencies.
 
@@ -96,18 +96,18 @@ One JSON object per line. Advantages for agents:
 
 ## Design Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Transport | Vite HMR custom events | WebSocket already open, zero additional infra. gg already ships Vite plugins. |
-| File format | JSONL over SQLite | Every agent has `grep`; not every agent has `sqlite3`. JSONL is append-only, human-readable, corruption-tolerant. |
-| File location | `.gg/logs-{port}.jsonl` | Port-scoped to isolate multiple dev servers. Grouped under `.gg/` for easy gitignore. Discoverable via `ls .gg/logs-*.jsonl`. |
-| Truncation | Auto on server start + agent-initiated clear via HTTP | Auto-truncate prevents unbounded growth. Agent clear (`DELETE /__gg/logs`) gives precise control -- agent clears right before triggering an action, then reads only the relevant entries. |
-| Browser-side batching | Optional, deferred | Simplicity first. One HMR message per `gg()` call. Batch later if profiling shows need. |
-| Filtering | Agent-side (grep the file) | No server-side filter config needed. JSONL fields are greppable. Agent uses its own tools. |
-| Serialization | Subset of CapturedEntry fields | Skip `args` (may contain non-serializable objects). Include namespace, message, timestamp, level, env, origin, file, line, src. |
-| Client origin detection | `window.__TAURI_INTERNALS__` check | Tauri injects this global in its webview. Detected once on init, stamped on every entry. Distinguishes Tauri webview from browser tab when both connect to the same Vite dev server. |
-| Activation | Dev-only, opt-in via plugin option | No file I/O in production. Explicit opt-in prevents surprise disk writes. |
-| Production behavior | Automatic no-op, zero bundle cost | `import.meta.hot` is `undefined` in prod builds -- Vite dead-code-eliminates the client sender. `configureServer` only runs in dev. |
+| Decision                | Choice                                                | Rationale                                                                                                                                                                                 |
+| ----------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport               | Vite HMR custom events                                | WebSocket already open, zero additional infra. gg already ships Vite plugins.                                                                                                             |
+| File format             | JSONL over SQLite                                     | Every agent has `grep`; not every agent has `sqlite3`. JSONL is append-only, human-readable, corruption-tolerant.                                                                         |
+| File location           | `.gg/logs-{port}.jsonl`                               | Port-scoped to isolate multiple dev servers. Grouped under `.gg/` for easy gitignore. Discoverable via `ls .gg/logs-*.jsonl`.                                                             |
+| Truncation              | Auto on server start + agent-initiated clear via HTTP | Auto-truncate prevents unbounded growth. Agent clear (`DELETE /__gg/logs`) gives precise control -- agent clears right before triggering an action, then reads only the relevant entries. |
+| Browser-side batching   | Optional, deferred                                    | Simplicity first. One HMR message per `gg()` call. Batch later if profiling shows need.                                                                                                   |
+| Filtering               | Agent-side (grep the file)                            | No server-side filter config needed. JSONL fields are greppable. Agent uses its own tools.                                                                                                |
+| Serialization           | Subset of CapturedEntry fields                        | Skip `args` (may contain non-serializable objects). Include namespace, message, timestamp, level, env, origin, file, line, src.                                                           |
+| Client origin detection | `window.__TAURI_INTERNALS__` check                    | Tauri injects this global in its webview. Detected once on init, stamped on every entry. Distinguishes Tauri webview from browser tab when both connect to the same Vite dev server.      |
+| Activation              | Dev-only, opt-in via plugin option                    | No file I/O in production. Explicit opt-in prevents surprise disk writes.                                                                                                                 |
+| Production behavior     | Automatic no-op, zero bundle cost                     | `import.meta.hot` is `undefined` in prod builds -- Vite dead-code-eliminates the client sender. `configureServer` only runs in dev.                                                       |
 
 ## Architecture
 
@@ -181,24 +181,25 @@ Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent ut
 {"ns":"routes/+page.server.ts@load","msg":"Fetching user data","ts":1741234567885,"env":"server","file":"src/routes/+page.server.ts","line":18,"diff":0}
 ```
 
-| Field | Source | Description |
-|-------|--------|-------------|
-| `ns` | `namespace` | Namespace string (greppable) |
-| `msg` | `message` | Formatted message string |
-| `ts` | `timestamp` | Unix epoch ms |
-| `lvl` | `level` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
-| `env` | (injected) | `"client"` or `"server"` -- which runtime produced this entry |
-| `origin` | (injected) | `"tauri"` \| `"browser"` (client only) -- which client produced this entry |
-| `file` | `file` | Source file path |
-| `line` | `line` | Source line number |
-| `src` | `src` | Source expression text (icecream-style) |
-| `diff` | `diff` | Ms since previous log in same namespace |
+| Field    | Source      | Description                                                                |
+| -------- | ----------- | -------------------------------------------------------------------------- |
+| `ns`     | `namespace` | Namespace string (greppable)                                               |
+| `msg`    | `message`   | Formatted message string                                                   |
+| `ts`     | `timestamp` | Unix epoch ms                                                              |
+| `lvl`    | `level`     | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)          |
+| `env`    | (injected)  | `"client"` or `"server"` -- which runtime produced this entry              |
+| `origin` | (injected)  | `"tauri"` \| `"browser"` (client only) -- which client produced this entry |
+| `file`   | `file`      | Source file path                                                           |
+| `line`   | `line`      | Source line number                                                         |
+| `src`    | `src`       | Source expression text (icecream-style)                                    |
+| `diff`   | `diff`      | Ms since previous log in same namespace                                    |
 
 The `env` field is added by the transport layer, not by `gg()` itself. The client-side HMR sender stamps `"client"`; the server-side direct writer stamps `"server"`. This lets agents distinguish SSR load function logs from hydrated component logs, even when both target the same source file.
 
 The `origin` field distinguishes which client produced the entry. Detected client-side via `window.__TAURI_INTERNALS__` -- if present, `"tauri"`; otherwise `"browser"`. This is important because Tauri apps (`bun tauri dev`) open the Vite dev server in a Tauri webview by default, and the developer or agent may also open the same URL in a browser. Both connect to the same Vite HMR WebSocket and both produce `env: "client"` entries. Without `origin`, these are indistinguishable. The `origin` field is omitted for `env: "server"` entries (server-side code has no client context).
 
 Agents can filter by environment and origin:
+
 - `grep '"env":"server"' .gg/logs-5173.jsonl` -- server-side only
 - `grep '"origin":"tauri"' .gg/logs-5173.jsonl` -- Tauri webview only
 - `GET /__gg/logs?origin=browser` -- browser tab only
@@ -270,14 +271,14 @@ curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
 
 **`grep` vs `jq` trade-offs:**
 
-| Dimension | `grep` | `jq` |
-|-----------|--------|------|
-| Availability | Universal | Pre-installed on macOS/most Linux; may need install elsewhere |
-| Speed | Faster for large files (no JSON parsing) | Slightly slower but negligible at dev log volumes |
-| Precision | Substring match (may false-match message content) | Exact field-level filtering |
-| Field extraction | Not possible (returns whole lines) | Select, reshape, format individual fields |
-| Aggregation | Not possible | `group_by`, `length`, `sort_by`, etc. |
-| Learning curve | Minimal | Moderate (but agents already know `jq` syntax) |
+| Dimension        | `grep`                                            | `jq`                                                          |
+| ---------------- | ------------------------------------------------- | ------------------------------------------------------------- |
+| Availability     | Universal                                         | Pre-installed on macOS/most Linux; may need install elsewhere |
+| Speed            | Faster for large files (no JSON parsing)          | Slightly slower but negligible at dev log volumes             |
+| Precision        | Substring match (may false-match message content) | Exact field-level filtering                                   |
+| Field extraction | Not possible (returns whole lines)                | Select, reshape, format individual fields                     |
+| Aggregation      | Not possible                                      | `group_by`, `length`, `sort_by`, etc.                         |
+| Learning curve   | Minimal                                           | Moderate (but agents already know `jq` syntax)                |
 
 **Recommendation for agents**: Use `jq` as the default querying tool. Fall back to `grep` if `jq` is unavailable or for quick single-pattern searches where precision doesn't matter.
 
@@ -333,14 +334,14 @@ Server-side capture is simpler than client-side because there's no transport gap
 
 The Vite plugin exposes a middleware endpoint for agent interaction. Same path, different HTTP methods:
 
-| Method | Endpoint | Description | Response |
-|--------|----------|-------------|----------|
-| `DELETE` | `/__gg/logs` | Truncate the JSONL file | `204 No Content` |
-| `GET` | `/__gg/logs` | Read the JSONL file contents | `200` with `text/plain` body (raw JSONL) |
-| `GET` | `/__gg/logs?filter=api:*` | Read filtered entries (server-side grep) | `200` with matching JSONL lines |
-| `GET` | `/__gg/logs?since={ts}` | Read entries after a timestamp | `200` with matching JSONL lines |
-| `GET` | `/__gg/logs?env=server` | Read only server-side or client-side entries | `200` with matching JSONL lines |
-| `GET` | `/__gg/logs?origin=tauri` | Read only Tauri webview or browser tab entries | `200` with matching JSONL lines |
+| Method   | Endpoint                  | Description                                    | Response                                 |
+| -------- | ------------------------- | ---------------------------------------------- | ---------------------------------------- |
+| `DELETE` | `/__gg/logs`              | Truncate the JSONL file                        | `204 No Content`                         |
+| `GET`    | `/__gg/logs`              | Read the JSONL file contents                   | `200` with `text/plain` body (raw JSONL) |
+| `GET`    | `/__gg/logs?filter=api:*` | Read filtered entries (server-side grep)       | `200` with matching JSONL lines          |
+| `GET`    | `/__gg/logs?since={ts}`   | Read entries after a timestamp                 | `200` with matching JSONL lines          |
+| `GET`    | `/__gg/logs?env=server`   | Read only server-side or client-side entries   | `200` with matching JSONL lines          |
+| `GET`    | `/__gg/logs?origin=tauri` | Read only Tauri webview or browser tab entries | `200` with matching JSONL lines          |
 
 All query params can be combined: `GET /__gg/logs?filter=api:*&env=client&origin=tauri&since=1741234567890`.
 
@@ -553,6 +554,7 @@ This project uses `@leftium/gg` with the file sink plugin. All `gg()` calls — 
 1. **Instrument** — Ensure `gg()` calls exist in the code paths you want to observe. `gg()` is zero-config — just `import { gg } from '@leftium/gg'` and call `gg(value)`. Skip this step if the relevant calls are already in place.
 
 2. **Reset** — Clear the log file so you're only reading entries from the action you care about.
+
    ```bash
    curl -X DELETE http://localhost:5173/__gg/logs
    ```
@@ -560,6 +562,7 @@ This project uses `@leftium/gg` with the file sink plugin. All `gg()` calls — 
 3. **Trigger** — Ask the user to perform the action under investigation (page load, button click, form submit, etc.). Wait for the user to confirm they're done.
 
 4. **Query** — Read and filter the log entries.
+
    ```bash
    # Read everything
    curl -s http://localhost:5173/__gg/logs
@@ -574,16 +577,16 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 
 **Each JSONL line contains:**
 
-| Field | Description |
-|-------|-------------|
-| `ns` | Namespace (file + function, e.g., `routes/+page.svelte@handleClick`) |
-| `msg` | Formatted message string |
-| `ts` | Unix epoch ms |
-| `lvl` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
-| `env` | `"client"` or `"server"` — which runtime produced this entry |
-| `origin` | `"tauri"` \| `"browser"` (client entries only) |
-| `file` | Source file path |
-| `line` | Source line number |
+| Field    | Description                                                          |
+| -------- | -------------------------------------------------------------------- |
+| `ns`     | Namespace (file + function, e.g., `routes/+page.svelte@handleClick`) |
+| `msg`    | Formatted message string                                             |
+| `ts`     | Unix epoch ms                                                        |
+| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)    |
+| `env`    | `"client"` or `"server"` — which runtime produced this entry         |
+| `origin` | `"tauri"` \| `"browser"` (client entries only)                       |
+| `file`   | Source file path                                                     |
+| `line`   | Source line number                                                   |
 
 **Querying with `jq` (preferred):**
 
@@ -635,10 +638,30 @@ curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
 ```
 
 **Key details:**
+
 - The `env` field distinguishes server-side (SSR, load functions, API routes) from client-side (browser, Tauri webview) entries.
 - The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both connect to the same dev server. Only present on client entries.
 - The file is truncated on dev server start. Use `DELETE /__gg/logs` to clear mid-session.
 - Each line is independently valid JSON — partial file reads and streaming (`tail -f`) work.
+
+**Opening files in the editor:**
+
+Vite's dev server registers `/__open-in-editor` unconditionally on every dev server — no extra plugin required. Agents can use it to open the exact source location of any log entry directly in the developer's editor.
+
+```bash
+# Open the file+line from the first error entry
+curl -s http://localhost:5173/__gg/logs \
+  | jq -r 'select(.lvl == "error") | "/__open-in-editor?file=\(.file)&line=\(.line)"' \
+  | head -1 \
+  | xargs -I{} curl -s "http://localhost:5173{}"
+
+# Open a specific file+line directly
+curl "http://localhost:5173/__open-in-editor?file=src/routes/+page.svelte&line=42"
+```
+
+The endpoint accepts `file`, `line`, and `col` query params. `file` can be relative to the project root or absolute. The editor opens and positions the cursor at the specified location. The response is `222` (a non-standard status used by `launch-editor`) with a self-closing page — safe to discard.
+
+Agents should use this proactively when they identify a relevant source location in log output: open the file for the developer rather than just citing `file:line` in text. This is especially useful after the analyze step — if an error or unexpected value is traced to a specific line, open it immediately.
 
 ---
 
