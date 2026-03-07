@@ -1,5 +1,7 @@
 # Two-Layer Filtering for gg Console
 
+**Status**: Implemented (all phases complete)
+
 ## Overview
 
 Replace the current single-layer display filter with a two-layer filtering strategy that gives users control over both **what enters the ring buffer** and **what is displayed** from it. This addresses the problem of high-volume logging overwhelming the ring buffer's fixed capacity (default: 2000 loggs).
@@ -473,7 +475,7 @@ All UI changes described in the spec. Several items deviated from the original d
 - [x] **Segment-level keep toast** — `showKeepToast()` added (`toastMode: 'hide' | 'drop' | 'keep'`). Clicking `[+]` saves pre-click `keepPattern` + `DroppedNamespaceInfo`, removes exclusion (or adds inclusion for Case B), deletes from `droppedNamespaces`, shows toast. Segment click broadens pattern and clears all matching dropped namespaces. Undo restores `keepPattern` and re-inserts the sentinel.
 - [x] **`simplifyPattern` redundancy removal** — now collapses redundant inclusions subsumed by `*`, and drops exclusions covered by a broader exclusion glob (e.g. `-gg:routes/demo-helpers.ts:x` subsumed by `-gg:routes/demo-*`).
 - [x] **`gg:` universal segment** — all auto-generated namespaces prefixed with `gg:` by Vite plugin; `.ns()` runtime normalised to `gg:label`. The `gg` first segment in every toast and log row targets all gg namespaces (`gg:*`).
-- [ ] **`DROPPED:*` show-filter support** — sentinels are rendered from a separate section, not from `filteredIndices`, so `gg-show = 'DROPPED:*'` does not currently filter them.
+- [x] **`DROPPED:*` show-filter support** — `renderSentinelSection()` now respects `filterPattern`; added to all 9 `filterPattern`-change call sites in `plugin.ts`.
 
 ---
 
