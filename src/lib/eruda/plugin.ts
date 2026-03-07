@@ -2890,15 +2890,8 @@ export function createGgPlugin(
 			}
 		});
 
-		// Helper: show confirmation tooltip near target element
-		function showConfirmationTooltip(containerEl: HTMLElement, target: HTMLElement, text: string) {
-			const tip = containerEl.querySelector('.gg-hover-tooltip') as HTMLElement | null;
-			if (!tip) return;
-
-			tip.textContent = text;
-			tip.style.display = 'block';
-
-			const targetRect = target.getBoundingClientRect();
+		/** Clamp and apply tooltip position below (or above) a target element. */
+		function positionTooltip(tip: HTMLElement, targetRect: DOMRect) {
 			let left = targetRect.left;
 			let top = targetRect.bottom + 4;
 
@@ -2913,6 +2906,16 @@ export function createGgPlugin(
 
 			tip.style.left = `${left}px`;
 			tip.style.top = `${top}px`;
+		}
+
+		// Helper: show confirmation tooltip near target element
+		function showConfirmationTooltip(containerEl: HTMLElement, target: HTMLElement, text: string) {
+			const tip = containerEl.querySelector('.gg-hover-tooltip') as HTMLElement | null;
+			if (!tip) return;
+
+			tip.textContent = text;
+			tip.style.display = 'block';
+			positionTooltip(tip, target.getBoundingClientRect());
 
 			setTimeout(() => {
 				tip.style.display = 'none';
@@ -3039,25 +3042,7 @@ export function createGgPlugin(
 			tip.appendChild(pre);
 
 			tip.style.display = 'block';
-
-			// Position below the hovered element using viewport coords (fixed positioning)
-			const targetRect = target.getBoundingClientRect();
-			let left = targetRect.left;
-			let top = targetRect.bottom + 4;
-
-			// Keep tooltip within viewport
-			const tipRect = tip.getBoundingClientRect();
-			if (left + tipRect.width > window.innerWidth) {
-				left = window.innerWidth - tipRect.width - 8;
-			}
-			if (left < 4) left = 4;
-			// If tooltip would go below viewport, show above instead
-			if (top + tipRect.height > window.innerHeight) {
-				top = targetRect.top - tipRect.height - 4;
-			}
-
-			tip.style.left = `${left}px`;
-			tip.style.top = `${top}px`;
+			positionTooltip(tip, target.getBoundingClientRect());
 		});
 
 		containerEl.addEventListener('mouseout', (e: MouseEvent) => {
@@ -3097,24 +3082,7 @@ export function createGgPlugin(
 
 			tip.textContent = actionText;
 			tip.style.display = 'block';
-
-			// Position below the target
-			const targetRect = target.getBoundingClientRect();
-			let left = targetRect.left;
-			let top = targetRect.bottom + 4;
-
-			// Keep tooltip within viewport
-			const tipRect = tip.getBoundingClientRect();
-			if (left + tipRect.width > window.innerWidth) {
-				left = window.innerWidth - tipRect.width - 8;
-			}
-			if (left < 4) left = 4;
-			if (top + tipRect.height > window.innerHeight) {
-				top = targetRect.top - tipRect.height - 4;
-			}
-
-			tip.style.left = `${left}px`;
-			tip.style.top = `${top}px`;
+			positionTooltip(tip, target.getBoundingClientRect());
 		});
 
 		containerEl.addEventListener('mouseout', (e: MouseEvent) => {
