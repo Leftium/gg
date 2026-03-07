@@ -1,6 +1,6 @@
 # gg.widget: Eruda Plugin for Mobile Debugging
 
-> **Status: Largely implemented.** The core Eruda plugin, ring buffer, namespace filtering UI, copy, and production triggers are all working. See [Implementation Status](#implementation-status) for details. The filtering model is being overhauled by the [two-layer filtering spec](./gg-two-layer-filtering.md).
+> **Status: Implemented.** All core functionality is complete. The `localStorage.debug` manager approach was superseded by two-layer filtering (`gg-keep`/`gg-show`). Namespace presets (All/Routes/Lib/Off) were deferred indefinitely — the Keep/Show checkbox panels cover this use case. See [gg-two-layer-filtering.md](./completed/gg-two-layer-filtering.md) for the filtering implementation.
 
 ## Overview
 
@@ -65,7 +65,7 @@ Eruda's Console tab can only filter by log level (All/Info/Warning/Error). The g
 
 ### 2. `localStorage.debug` Namespace Manager
 
-> **Partially implemented.** The Settings panel shows the current `localStorage.debug` value with Sync/Clear buttons. The full checkbox UI with auto-discovered namespaces and presets is not yet built. **This section is being superseded** by the [two-layer filtering spec](./gg-two-layer-filtering.md), which replaces `localStorage.debug` with `gg-keep` (buffer gate) and `gg-show` (display filter), breaking from the `debug` npm package conventions entirely.
+> **Superseded.** The Sync/Clear buttons were removed. `localStorage.debug` is no longer used by gg. The [two-layer filtering spec](./completed/gg-two-layer-filtering.md) replaced this with `gg-keep` (buffer gate) and `gg-show` (display filter). The Settings panel now has a single `gg-console` toggle for native console output.
 
 ```
 ┌─────────────────────────────────────┐
@@ -245,7 +245,7 @@ gg._onLog = (entry: CapturedEntry) => { ... };
 
 ### Capture Is Independent of `debug` Enable State
 
-> **Being overhauled.** The [two-layer filtering spec](./gg-two-layer-filtering.md) replaces this single-layer model with `gg-keep` (buffer gate) and `gg-show` (display filter). `localStorage.debug` will no longer be used by gg. Native console output will be controlled by a separate `gg-console` toggle.
+> **Overhauled.** The [two-layer filtering spec](./completed/gg-two-layer-filtering.md) replaced this single-layer model with `gg-keep` (buffer gate) and `gg-show` (display filter). `localStorage.debug` is no longer used by gg. Native console output is controlled by the `gg-console` toggle.
 
 The plugin captures **all** `gg()` calls regardless of `localStorage.debug`. This means:
 
@@ -261,7 +261,7 @@ This separation is valuable: console quiet but gg tab comprehensive, or vice ver
 - When full, oldest loggs are evicted (ring buffer)
 - Clear button empties the buffer
 - Buffer is **in-memory only** - cleared on page reload
-- See the [two-layer filtering spec](./gg-two-layer-filtering.md) for the upcoming `gg-keep` gate that controls what enters the buffer
+- The `gg-keep` gate controls what enters the buffer — see [completed/gg-two-layer-filtering.md](./completed/gg-two-layer-filtering.md)
 
 ## Proposed API
 
@@ -477,28 +477,28 @@ The only capability lost is server-side programmatic log access. Server environm
 
 ## Implementation Status
 
-| Feature                                                           | Status          | Key Files                                                    |
-| ----------------------------------------------------------------- | --------------- | ------------------------------------------------------------ |
-| Eruda plugin with GG tab                                          | **Implemented** | `src/lib/eruda/plugin.ts` (2889 lines)                       |
-| Ring buffer (2000 loggs)                                          | **Implemented** | `src/lib/eruda/buffer.ts`                                    |
-| Namespace-aware filtering (wildcard patterns)                     | **Implemented** | `plugin.ts` (filter UI, `namespaceMatchesPattern`)           |
-| Segmented namespace clicks (left-click solo, right-click exclude) | **Implemented** | `plugin.ts`                                                  |
-| Hide toast with undo and segment-level control                    | **Implemented** | `plugin.ts` (`showHideToast`, `undoHide`)                    |
-| Hide button `[x]` per namespace (on hover)                        | **Implemented** | `plugin.ts` (`.gg-ns-hide`)                                  |
-| Copy filtered loggs                                               | **Implemented** | `plugin.ts` (`formatEntryForClipboard`)                      |
-| Virtual scrolling                                                 | **Implemented** | `plugin.ts` (uses `@tanstack/virtual-core`)                  |
-| `GgConsole.svelte` wrapper component                              | **Implemented** | `src/lib/GgConsole.svelte`                                   |
-| Production triggers (`?gg`, gesture, localStorage)                | **Implemented** | `src/lib/eruda/loader.ts`, `src/lib/eruda/index.ts`          |
-| Internal `debug` package replacement                              | **Implemented** | `src/lib/debug/common.ts`, `browser.ts`, `node.ts`           |
-| `localStorage.debug` manager (Sync/Clear buttons)                 | **Partial**     | `plugin.ts` (Settings panel)                                 |
-| Auto-discovered namespace checkbox list                           | **Not yet**     | Spec only                                                    |
-| Namespace presets (All/Routes/Lib/Off)                            | **Not yet**     | Spec only                                                    |
-| `autoEnable` option for `localStorage.debug`                      | **Moot**        | Superseded by two-layer filtering                            |
-| Two-layer filtering (`gg-keep`/`gg-show`)                         | **Not yet**     | See [gg-two-layer-filtering.md](./gg-two-layer-filtering.md) |
+| Feature                                                           | Status          | Key Files                                                                        |
+| ----------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------- |
+| Eruda plugin with GG tab                                          | **Implemented** | `src/lib/eruda/plugin.ts` (2889 lines)                                           |
+| Ring buffer (2000 loggs)                                          | **Implemented** | `src/lib/eruda/buffer.ts`                                                        |
+| Namespace-aware filtering (wildcard patterns)                     | **Implemented** | `plugin.ts` (filter UI, `namespaceMatchesPattern`)                               |
+| Segmented namespace clicks (left-click solo, right-click exclude) | **Implemented** | `plugin.ts`                                                                      |
+| Hide toast with undo and segment-level control                    | **Implemented** | `plugin.ts` (`showHideToast`, `undoHide`)                                        |
+| Hide button `[x]` per namespace (on hover)                        | **Implemented** | `plugin.ts` (`.gg-ns-hide`)                                                      |
+| Copy filtered loggs                                               | **Implemented** | `plugin.ts` (`formatEntryForClipboard`)                                          |
+| Virtual scrolling                                                 | **Implemented** | `plugin.ts` (uses `@tanstack/virtual-core`)                                      |
+| `GgConsole.svelte` wrapper component                              | **Implemented** | `src/lib/GgConsole.svelte`                                                       |
+| Production triggers (`?gg`, gesture, localStorage)                | **Implemented** | `src/lib/eruda/loader.ts`, `src/lib/eruda/index.ts`                              |
+| Internal `debug` package replacement                              | **Implemented** | `src/lib/debug/common.ts`, `browser.ts`, `node.ts`                               |
+| `localStorage.debug` manager (Sync/Clear buttons)                 | **Superseded**  | Replaced by `gg-console` toggle + `gg-keep`/`gg-show` panels                     |
+| Auto-discovered namespace checkbox list                           | **Implemented** | Keep/Show panels with checkbox lists (`plugin.ts`)                               |
+| Namespace presets (All/Routes/Lib/Off)                            | **Deferred**    | Keep/Show checkboxes cover the use case; presets not built                       |
+| `autoEnable` option for `localStorage.debug`                      | **Superseded**  | Replaced by two-layer filtering                                                  |
+| Two-layer filtering (`gg-keep`/`gg-show`)                         | **Implemented** | See [completed/gg-two-layer-filtering.md](./completed/gg-two-layer-filtering.md) |
 
 ## Open Questions
 
-1. ~~**Should `initGgEruda()` auto-enable `localStorage.debug`?**~~ **Moot.** The [two-layer filtering spec](./gg-two-layer-filtering.md) replaces `localStorage.debug` with `gg-keep`/`gg-show`. Default is `*` (keep/show everything), so gg "just works" without manual setup.
+1. ~~**Should `initGgEruda()` auto-enable `localStorage.debug`?**~~ **Moot.** The [two-layer filtering spec](./completed/gg-two-layer-filtering.md) replaced `localStorage.debug` with `gg-keep`/`gg-show`. Default is `*` (keep/show everything), so gg "just works" without manual setup.
 
 2. ~~**Eruda as peer dependency or bundled?**~~ **Resolved.** Dynamic `import('eruda')` in `loader.ts` -- exactly as recommended. Users install Eruda as a dev dependency.
 
@@ -510,7 +510,7 @@ The only capability lost is server-side programmatic log access. Server environm
 
 ## References
 
-- [gg-two-layer-filtering spec](./gg-two-layer-filtering.md) -- upcoming overhaul of the filtering model
+- [gg-two-layer-filtering spec](./completed/gg-two-layer-filtering.md) -- filtering model overhaul (implemented)
 - [Eruda](https://github.com/liriliri/eruda) - mobile debug console (20.7k stars, ~100kb gz)
 - [Eruda Plugin Docs](https://eruda.liriliri.io/docs/plugin.html) - plugin API reference
 - [Chii](https://github.com/liriliri/chii) - remote debugging with Chrome DevTools frontend (2.2k stars, same author as Eruda)
