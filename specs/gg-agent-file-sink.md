@@ -203,6 +203,84 @@ Agents can filter by environment and origin:
 - `grep '"origin":"tauri"' .gg/logs-5173.jsonl` -- Tauri webview only
 - `GET /__gg/logs?origin=browser` -- browser tab only
 
+### Querying with `jq`
+
+`grep` works for quick pattern matching, but `jq` is the preferred tool for structured JSONL queries. It gives precise field-level filtering without false matches (e.g., `grep '"server"'` would match a message string containing the word "server", while `jq 'select(.env == "server")'` is exact).
+
+`jq` is pre-installed on macOS and most Linux distributions. Agents should prefer `jq` when available, fall back to `grep` for environments where `jq` is missing.
+
+**Basic filtering:**
+
+```bash
+# All server-side entries
+jq 'select(.env == "server")' .gg/logs-5173.jsonl
+
+# All entries from a specific namespace
+jq 'select(.ns | startswith("routes/+page"))' .gg/logs-5173.jsonl
+
+# Errors only
+jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
+
+# Client entries from the Tauri webview
+jq 'select(.env == "client" and .origin == "tauri")' .gg/logs-5173.jsonl
+```
+
+**Extracting specific fields (reduce noise):**
+
+```bash
+# Just timestamps and messages
+jq '{ts: .ts, msg: .msg}' .gg/logs-5173.jsonl
+
+# Namespace, message, and source location
+jq '{ns: .ns, msg: .msg, file: .file, line: .line}' .gg/logs-5173.jsonl
+
+# Messages only, as plain text (one per line, no JSON wrapping)
+jq -r '.msg' .gg/logs-5173.jsonl
+```
+
+**Time-range queries:**
+
+```bash
+# Entries from the last 5 seconds (ts is Unix epoch ms)
+jq "select(.ts > (now * 1000 - 5000))" .gg/logs-5173.jsonl
+
+# Entries after a specific timestamp
+jq 'select(.ts > 1741234567890)' .gg/logs-5173.jsonl
+```
+
+**Counting and aggregation:**
+
+```bash
+# Count entries by env
+jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
+
+# Count entries by namespace
+jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
+```
+
+**Combining with other tools:**
+
+```bash
+# Last 20 entries, pretty-printed
+tail -20 .gg/logs-5173.jsonl | jq .
+
+# Pipe HTTP API response through jq
+curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
+```
+
+**`grep` vs `jq` trade-offs:**
+
+| Dimension | `grep` | `jq` |
+|-----------|--------|------|
+| Availability | Universal | Pre-installed on macOS/most Linux; may need install elsewhere |
+| Speed | Faster for large files (no JSON parsing) | Slightly slower but negligible at dev log volumes |
+| Precision | Substring match (may false-match message content) | Exact field-level filtering |
+| Field extraction | Not possible (returns whole lines) | Select, reshape, format individual fields |
+| Aggregation | Not possible | `group_by`, `length`, `sort_by`, etc. |
+| Learning curve | Minimal | Moderate (but agents already know `jq` syntax) |
+
+**Recommendation for agents**: Use `jq` as the default querying tool. Fall back to `grep` if `jq` is unavailable or for quick single-pattern searches where precision doesn't matter.
+
 **Excluded**: `args` (may contain circular refs, DOM nodes, non-serializable objects), `color` (cosmetic), `col` (rarely useful), `stack` (large, could be opt-in), `tableData` (complex structure).
 
 ### Hook Points: Client and Server
@@ -333,7 +411,8 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 - [ ] **2.1** Add `.gg/` to the project's `.gitignore` template / documentation
 - [ ] **2.2** Test with the demo app (`src/routes/`) -- verify entries appear in the file
 - [ ] **2.3** Test with a non-SvelteKit Vite app (plain Vite + React/Vue) to verify framework-agnostic behavior
-- [ ] **2.4** Document in README: how to enable, file location, JSONL format, example grep commands
+- [ ] **2.4** Document in README: how to enable, file location, JSONL format, example `jq`/`grep` commands
+- [ ] **2.5** Extract the "Agent Instructions Template" section into consuming projects' `AGENTS.md` files (e.g., epicenter). Adapt paths/ports as needed.
 
 ### Phase 3: Agent Ergonomics (future)
 
@@ -444,9 +523,10 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 - [ ] Each line is valid JSON and independently parseable
 - [ ] Every line contains an `env` field (`"client"` or `"server"`)
 - [ ] Client entries contain an `origin` field (`"tauri"` or `"browser"`)
-- [ ] `grep '"ns":"some:namespace"' .gg/logs-5173.jsonl` returns matching entries
-- [ ] `grep '"env":"server"' .gg/logs-5173.jsonl` returns only server-side entries
-- [ ] `grep '"origin":"tauri"' .gg/logs-5173.jsonl` returns only Tauri webview entries
+- [ ] `jq 'select(.ns | startswith("some:namespace"))' .gg/logs-5173.jsonl` returns matching entries
+- [ ] `jq 'select(.env == "server")' .gg/logs-5173.jsonl` returns only server-side entries
+- [ ] `jq 'select(.origin == "tauri")' .gg/logs-5173.jsonl` returns only Tauri webview entries
+- [ ] `grep` equivalents also work: `grep '"env":"server"' .gg/logs-5173.jsonl`
 - [ ] `curl -X DELETE http://localhost:5173/__gg/logs` truncates the file and returns 204
 - [ ] `curl http://localhost:5173/__gg/logs` returns the full JSONL contents
 - [ ] `curl "http://localhost:5173/__gg/logs?filter=api:*&env=server"` returns only matching server entries
@@ -455,6 +535,112 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 - [ ] `DELETE` does not affect the browser-side ring buffer or Eruda UI
 - [ ] No file writes in production builds (client sender is tree-shaken, `configureServer` doesn't run)
 - [ ] No measurable dev server performance impact at typical logging volumes (< 100 entries/sec)
+
+## Agent Instructions Template (for consuming projects' AGENTS.md)
+
+The following content should be added to consuming projects' `AGENTS.md` (or equivalent agent instruction file) once the file sink is enabled. Adapt paths and port numbers as needed.
+
+---
+
+### Reading `gg()` Runtime Logs
+
+This project uses `@leftium/gg` with the file sink plugin. All `gg()` calls — both browser-side and server-side — are captured to `.gg/logs-{port}.jsonl` during development.
+
+**Log file location**: `.gg/logs-{port}.jsonl` (e.g., `.gg/logs-5173.jsonl`). Discover active log files with `ls .gg/logs-*.jsonl`.
+
+**Workflow:**
+
+1. **Instrument** — Ensure `gg()` calls exist in the code paths you want to observe. `gg()` is zero-config — just `import { gg } from '@leftium/gg'` and call `gg(value)`. Skip this step if the relevant calls are already in place.
+
+2. **Reset** — Clear the log file so you're only reading entries from the action you care about.
+   ```bash
+   curl -X DELETE http://localhost:5173/__gg/logs
+   ```
+
+3. **Trigger** — Ask the user to perform the action under investigation (page load, button click, form submit, etc.). Wait for the user to confirm they're done.
+
+4. **Query** — Read and filter the log entries.
+   ```bash
+   # Read everything
+   curl -s http://localhost:5173/__gg/logs
+
+   # Or query the file directly with jq
+   jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
+   ```
+
+5. **Analyze** — Interpret the entries in context. The `file` and `line` fields point to source locations. The `ns` field shows the call site (file + function). The `env` field tells you whether the entry came from server-side (SSR, load functions) or client-side (browser, Tauri). If more data is needed, go back to step 1 and add more `gg()` calls.
+
+This cycle — instrument, reset, trigger, query, analyze — is the primary debugging loop. Each iteration narrows the investigation.
+
+**Each JSONL line contains:**
+
+| Field | Description |
+|-------|-------------|
+| `ns` | Namespace (file + function, e.g., `routes/+page.svelte@handleClick`) |
+| `msg` | Formatted message string |
+| `ts` | Unix epoch ms |
+| `lvl` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
+| `env` | `"client"` or `"server"` — which runtime produced this entry |
+| `origin` | `"tauri"` \| `"browser"` (client entries only) |
+| `file` | Source file path |
+| `line` | Source line number |
+
+**Querying with `jq` (preferred):**
+
+```bash
+# Server-side entries only
+jq 'select(.env == "server")' .gg/logs-5173.jsonl
+
+# Errors only
+jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
+
+# Entries from a specific file
+jq 'select(.file | contains("+page.svelte"))' .gg/logs-5173.jsonl
+
+# Just messages as plain text
+jq -r '.msg' .gg/logs-5173.jsonl
+
+# Messages with source location
+jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
+
+# Count entries by namespace
+jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
+```
+
+**Querying with `grep` (fallback):**
+
+```bash
+# Server-side entries only (less precise — may false-match message content)
+grep '"env":"server"' .gg/logs-5173.jsonl
+
+# Entries mentioning a namespace pattern
+grep '"ns":"routes/+page' .gg/logs-5173.jsonl
+```
+
+**HTTP API (alternative to file access):**
+
+```bash
+# Read all logs
+curl -s http://localhost:5173/__gg/logs
+
+# Filter by namespace glob, environment, origin
+curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
+curl -s "http://localhost:5173/__gg/logs?origin=tauri"
+
+# Entries after a timestamp
+curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
+
+# Pipe through jq for further filtering
+curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
+```
+
+**Key details:**
+- The `env` field distinguishes server-side (SSR, load functions, API routes) from client-side (browser, Tauri webview) entries.
+- The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both connect to the same dev server. Only present on client entries.
+- The file is truncated on dev server start. Use `DELETE /__gg/logs` to clear mid-session.
+- Each line is independently valid JSON — partial file reads and streaming (`tail -f`) work.
+
+---
 
 ## References
 
