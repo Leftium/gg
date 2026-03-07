@@ -659,22 +659,42 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 
 **Each JSONL line contains:**
 
-| Field    | Description                                                             |
-| -------- | ----------------------------------------------------------------------- |
-| `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@handleClick`) |
-| `msg`    | Formatted message string                                                |
-| `ts`     | Unix epoch ms                                                           |
-| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)       |
-| `env`    | `"client"` or `"server"` — which runtime produced this entry            |
-| `origin` | `"tauri"` \| `"browser"` (client entries only)                          |
-| `file`   | Source file path                                                        |
-| `line`   | Source line number                                                      |
+| Field    | Description                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------- |
+| `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@handleClick`)                     |
+| `msg`    | Formatted message string                                                                    |
+| `ts`     | Unix epoch ms                                                                               |
+| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)                           |
+| `env`    | `"client"` or `"server"` — which runtime produced this entry                                |
+| `origin` | `"tauri"` \| `"browser"` (client entries only)                                              |
+| `file`   | Source file path                                                                            |
+| `line`   | Source line number                                                                          |
+| `count`  | Repeat count when consecutive entries share the same `ns`+`msg` (HTTP only, omitted when 1) |
 
 **HTTP API (primary — handles dedup automatically):**
 
+Consecutive repeated messages are collapsed by default (Chrome DevTools-style `count` field). Use `?raw` to disable and get one line per entry.
+
+**Prefer `jq` over `grep`** for filtering NDJSON — it operates on fields directly and avoids JSON parsing noise:
+
 ```bash
-# Default — deduplicated (server wins; identical client entries dropped)
+# Default — deduplicated, repeated messages collapsed
 curl -s http://localhost:5173/__gg/logs
+
+# Filter by message content (jq preferred over grep)
+curl -s http://localhost:5173/__gg/logs | jq 'select(.msg | test("myFunction"))'
+
+# Extract just the msg field as plain text
+curl -s http://localhost:5173/__gg/logs | jq -r '.msg'
+
+# Errors only
+curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
+
+# Messages with source location
+curl -s http://localhost:5173/__gg/logs | jq -r '"\(.file):\(.line) \(.msg)"'
+
+# Unrolled — one line per entry, no count collapsing
+curl -s "http://localhost:5173/__gg/logs?raw"
 
 # Hydration mismatches only (call sites where server and client produced different values)
 curl -s "http://localhost:5173/__gg/logs?mismatch"
@@ -686,9 +706,6 @@ curl -s "http://localhost:5173/__gg/logs?all"
 curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
 curl -s "http://localhost:5173/__gg/logs?origin=tauri"
 curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
-
-# Pipe through jq for further filtering
-curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
 ```
 
 **Querying the file directly with `jq` (aggregation, field extraction):**

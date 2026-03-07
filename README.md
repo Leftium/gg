@@ -319,27 +319,38 @@ jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
 
 **Each JSONL line contains:**
 
-| Field    | Description                                                       |
-| -------- | ----------------------------------------------------------------- |
-| `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@click`) |
-| `msg`    | Formatted message string                                          |
-| `ts`     | Unix epoch ms                                                     |
-| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
-| `env`    | `"client"` or `"server"` -- which runtime produced this entry     |
-| `origin` | `"tauri"` \| `"browser"` (client entries only)                    |
-| `file`   | Source file path                                                  |
-| `line`   | Source line number                                                |
+| Field    | Description                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------- |
+| `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@click`)                           |
+| `msg`    | Formatted message string                                                                    |
+| `ts`     | Unix epoch ms                                                                               |
+| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)                           |
+| `env`    | `"client"` or `"server"` -- which runtime produced this entry                               |
+| `origin` | `"tauri"` \| `"browser"` (client entries only)                                              |
+| `file`   | Source file path                                                                            |
+| `line`   | Source line number                                                                          |
+| `count`  | Repeat count when consecutive entries share the same `ns`+`msg` (HTTP only, omitted when 1) |
 
 **HTTP API:**
 
 In SSR apps, component `gg()` calls fire on both server and client. The HTTP endpoint deduplicates by default: server entries are canonical; a client entry at the same `[ns, line]` is dropped if its `msg` is identical. Client-only call sites (e.g. `onMount`) and hydration mismatches (same `[ns, line]`, different `msg`) are always kept.
 
+Consecutive repeated messages are collapsed by default (Chrome DevTools-style `count` field on the entry). Use `?raw` to disable collapsing and get one line per entry.
+
 ```bash
-# Default — deduplicated (server wins for identical entries)
+# Default — deduplicated, repeated messages collapsed
 curl -s http://localhost:5173/__gg/logs
+
+# Prefer jq over grep for filtering NDJSON — cleaner field access
+curl -s http://localhost:5173/__gg/logs | jq 'select(.msg | test("myFunction"))'
+curl -s http://localhost:5173/__gg/logs | jq -r '.msg'
+curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
 
 # All entries, both sides (raw file contents)
 curl -s "http://localhost:5173/__gg/logs?all"
+
+# Unrolled — one line per entry, no count collapsing
+curl -s "http://localhost:5173/__gg/logs?raw"
 
 # Only call sites where server and client produced different values (hydration mismatches)
 curl -s "http://localhost:5173/__gg/logs?mismatch"

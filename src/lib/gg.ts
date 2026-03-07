@@ -494,6 +494,55 @@ export class GgChain<T> {
  *
  * Handles namespace resolution, debug output, capture hook, and return value.
  */
+/**
+ * Format a single value for the flat `msg` string written to the file sink
+ * (and stored on CapturedEntry.message). Produces readable output for the
+ * common types that String() handles poorly:
+ *
+ * - plain objects / arrays → compact JSON (depth-limited, no circular crash)
+ * - DOM nodes              → "tag#id.firstClass" summary
+ * - everything else        → String() as before
+ *
+ * This mirrors what `debug`'s %o/%O formatters do and what Node's util.inspect
+ * does by default — display formatting, not round-trip serialization.
+ */
+function formatValue(v: unknown): string {
+	if (v === null) return 'null';
+	if (v === undefined) return 'undefined';
+	if (typeof v === 'string') return v;
+	if (typeof v !== 'object' && typeof v !== 'function') return String(v);
+
+	// DOM nodes: "div#id.firstClass" summary
+	if (typeof Element !== 'undefined' && v instanceof Element) {
+		let s = v.tagName.toLowerCase();
+		if (v.id) s += `#${v.id}`;
+		if (v.classList.length) s += `.${v.classList[0]}`;
+		return s;
+	}
+	if (typeof Node !== 'undefined' && v instanceof Node) {
+		return `[${v.constructor?.name ?? 'Node'}]`;
+	}
+
+	// Arrays and plain objects: compact JSON, depth-limited
+	try {
+		return JSON.stringify(v, jsonReplacer, 0) ?? String(v);
+	} catch {
+		return String(v);
+	}
+}
+
+/** JSON replacer that limits nesting depth to avoid huge output. */
+function jsonReplacer(this: unknown, key: string, value: unknown): unknown {
+	// 'this' is the parent object; key === '' at the root level
+	if (key !== '' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+		// Count depth by checking how many ancestors are objects/arrays
+		// Simple approximation: truncate any nested object at depth > 2
+		const str = JSON.stringify(value);
+		if (str && str.length > 120) return '{…}';
+	}
+	return value;
+}
+
 function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 	const { ns: nsLabel, file, line, col, src, level, stack, tableData } = options;
 
@@ -545,7 +594,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		namespace,
 		color: ggLogFunction.color,
 		diff,
-		message: logArgs.length === 1 ? String(logArgs[0]) : logArgs.map(String).join(' '),
+		message: logArgs.length === 1 ? formatValue(logArgs[0]) : logArgs.map(formatValue).join(' '),
 		args: logArgs,
 		timestamp: Date.now(),
 		file,

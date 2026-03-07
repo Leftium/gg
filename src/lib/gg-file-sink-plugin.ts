@@ -25,6 +25,11 @@ interface SerializedEntry {
 	table?: { keys: string[]; rows: Array<Record<string, unknown>> };
 }
 
+/** SerializedEntry with optional repeat-count for HTTP output. */
+interface OutputEntry extends SerializedEntry {
+	count?: number;
+}
+
 /**
  * Serialize a CapturedEntry for writing to the JSONL log file.
  *
@@ -158,6 +163,29 @@ function applyDedup(
 		if (!slot || slot.serverMsgs.size === 0) return true; // no server counterpart — keep
 		return !slot.serverMsgs.has(e.msg); // keep only if msg differs (mismatch)
 	});
+}
+
+/**
+ * Collapse consecutive entries with the same ns+msg into a single entry with
+ * a `count` field. Mirrors the Chrome DevTools repeat-counter behaviour.
+ *
+ * Only consecutive runs are collapsed — intentional: an entry appearing again
+ * after different messages is a new event and should be shown separately.
+ *
+ * The `ts` and `diff` of the *first* occurrence are kept; `count` is omitted
+ * when it is 1 (no repetition) so the schema stays clean for non-repeated entries.
+ */
+function collapseRepeats(entries: SerializedEntry[]): OutputEntry[] {
+	const out: OutputEntry[] = [];
+	for (const e of entries) {
+		const prev = out.at(-1);
+		if (prev && prev.ns === e.ns && prev.msg === e.msg) {
+			prev.count = (prev.count ?? 1) + 1;
+		} else {
+			out.push({ ...e });
+		}
+	}
+	return out;
 }
 
 export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugin {
@@ -330,7 +358,7 @@ if (import.meta.hot) {
 						entries,
 						endpoints: {
 							'GET /__gg/logs':
-								'read deduplicated JSONL entries (?filter=, ?since=, ?env=, ?origin=, ?all, ?mismatch)',
+								'read deduplicated JSONL entries (?filter=, ?since=, ?env=, ?origin=, ?all, ?mismatch, ?raw)',
 							'DELETE /__gg/logs': 'truncate log file',
 							'GET /__gg/project-root': 'project root path'
 						}
@@ -372,11 +400,13 @@ if (import.meta.hot) {
 						const params = new URL(req.url || '/', 'http://x').searchParams;
 						const all = params.has('all');
 						const mismatch = params.has('mismatch');
+						// ?raw disables consecutive-repeat collapsing (count field)
+						const noCollapse = params.has('raw');
 
 						res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
-						const raw = fs.readFileSync(logFile, 'utf-8');
-						const lines = raw.split('\n').filter((l) => l.trim());
+						const fileContent = fs.readFileSync(logFile, 'utf-8');
+						const lines = fileContent.split('\n').filter((l: string) => l.trim());
 
 						// Pre-dedup filters: namespace glob and timestamp (symmetric — don't affect cross-env index)
 						const preFiltered = lines.filter((l) => filterLinePreDedup(l, params));
@@ -394,7 +424,10 @@ if (import.meta.hot) {
 						const deduped = applyDedup(entries, all, mismatch);
 
 						// Post-dedup filters: env and origin (applied after so cross-env index is intact)
-						const result = deduped.filter((e) => filterEntryPostDedup(e, params));
+						const postFiltered = deduped.filter((e) => filterEntryPostDedup(e, params));
+
+						// Collapse consecutive repeated messages (count field), unless ?raw
+						const result = noCollapse ? postFiltered : collapseRepeats(postFiltered);
 
 						res.statusCode = 200;
 						res.end(result.map((e) => JSON.stringify(e)).join('\n') + (result.length ? '\n' : ''));
