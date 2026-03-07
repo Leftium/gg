@@ -39,21 +39,21 @@ describe('bare gg() transforms', () => {
 	it('rewrites bare gg(expr) with file@fn namespace', () => {
 		const code = 'function handleClick() { gg("hello") }';
 		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte@handleClick'");
+		expect(out).toContain("ns:'gg:routes/+page.svelte@handleClick'");
 		expect(out).toContain('src:\'"hello"\'');
 	});
 
 	it('rewrites bare gg() with no args', () => {
 		const code = 'function test() { gg() }';
 		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte@test'");
+		expect(out).toContain("ns:'gg:routes/+page.svelte@test'");
 		expect(out).not.toContain('src:');
 	});
 
 	it('rewrites bare gg(expr) at top level (no enclosing function)', () => {
 		const code = 'gg("top level")';
 		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte'");
+		expect(out).toContain("ns:'gg:routes/+page.svelte'");
 		// No @fn suffix when not inside a function
 		expect(out).not.toContain('@');
 	});
@@ -67,7 +67,7 @@ describe('bare gg() transforms', () => {
 		const code = `function test() { gg("hello").ns("custom").warn() }`;
 		const out = transform(code)!;
 		// Plugin rewrites gg("hello") but leaves .ns("custom").warn() untouched
-		expect(out).toContain("gg._ns({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("gg._ns({ns:'gg:routes/+page.svelte@test'");
 		expect(out).toContain('.ns("custom").warn()');
 	});
 
@@ -85,14 +85,14 @@ describe('gg.here() transforms', () => {
 	it('rewrites gg.here() to gg._here() with metadata', () => {
 		const code = 'function test() { gg.here() }';
 		const out = transform(code)!;
-		expect(out).toContain("gg._here({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("gg._here({ns:'gg:routes/+page.svelte@test'");
 		expect(out).toContain("file:'src/routes/+page.svelte'");
 	});
 
 	it('rewrites gg.here() at top level', () => {
 		const code = 'const info = gg.here()';
 		const out = transform(code)!;
-		expect(out).toContain("gg._here({ns:'routes/+page.svelte'");
+		expect(out).toContain("gg._here({ns:'gg:routes/+page.svelte'");
 	});
 });
 
@@ -102,26 +102,26 @@ describe('timer transforms', () => {
 	it('rewrites gg.time() with metadata', () => {
 		const code = `function test() { gg.time('fetch') }`;
 		const out = transform(code)!;
-		expect(out).toContain("gg._time({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("gg._time({ns:'gg:routes/+page.svelte@test'");
 		expect(out).toContain("'fetch'");
 	});
 
 	it('rewrites gg.time() with no args', () => {
 		const code = `function test() { gg.time() }`;
 		const out = transform(code)!;
-		expect(out).toContain("gg._time({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("gg._time({ns:'gg:routes/+page.svelte@test'");
 	});
 
 	it('rewrites gg.timeLog() with metadata', () => {
 		const code = `function test() { gg.timeLog('fetch', 'step 1') }`;
 		const out = transform(code)!;
-		expect(out).toContain("gg._timeLog({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("gg._timeLog({ns:'gg:routes/+page.svelte@test'");
 	});
 
 	it('rewrites gg.timeEnd() with metadata', () => {
 		const code = `function test() { gg.timeEnd('fetch') }`;
 		const out = transform(code)!;
-		expect(out).toContain("gg._timeEnd({ns:'routes/+page.svelte@test'");
+		expect(out).toContain("gg._timeEnd({ns:'gg:routes/+page.svelte@test'");
 	});
 
 	it('preserves .ns() chain after gg.time()', () => {
@@ -177,7 +177,7 @@ describe('edge cases', () => {
 	it('handles multi-line gg() call', () => {
 		const code = `function handleClick() {\n\tgg(\n\t\tsome.value\n\t)\n}`;
 		const out = transform(code)!;
-		expect(out).toContain("ns:'routes/+page.svelte@handleClick'");
+		expect(out).toContain("ns:'gg:routes/+page.svelte@handleClick'");
 		expect(out).toContain("file:'src/routes/+page.svelte'");
 		expect(out).toContain('line:');
 	});
@@ -201,7 +201,7 @@ describe('edge cases', () => {
 		);
 		const out = result!.code;
 		// Script: transformed with object literal syntax
-		expect(out).toContain("{ns:'routes/+page.svelte@test'");
+		expect(out).toContain("{ns:'gg:routes/+page.svelte@test'");
 		// Template prose: left untouched (prose text, not a code expression)
 		expect(out).toContain('gg("label")');
 	});

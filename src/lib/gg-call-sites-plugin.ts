@@ -831,7 +831,7 @@ export function transformGgCalls(
 			if (code.slice(i + 2, i + 9) === '.here()') {
 				const { line, col } = getLineCol(code, i);
 				const fnName = getFunctionName(i, range);
-				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+				const callpoint = `gg:${shortPath}${fnName ? `@${fnName}` : ''}`;
 				const escapedNs = escapeForString(callpoint);
 
 				result.push(code.slice(lastIndex, i));
@@ -853,7 +853,7 @@ export function transformGgCalls(
 
 				const { line, col } = getLineCol(code, i);
 				const fnName = getFunctionName(i, range);
-				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+				const callpoint = `gg:${shortPath}${fnName ? `@${fnName}` : ''}`;
 				const escapedNs = escapeForString(callpoint);
 
 				const closeParenPos = findMatchingParen(code, openParenPos);
@@ -894,7 +894,7 @@ export function transformGgCalls(
 			if (code[i + 2] === '(') {
 				const { line, col } = getLineCol(code, i);
 				const fnName = getFunctionName(i, range);
-				const callpoint = `${shortPath}${fnName ? `@${fnName}` : ''}`;
+				const callpoint = `gg:${shortPath}${fnName ? `@${fnName}` : ''}`;
 				const escapedNs = escapeForString(callpoint);
 				const openParenPos = i + 2; // position of '(' in 'gg('
 

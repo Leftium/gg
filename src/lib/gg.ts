@@ -501,10 +501,10 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
 	}
 
-	const namespace = nsLabel;
+	const namespace = nsLabel.startsWith('gg:') ? nsLabel : `gg:${nsLabel}`;
 
-	if (nsLabel.length < 80 && nsLabel.length > maxCallpointLength) {
-		maxCallpointLength = nsLabel.length;
+	if (namespace.length < 80 && namespace.length > maxCallpointLength) {
+		maxCallpointLength = namespace.length;
 	}
 
 	const ggLogFunction =
@@ -604,11 +604,11 @@ gg._here = function (options: { ns: string; file?: string; line?: number; col?: 
 		return { fileName: '', functionName: '', url: '' };
 	}
 	const { ns: nsLabel, file, line, col } = options;
-	const namespace = nsLabel;
+	const namespace = nsLabel.startsWith('gg:') ? nsLabel : `gg:${nsLabel}`;
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
 		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
-	ggLogFunction(`    📝 ${nsLabel}`);
+	ggLogFunction(`    📝 ${namespace}`);
 
 	const fileName = file ? file.replace(srcRootRegex, '') : nsLabel;
 	const functionName = nsLabel.includes('@') ? nsLabel.split('@').pop() || '' : '';

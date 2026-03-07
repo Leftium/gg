@@ -124,7 +124,7 @@ describe('createGgPlugin — dropped namespace tracking (Phase 2)', () => {
 
 	it('does not track entries that pass the keep gate', () => {
 		// Default keepPattern is '*' — everything passes
-		send(makeEntry('routes/+page.svelte@handleClick'));
+		send(makeEntry('gg:routes/+page.svelte@handleClick'));
 		expect(plugin.getDroppedNamespaces().size).toBe(0);
 	});
 
@@ -133,14 +133,14 @@ describe('createGgPlugin — dropped namespace tracking (Phase 2)', () => {
 		// Re-init so keepPattern is loaded
 		plugin.init($el as never);
 
-		const entry = makeEntry('routes/+page.svelte@handleClick', { timestamp: 1000 });
+		const entry = makeEntry('gg:routes/+page.svelte@handleClick', { timestamp: 1000 });
 		send(entry);
 
 		const dropped = plugin.getDroppedNamespaces();
 		expect(dropped.size).toBe(1);
 
-		const info = dropped.get('routes/+page.svelte@handleClick')!;
-		expect(info.namespace).toBe('routes/+page.svelte@handleClick');
+		const info = dropped.get('gg:routes/+page.svelte@handleClick')!;
+		expect(info.namespace).toBe('gg:routes/+page.svelte@handleClick');
 		expect(info.total).toBe(1);
 		expect(info.firstSeen).toBe(1000);
 		expect(info.lastSeen).toBe(1000);
@@ -211,12 +211,12 @@ describe('createGgPlugin — dropped namespace tracking (Phase 2)', () => {
 		plugin.init($el as never);
 
 		send(makeEntry('api:users')); // kept
-		send(makeEntry('routes/+page.svelte')); // dropped
+		send(makeEntry('gg:routes/+page.svelte')); // dropped
 
 		const dropped = plugin.getDroppedNamespaces();
 		expect(dropped.size).toBe(1);
 		expect(dropped.has('api:users')).toBe(false);
-		expect(dropped.has('routes/+page.svelte')).toBe(true);
+		expect(dropped.has('gg:routes/+page.svelte')).toBe(true);
 	});
 
 	// -------------------------------------------------------------------------

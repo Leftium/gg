@@ -239,9 +239,7 @@ export function createGgPlugin(
 			// Load filter state BEFORE registering _onLog hook, because registering
 			// triggers replay of earlyLogBuffer and each entry checks filterPattern
 			const _legacyFilter = localStorage.getItem(LEGACY_FILTER_KEY);
-			// Strip old gg: prefix from legacy values (Phase 1 dropped the namespace prefix)
-			const _legacyNormalized = _legacyFilter ? _legacyFilter.replace(/\bgg:/g, '') || '*' : null;
-			filterPattern = localStorage.getItem(SHOW_KEY) || _legacyNormalized || '*';
+			filterPattern = localStorage.getItem(SHOW_KEY) || _legacyFilter || '*';
 			keepPattern = localStorage.getItem(KEEP_KEY) || '*';
 			showExpressions = localStorage.getItem(SHOW_EXPRESSIONS_KEY) === 'true';
 
@@ -739,6 +737,7 @@ export function createGgPlugin(
 			text-decoration-style: solid;
 			text-underline-offset: 2px;
 		}
+
 			.gg-details {
 				grid-column: 1 / -1;
 				border-top: none;
