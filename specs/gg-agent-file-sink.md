@@ -104,7 +104,8 @@ One JSON object per line. Advantages for agents:
 | Truncation | Auto on server start + agent-initiated clear via HTTP | Auto-truncate prevents unbounded growth. Agent clear (`DELETE /__gg/logs`) gives precise control -- agent clears right before triggering an action, then reads only the relevant entries. |
 | Browser-side batching | Optional, deferred | Simplicity first. One HMR message per `gg()` call. Batch later if profiling shows need. |
 | Filtering | Agent-side (grep the file) | No server-side filter config needed. JSONL fields are greppable. Agent uses its own tools. |
-| Serialization | Subset of CapturedEntry fields | Skip `args` (may contain non-serializable objects). Include namespace, message, timestamp, level, file, line, src. |
+| Serialization | Subset of CapturedEntry fields | Skip `args` (may contain non-serializable objects). Include namespace, message, timestamp, level, env, origin, file, line, src. |
+| Client origin detection | `window.__TAURI_INTERNALS__` check | Tauri injects this global in its webview. Detected once on init, stamped on every entry. Distinguishes Tauri webview from browser tab when both connect to the same Vite dev server. |
 | Activation | Dev-only, opt-in via plugin option | No file I/O in production. Explicit opt-in prevents surprise disk writes. |
 | Production behavior | Automatic no-op, zero bundle cost | `import.meta.hot` is `undefined` in prod builds -- Vite dead-code-eliminates the client sender. `configureServer` only runs in dev. |
 
@@ -155,18 +156,19 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
                                                      │
                                                      ▼
                                           .gg/logs-5173.jsonl
-                                          ┌────────────────────────────────┐
-                                          │ {"env":"server","ns":"..."}    │
-                                          │ {"env":"client","ns":"..."}    │
-                                          │ {"env":"server","ns":"..."}    │
-                                          │ {"env":"client","ns":"..."}    │
-                                          └────────────────────────────────┘
+                                          ┌──────────────────────────────────────┐
+                                          │ {"env":"server","ns":"..."}          │
+                                          │ {"env":"client","origin":"tauri"}    │
+                                          │ {"env":"client","origin":"browser"}  │
+                                          │ {"env":"server","ns":"..."}          │
+                                          └──────────────────────────────────────┘
                                                      ↑
                                           Agent reads file directly
                                           or via GET /__gg/logs
-                                          Filter by env:
-                                            grep '"env":"server"' ...
+                                          Filter by env/origin:
+                                            grep '"origin":"tauri"' ...
                                             GET /__gg/logs?env=server
+                                            GET /__gg/logs?origin=browser
 ```
 
 ### Serialized Entry Format
@@ -174,7 +176,8 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
 Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent utility and safe serialization:
 
 ```jsonl
-{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567890,"lvl":"warn","env":"client","file":"src/routes/+page.svelte","line":42,"src":"item","diff":12}
+{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567890,"lvl":"warn","env":"client","origin":"tauri","file":"src/routes/+page.svelte","line":42,"src":"item","diff":12}
+{"ns":"routes/+page.svelte@handleClick","msg":"Processing item: {id: 42}","ts":1741234567920,"env":"client","origin":"browser","file":"src/routes/+page.svelte","line":42,"src":"item","diff":30}
 {"ns":"routes/+page.server.ts@load","msg":"Fetching user data","ts":1741234567885,"env":"server","file":"src/routes/+page.server.ts","line":18,"diff":0}
 ```
 
@@ -185,12 +188,20 @@ Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent ut
 | `ts` | `timestamp` | Unix epoch ms |
 | `lvl` | `level` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
 | `env` | (injected) | `"client"` or `"server"` -- which runtime produced this entry |
+| `origin` | (injected) | `"tauri"` \| `"browser"` (client only) -- which client produced this entry |
 | `file` | `file` | Source file path |
 | `line` | `line` | Source line number |
 | `src` | `src` | Source expression text (icecream-style) |
 | `diff` | `diff` | Ms since previous log in same namespace |
 
-The `env` field is added by the transport layer, not by `gg()` itself. The client-side HMR sender stamps `"client"`; the server-side direct writer stamps `"server"`. This lets agents distinguish SSR load function logs from hydrated component logs, even when both target the same source file. Agents can filter by environment: `grep '"env":"server"' .gg/logs-5173.jsonl`.
+The `env` field is added by the transport layer, not by `gg()` itself. The client-side HMR sender stamps `"client"`; the server-side direct writer stamps `"server"`. This lets agents distinguish SSR load function logs from hydrated component logs, even when both target the same source file.
+
+The `origin` field distinguishes which client produced the entry. Detected client-side via `window.__TAURI_INTERNALS__` -- if present, `"tauri"`; otherwise `"browser"`. This is important because Tauri apps (`bun tauri dev`) open the Vite dev server in a Tauri webview by default, and the developer or agent may also open the same URL in a browser. Both connect to the same Vite HMR WebSocket and both produce `env: "client"` entries. Without `origin`, these are indistinguishable. The `origin` field is omitted for `env: "server"` entries (server-side code has no client context).
+
+Agents can filter by environment and origin:
+- `grep '"env":"server"' .gg/logs-5173.jsonl` -- server-side only
+- `grep '"origin":"tauri"' .gg/logs-5173.jsonl` -- Tauri webview only
+- `GET /__gg/logs?origin=browser` -- browser tab only
 
 **Excluded**: `args` (may contain circular refs, DOM nodes, non-serializable objects), `color` (cosmetic), `col` (rarely useful), `stack` (large, could be opt-in), `tableData` (complex structure).
 
@@ -210,8 +221,10 @@ This runs alongside the existing Eruda hook -- both receive entries.
 STEP 2: Browser serializes and sends
 ─────────────────────────────────────
 On each gg() call, the injected code serializes the CapturedEntry
-(stripping non-serializable fields), stamps env: 'client',
-and calls import.meta.hot.send('gg:log', data).
+(stripping non-serializable fields), stamps env: 'client' and
+origin: 'tauri' | 'browser' (detected once on init via
+window.__TAURI_INTERNALS__), and calls
+import.meta.hot.send('gg:log', data).
 
 STEP 3: Vite plugin receives and writes
 ────────────────────────────────────────
@@ -249,8 +262,9 @@ The Vite plugin exposes a middleware endpoint for agent interaction. Same path, 
 | `GET` | `/__gg/logs?filter=api:*` | Read filtered entries (server-side grep) | `200` with matching JSONL lines |
 | `GET` | `/__gg/logs?since={ts}` | Read entries after a timestamp | `200` with matching JSONL lines |
 | `GET` | `/__gg/logs?env=server` | Read only server-side or client-side entries | `200` with matching JSONL lines |
+| `GET` | `/__gg/logs?origin=tauri` | Read only Tauri webview or browser tab entries | `200` with matching JSONL lines |
 
-All query params can be combined: `GET /__gg/logs?filter=api:*&env=server&since=1741234567890`.
+All query params can be combined: `GET /__gg/logs?filter=api:*&env=client&origin=tauri&since=1741234567890`.
 
 **Why HTTP in addition to the file?**
 
@@ -308,7 +322,7 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 - [ ] **1.4** Server side: ensure `.gg/` directory is created if missing
 - [ ] **1.5** Server side: `/__gg/logs` middleware -- `DELETE` truncates file (204), `GET` returns file contents as `text/plain` (200)
 - [ ] **1.6** Server side: `GET /__gg/logs?filter=` glob matching and `?since=` timestamp filtering
-- [ ] **1.7** Client side: inject `import.meta.hot.send('gg:log', serialized)` into the `_onLog` pipeline, guarded by `if (import.meta.hot)` for automatic prod tree-shaking. Stamp `env: 'client'`.
+- [ ] **1.7** Client side: inject `import.meta.hot.send('gg:log', serialized)` into the `_onLog` pipeline, guarded by `if (import.meta.hot)` for automatic prod tree-shaking. Stamp `env: 'client'` and `origin: 'tauri' | 'browser'` (detect once on init via `window.__TAURI_INTERNALS__`).
 - [ ] **1.8** Server side: register `gg._onLog` listener in `configureServer` for direct `fs.appendFile` of server-side entries. Stamp `env: 'server'`.
 - [ ] **1.9** Serialization: define the `SerializedEntry` subset (including `env` field), handle non-serializable args gracefully
 - [ ] **1.10** Add to `ggPlugins()` in `vite.ts` as an opt-in plugin (e.g., `fileSink?: boolean | { dir?: string }`)
@@ -366,13 +380,26 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 1. A SvelteKit page has `gg()` calls in both `+page.server.ts` (load function) and `+page.svelte` (component)
 2. On page load, the server-side load function runs first -- entries are written with `env: "server"`
 3. The page is sent to the browser, the component hydrates, and client-side `gg()` calls fire -- entries arrive via HMR with `env: "client"`
-4. The JSONL file contains both, naturally ordered by time. The `env` field distinguishes them:
+4. The JSONL file contains both, naturally ordered by time. The `env` and `origin` fields distinguish them:
    ```jsonl
    {"env":"server","ns":"routes/+page.server.ts@load","msg":"Fetching data","ts":1741234567885,...}
    {"env":"server","ns":"routes/+page.server.ts@load","msg":"Data ready: 42 items","ts":1741234567890,...}
-   {"env":"client","ns":"routes/+page.svelte@onMount","msg":"Component mounted","ts":1741234568100,...}
+   {"env":"client","origin":"browser","ns":"routes/+page.svelte@onMount","msg":"Component mounted","ts":1741234568100,...}
    ```
 5. Agent can see the full request lifecycle in one file, or filter to one side: `grep '"env":"server"'` or `GET /__gg/logs?env=client`.
+
+### Tauri Webview + Browser Tab (Simultaneous Clients)
+
+1. Developer runs `bun tauri dev`, which starts the Vite dev server and opens the Tauri webview -- the default workflow.
+2. Developer (or a future agent with browser automation) also opens `localhost:1421` in a browser.
+3. Both the Tauri webview and the browser tab connect to the same Vite HMR WebSocket. Both send `gg:log` events.
+4. Entries from both sources are appended to the same JSONL file, distinguished by `origin`:
+   ```jsonl
+   {"env":"client","origin":"tauri","ns":"routes/+page.svelte@onClick","msg":"Button clicked","ts":1741234567890,...}
+   {"env":"client","origin":"browser","ns":"routes/+page.svelte@onClick","msg":"Button clicked","ts":1741234567920,...}
+   ```
+5. Agent can filter: `grep '"origin":"tauri"'` or `GET /__gg/logs?origin=tauri` to see only the Tauri webview's entries.
+6. If only the Tauri webview is open (the common case), all client entries have `origin: "tauri"` and no disambiguation is needed.
 
 ### Multiple Browser Tabs
 
@@ -416,11 +443,14 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 - [ ] File is truncated on dev server start
 - [ ] Each line is valid JSON and independently parseable
 - [ ] Every line contains an `env` field (`"client"` or `"server"`)
+- [ ] Client entries contain an `origin` field (`"tauri"` or `"browser"`)
 - [ ] `grep '"ns":"some:namespace"' .gg/logs-5173.jsonl` returns matching entries
 - [ ] `grep '"env":"server"' .gg/logs-5173.jsonl` returns only server-side entries
+- [ ] `grep '"origin":"tauri"' .gg/logs-5173.jsonl` returns only Tauri webview entries
 - [ ] `curl -X DELETE http://localhost:5173/__gg/logs` truncates the file and returns 204
 - [ ] `curl http://localhost:5173/__gg/logs` returns the full JSONL contents
-- [ ] `curl "http://localhost:5173/__gg/logs?filter=api:*&env=server"` returns only matching entries
+- [ ] `curl "http://localhost:5173/__gg/logs?filter=api:*&env=server"` returns only matching server entries
+- [ ] `curl "http://localhost:5173/__gg/logs?origin=tauri"` returns only Tauri webview entries
 - [ ] Eruda plugin continues to work normally (file sink does not interfere)
 - [ ] `DELETE` does not affect the browser-side ring buffer or Eruda UI
 - [ ] No file writes in production builds (client sender is tree-shaken, `configureServer` doesn't run)
