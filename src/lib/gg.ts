@@ -557,10 +557,13 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		tableData
 	};
 
+	// Always buffer — earlyLogBuffer is a persistent replay log so late-registering
+	// listeners (e.g. Eruda mounting after the file-sink listener) still receive entries
+	// that fired before they registered. Dispatched to all current listeners too.
+	earlyLogBuffer.push(entry);
+	if (earlyLogBuffer.length > EARLY_BUFFER_MAX) earlyLogBuffer.shift();
 	if (_logListeners.size > 0) {
 		_dispatchToListeners(entry);
-	} else {
-		earlyLogBuffer.push(entry);
 	}
 }
 
@@ -1174,7 +1177,9 @@ export function dim(): ChainableColorFn {
  * The legacy gg._onLog setter is preserved as a backward-compatible alias
  * (it replaces the single "legacy" slot without affecting other listeners).
  */
-// Buffer for capturing early logs before any listener registers
+// Persistent replay buffer — every new listener gets a full replay of recent entries.
+// Capped at 2005 entries (matches the Eruda ring buffer size) to bound memory.
+const EARLY_BUFFER_MAX = 2000;
 const earlyLogBuffer: CapturedEntry[] = [];
 const _logListeners = new Set<OnLogCallback>();
 // Legacy single-slot: tracks the callback assigned via `gg._onLog = fn`
@@ -1188,10 +1193,12 @@ function _dispatchToListeners(entry: CapturedEntry): void {
 Object.defineProperty(gg, 'addLogListener', {
 	value(callback: OnLogCallback): void {
 		_logListeners.add(callback);
-		// Replay early buffer to first-ever listener
-		if (_logListeners.size === 1 && earlyLogBuffer.length > 0) {
+		// Replay early buffer to every new listener — buffer accumulates entries that
+		// fired before any listener was registered. Each listener gets the full replay;
+		// the buffer is never cleared so late-registering listeners (e.g. Eruda mounting
+		// after the file-sink listener) still receive the early entries.
+		if (earlyLogBuffer.length > 0) {
 			earlyLogBuffer.forEach((entry) => callback(entry));
-			earlyLogBuffer.length = 0;
 		}
 	},
 	writable: false,
@@ -1219,10 +1226,9 @@ Object.defineProperty(gg, '_onLog', {
 		_legacyOnLogCallback = callback;
 		if (callback) {
 			_logListeners.add(callback);
-			// Replay early buffer on first-ever listener registration
-			if (_logListeners.size === 1 && earlyLogBuffer.length > 0) {
+			// Replay early buffer — same policy as addLogListener
+			if (earlyLogBuffer.length > 0) {
 				earlyLogBuffer.forEach((entry) => callback(entry));
-				earlyLogBuffer.length = 0;
 			}
 		}
 	}
