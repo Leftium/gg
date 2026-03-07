@@ -115,11 +115,41 @@ export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugi
 		},
 
 		transform(code, id, transformOptions) {
-			// Only inject HMR sender in browser dev mode, not SSR, not prod
-			if (transformOptions?.ssr) return null;
 			if (id !== ggModulePath) return null;
 
-			// Append the client-side HMR sender registration.
+			if (transformOptions?.ssr) {
+				// SSR injection: write server-side entries directly to the log file.
+				// Runs in Vite's SSR module runner (same Node.js process but separate module
+				// instance from configureServer, so we can't share a listener — inject instead).
+				// We pass appendFileSync + the log file path via globalThis so the injected
+				// code has no imports of its own (avoids TLA / static import constraints).
+				// Guarded by import.meta.env.DEV — tree-shaken in production builds.
+				const ssrInjection = `
+// gg-file-sink: server-side direct writer (injected by ggFileSinkPlugin)
+if (import.meta.env.DEV && globalThis.__ggFileSink) {
+	const { appendFileSync: __ggAppendFileSync, logFile: __ggLogFile } = globalThis.__ggFileSink;
+	gg.addLogListener(function __ggFileSinkServerWriter(entry) {
+		if (!__ggLogFile) return;
+		const s = {
+			ns: entry.namespace,
+			msg: entry.message,
+			ts: entry.timestamp,
+			env: 'server',
+			diff: entry.diff,
+		};
+		if (entry.level && entry.level !== 'debug') s.lvl = entry.level;
+		if (entry.file) s.file = entry.file;
+		if (entry.line !== undefined) s.line = entry.line;
+		if (entry.src) s.src = entry.src;
+		if (entry.tableData) s.table = entry.tableData;
+		try { __ggAppendFileSync(__ggLogFile, JSON.stringify(s) + '\\n'); } catch {}
+	});
+}
+`;
+				return { code: code + ssrInjection, map: null };
+			}
+
+			// Browser injection: relay entries to Vite dev server via HMR WebSocket.
 			// Runs once when the gg module is first loaded in the browser.
 			// Guarded by import.meta.hot — Vite tree-shakes this in production builds.
 			const injection = `
@@ -176,6 +206,16 @@ if (import.meta.hot) {
 			logFile = resolveLogFile();
 			fs.writeFileSync(logFile, '');
 
+			// Expose appendFileSync + logFile path via globalThis so the SSR-injected
+			// listener (running in Vite's separate module runner context) can write to the
+			// same file without needing its own fs import.
+			(globalThis as Record<string, unknown>).__ggFileSink = {
+				appendFileSync: fs.appendFileSync.bind(fs),
+				get logFile() {
+					return logFile;
+				}
+			};
+
 			const appendEntry = (serialized: SerializedEntry) => {
 				if (!logFile) return;
 				fs.appendFileSync(logFile, JSON.stringify(serialized) + '\n');
@@ -198,12 +238,13 @@ if (import.meta.hot) {
 			};
 			gg.addLogListener(serverSideListener);
 
-			// Clean up server-side listener when the dev server closes
+			// Clean up on dev server close
 			server.httpServer?.once('close', () => {
 				if (serverSideListener) {
 					gg.removeLogListener(serverSideListener);
 					serverSideListener = null;
 				}
+				delete (globalThis as Record<string, unknown>).__ggFileSink;
 			});
 
 			// /__gg/ index — JSON status for agents and developers
