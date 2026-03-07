@@ -22,6 +22,13 @@
 		"Hello, again! This logg's color differs because the callpoint's file and/or function differ."
 	);
 
+	// SSR hydration demo — these run on both server and client, values differ
+	// Shows how gg() helps diagnose hydration mismatches via env:"server" vs env:"client"
+	gg('typeof window:', typeof window);
+	gg('import.meta.env.SSR:', import.meta.env.SSR);
+	gg('Date.now():', Date.now());
+	gg('Math.random():', Math.random());
+
 	let stopStress: (() => void) | null = $state(null);
 
 	function testLog() {
