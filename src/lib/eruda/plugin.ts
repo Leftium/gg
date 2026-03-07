@@ -34,7 +34,11 @@ interface LiciaElement {
  */
 export function createGgPlugin(
 	options: GgErudaOptions,
-	gg: { _onLog?: ((entry: CapturedEntry) => void) | null }
+	gg: {
+		_onLog?: ((entry: CapturedEntry) => void) | null;
+		addLogListener?: (callback: (entry: CapturedEntry) => void) => void;
+		removeLogListener?: (callback: (entry: CapturedEntry) => void) => void;
+	}
 ) {
 	const buffer = new LogBuffer(options.maxEntries ?? 2000);
 	// The licia jQuery-like wrapper Eruda passes to init()
@@ -67,12 +71,26 @@ export function createGgPlugin(
 	// Settings UI state
 	let settingsExpanded = false;
 
+	// Layer 1: Keep gate pattern ('gg-keep') — controls which loggs enter the ring buffer.
+	// Default '*' (keep everything). Users narrow it to reduce buffer pressure.
+	let keepPattern = '*';
+
+	// Native console output toggle ('gg-console')
+	// Default: true (gg works without Eruda), but Eruda flips it to false on init
+	// unless the user has explicitly set it.
+	let ggConsoleEnabled = true;
+
 	// Expression visibility toggle
 	let showExpressions = false;
 
-	// Filter pattern persistence key (independent of localStorage.debug)
-	const FILTER_KEY = 'gg-filter';
+	// Filter pattern persistence keys
+	const SHOW_KEY = 'gg-show'; // Layer 2: which kept loggs to display in panel + console
+	const KEEP_KEY = 'gg-keep'; // Layer 1: which loggs enter the ring buffer
+	const CONSOLE_KEY = 'gg-console'; // Whether shown loggs also go to native console
 	const SHOW_EXPRESSIONS_KEY = 'gg-show-expressions';
+
+	// Backward-compat alias (old key name — ignored after migration)
+	const LEGACY_FILTER_KEY = 'gg-filter';
 
 	// Namespace click action: 'open' uses Vite dev middleware, 'copy' copies formatted string, 'open-url' navigates to URI
 	const NS_ACTION_KEY = 'gg-ns-action';
@@ -172,8 +190,7 @@ export function createGgPlugin(
 	function formatEntryForClipboard(entry: CapturedEntry, includeExpressions: boolean): string {
 		// Extract HH:MM:SS.mmm from timestamp (with milliseconds)
 		const time = new Date(entry.timestamp).toISOString().slice(11, 23);
-		// Trim namespace and strip 'gg:' prefix to save tokens
-		const ns = entry.namespace.trim().replace(/^gg:/, '');
+		const ns = entry.namespace.trim();
 		// Include expression on its own line above the value when toggle is enabled
 		const hasSrcExpr = !entry.level && entry.src?.trim() && !/^['"`]/.test(entry.src);
 		const exprLine = includeExpressions && hasSrcExpr ? `\u2039${entry.src}\u203A\n` : '';
@@ -196,20 +213,53 @@ export function createGgPlugin(
 		init($container: LiciaElement) {
 			$el = $container;
 
-			// Load filter state BEFORE registering _onLog hook, because setting _onLog
+			// Load filter state BEFORE registering _onLog hook, because registering
 			// triggers replay of earlyLogBuffer and each entry checks filterPattern
-			filterPattern = localStorage.getItem(FILTER_KEY) || 'gg:*';
+			filterPattern =
+				localStorage.getItem(SHOW_KEY) || localStorage.getItem(LEGACY_FILTER_KEY) || '*';
+			keepPattern = localStorage.getItem(KEEP_KEY) || '*';
 			showExpressions = localStorage.getItem(SHOW_EXPRESSIONS_KEY) === 'true';
 
-			// Register the capture hook on gg
+			// gg-console: Eruda flips to false on init, unless user explicitly set it.
+			// This lets gg work zero-config (console output enabled) before Eruda loads,
+			// while silencing the noise when the Eruda panel is in use.
+			const userSetConsole = localStorage.getItem(CONSOLE_KEY);
+			if (userSetConsole === null) {
+				// Not explicitly set — Eruda auto-flips to false
+				localStorage.setItem(CONSOLE_KEY, 'false');
+				ggConsoleEnabled = false;
+			} else {
+				ggConsoleEnabled = userSetConsole !== 'false';
+			}
+			// Tell the debug factory to reload its enabled state from gg-show/gg-console.
+			// browser.ts load() now reads gg-console + gg-show instead of localStorage.debug.
+			// Re-calling enable() with the right pattern updates which namespaces output to console.
+			import('../debug/index.js').then(({ default: dbg }) => {
+				try {
+					const pattern = ggConsoleEnabled ? filterPattern || '*' : '';
+					dbg.enable(pattern);
+				} catch {
+					// ignore
+				}
+			});
+
+			// Register the capture hook on gg (prefer multi-listener API, fall back to legacy)
 			if (gg) {
-				gg._onLog = (entry: CapturedEntry) => {
+				const onEntry = (entry: CapturedEntry) => {
+					// Layer 1: Keep gate — drop loggs that don't match gg-keep
+					const effectiveKeep = keepPattern || '*';
+					if (!namespaceMatchesPattern(entry.namespace, effectiveKeep)) {
+						// Logg is dropped — not stored in ring buffer.
+						// (Phase 2 will add DroppedNamespace tracking here)
+						return;
+					}
+
 					// Track namespaces incrementally (O(1) instead of scanning buffer)
 					const isNewNamespace = !allNamespacesSet.has(entry.namespace);
 					allNamespacesSet.add(entry.namespace);
 					buffer.push(entry);
-					// Add new namespace to enabledNamespaces if it matches the current pattern
-					const effectivePattern = filterPattern || 'gg:*';
+					// Layer 2: Show filter — track which namespaces are currently visible
+					const effectivePattern = filterPattern || '*';
 					if (namespaceMatchesPattern(entry.namespace, effectivePattern)) {
 						enabledNamespaces.add(entry.namespace);
 					}
@@ -229,6 +279,15 @@ export function createGgPlugin(
 						});
 					}
 				};
+
+				if (gg.addLogListener) {
+					gg.addLogListener(onEntry);
+					// Store reference for removal on destroy
+					(gg as { __ggErudaListener?: typeof onEntry }).__ggErudaListener = onEntry;
+				} else {
+					// Legacy fallback: single-slot _onLog
+					gg._onLog = onEntry;
+				}
 			}
 
 			// Probe for openInEditorPlugin (status 222) and auto-populate $ROOT in dev mode
@@ -285,7 +344,14 @@ export function createGgPlugin(
 
 		destroy() {
 			if (gg) {
-				gg._onLog = null;
+				const listener = (gg as { __ggErudaListener?: (entry: CapturedEntry) => void })
+					.__ggErudaListener;
+				if (gg.removeLogListener && listener) {
+					gg.removeLogListener(listener);
+					delete (gg as { __ggErudaListener?: (entry: CapturedEntry) => void }).__ggErudaListener;
+				} else {
+					gg._onLog = null;
+				}
 			}
 			// Clean up virtualizer
 			if (virtualizer && $el) {
@@ -304,7 +370,7 @@ export function createGgPlugin(
 	};
 
 	function toggleNamespace(namespace: string, enable: boolean) {
-		const currentPattern = filterPattern || 'gg:*';
+		const currentPattern = filterPattern || '*';
 		const ns = namespace.trim();
 		// Split into parts, manipulate, rejoin (avoids fragile regex on complex namespace strings)
 		const parts = currentPattern
@@ -328,7 +394,7 @@ export function createGgPlugin(
 		// Sync enabledNamespaces from the NEW pattern (don't re-read localStorage)
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || 'gg:*';
+		const effectivePattern = filterPattern || '*';
 		allNamespaces.forEach((ns) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
@@ -337,7 +403,7 @@ export function createGgPlugin(
 	}
 
 	function toggleNamespaces(namespaces: string[], enable: boolean) {
-		const currentPattern = filterPattern || 'gg:*';
+		const currentPattern = filterPattern || '*';
 		let parts = currentPattern
 			.split(',')
 			.map((p) => p.trim())
@@ -365,15 +431,14 @@ export function createGgPlugin(
 		// Sync enabledNamespaces from the NEW pattern
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || 'gg:*';
+		const effectivePattern = filterPattern || '*';
 		allNamespaces.forEach((ns) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
 			}
 		});
 
-		// Persist the new pattern
-		localStorage.setItem(FILTER_KEY, filterPattern);
+		localStorage.setItem(SHOW_KEY, filterPattern);
 	}
 
 	function simplifyPattern(pattern: string): string {
@@ -443,16 +508,16 @@ export function createGgPlugin(
 		if (!pattern) return true;
 
 		// Simple patterns:
-		// 1. 'gg:*' with optional exclusions
-		// 2. Explicit comma-separated list of exact namespaces
+		// 1. '*' with optional exclusions (e.g. '*,-api:verbose:*')
+		// 2. Explicit comma-separated list of exact namespaces (no wildcards, no exclusions)
 
 		const parts = pattern.split(',').map((p) => p.trim());
 
-		// Check if it's 'gg:*' based (with exclusions)
-		const hasWildcardBase = parts.some((p) => p === 'gg:*' || p === '*');
+		// Check if it's '*' based (with exclusions)
+		const hasWildcardBase = parts.some((p) => p === '*');
 		if (hasWildcardBase) {
-			// All other parts must be exclusions starting with '-gg:'
-			const otherParts = parts.filter((p) => p !== 'gg:*' && p !== '*');
+			// All other parts must be plain exclusions (no wildcards in the exclusion)
+			const otherParts = parts.filter((p) => p !== '*');
 			return otherParts.every((p) => p.startsWith('-') && !p.includes('*', 1));
 		}
 
@@ -1104,11 +1169,11 @@ export function createGgPlugin(
 
 	function applyPatternFromInput(value: string) {
 		filterPattern = value;
-		localStorage.setItem(FILTER_KEY, filterPattern);
+		localStorage.setItem(SHOW_KEY, filterPattern);
 		// Sync enabledNamespaces from the new pattern
 		const allNamespaces = getAllCapturedNamespaces();
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || 'gg:*';
+		const effectivePattern = filterPattern || '*';
 		allNamespaces.forEach((ns) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
@@ -1167,7 +1232,7 @@ export function createGgPlugin(
 				const allNamespaces = getAllCapturedNamespaces();
 				if (target.checked) {
 					// Select all
-					filterPattern = 'gg:*';
+					filterPattern = '*';
 					enabledNamespaces.clear();
 					allNamespaces.forEach((ns) => enabledNamespaces.add(ns));
 				} else {
@@ -1176,7 +1241,7 @@ export function createGgPlugin(
 					filterPattern = `gg:*,${exclusions}`;
 					enabledNamespaces.clear();
 				}
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;
@@ -1237,7 +1302,7 @@ export function createGgPlugin(
 			// Render expanded view
 			const allNamespaces = getAllCapturedNamespaces();
 			const simple = isSimplePattern(filterPattern);
-			const effectivePattern = filterPattern || 'gg:*';
+			const effectivePattern = filterPattern || '*';
 
 			let checkboxesHTML = '';
 			if (simple && allNamespaces.length > 0) {
@@ -1303,7 +1368,7 @@ export function createGgPlugin(
 
 			filterPanel.innerHTML = `
 			<div style="margin-bottom: 8px;">
-				<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="gg:*" style="width: 100%;">
+				<input type="text" class="gg-filter-pattern" value="${escapeHtml(filterPattern)}" placeholder="*" style="width: 100%;">
 			</div>
 			${checkboxesHTML}
 		`;
@@ -1393,37 +1458,17 @@ export function createGgPlugin(
 			}
 
 			// Native Console section
-			const currentDebugValue = localStorage.getItem('debug');
-			const debugDisplay =
-				currentDebugValue !== null ? `'${escapeHtml(currentDebugValue)}'` : 'not set';
-			const currentFilter = filterPattern || 'gg:*';
-			const debugMatchesFilter = currentDebugValue === currentFilter;
-			const debugIncludesGg =
-				currentDebugValue !== null &&
-				(currentDebugValue.includes('gg:') || currentDebugValue === '*');
-
 			const nativeConsoleSection = `
 				<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">
 					<div class="gg-settings-label">Native Console Output</div>
 					<div style="font-size: 11px; opacity: 0.7; margin-bottom: 8px;">
-						gg messages always appear in this GG panel. To also see them in the browser's native console, set <code>localStorage.debug</code> below.
-						For server-side: <code>DEBUG=gg:* npm run dev</code>
+						When enabled, loggs shown in the GG panel are also output to the browser's native console (filtered by the Show pattern).
 					</div>
-					<div style="font-family: monospace; font-size: 12px; margin-bottom: 6px;">
-						localStorage.debug = ${debugDisplay}
-						${debugIncludesGg ? '<span style="color: green;">✅</span>' : '<span style="color: #999;">⚫ gg:* not included</span>'}
-					</div>
-					<div style="display: flex; gap: 6px; flex-wrap: wrap;">
-						<button class="gg-sync-debug-btn" style="padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ccc; border-radius: 3px; background: ${debugMatchesFilter ? '#e8e8e8' : '#fff'};"${debugMatchesFilter ? ' disabled' : ''}>
-							${debugMatchesFilter ? 'In sync' : `Set to '${escapeHtml(currentFilter)}'`}
-						</button>
-						<button class="gg-clear-debug-btn" style="padding: 4px 10px; font-size: 12px; cursor: pointer; border: 1px solid #ccc; border-radius: 3px; background: #fff;"${currentDebugValue === null ? ' disabled' : ''}>
-							Clear
-						</button>
-					</div>
-					<div style="font-size: 10px; opacity: 0.5; margin-top: 4px;">
-						Changes take effect on next page reload.
-					</div>
+					<label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+						<input type="checkbox" class="gg-console-toggle" ${ggConsoleEnabled ? 'checked' : ''}>
+						Native console output
+					</label>
+					${ggConsoleEnabled ? `<div style="font-size: 10px; opacity: 0.5; margin-top: 4px;">Disable to silence gg loggs in DevTools console.</div>` : ''}
 				</div>
 			`;
 
@@ -1532,15 +1577,20 @@ export function createGgPlugin(
 					renderSettingsUI();
 				}
 			}
-			// Native Console: sync localStorage.debug to current gg-filter
-			if (target.classList.contains('gg-sync-debug-btn')) {
-				const currentFilter = localStorage.getItem(FILTER_KEY) || 'gg:*';
-				localStorage.setItem('debug', currentFilter);
-				renderSettingsUI();
-			}
-			// Native Console: clear localStorage.debug
-			if (target.classList.contains('gg-clear-debug-btn')) {
-				localStorage.removeItem('debug');
+			// Native Console: gg-console toggle
+			if (target.classList.contains('gg-console-toggle')) {
+				const checked = (target as HTMLInputElement).checked;
+				ggConsoleEnabled = checked;
+				localStorage.setItem(CONSOLE_KEY, String(checked));
+				// Update the debug factory's enabled pattern immediately
+				import('../debug/index.js').then(({ default: dbg }) => {
+					try {
+						const pattern = ggConsoleEnabled ? filterPattern || '*' : '';
+						dbg.enable(pattern);
+					} catch {
+						// ignore
+					}
+				});
 				renderSettingsUI();
 			}
 		});
@@ -1700,7 +1750,7 @@ export function createGgPlugin(
 			`<button class="gg-toast-btn gg-toast-help" title="Toggle help">?</button>` +
 			`</span>` +
 			`<div class="gg-toast-explanation${showExplanation ? ' visible' : ''}">` +
-			`Click a segment above to hide all matching namespaces (e.g. click "api" to hide gg:api:*). ` +
+			`Click a segment above to hide all matching namespaces (e.g. click "api" to hide api/*). ` +
 			`Tip: you can also right-click any segment in the log to hide it directly.` +
 			`</div>`;
 
@@ -1727,12 +1777,12 @@ export function createGgPlugin(
 
 		// Restore the previous filter pattern
 		filterPattern = lastHiddenPattern;
-		localStorage.setItem(FILTER_KEY, filterPattern);
+		localStorage.setItem(SHOW_KEY, filterPattern);
 
 		// Sync enabledNamespaces from the restored pattern
 		enabledNamespaces.clear();
-		const effectivePattern = filterPattern || 'gg:*';
-		getAllCapturedNamespaces().forEach((ns) => {
+		const effectivePattern = filterPattern || '*';
+		getAllCapturedNamespaces().forEach((ns: string) => {
 			if (namespaceMatchesPattern(ns, effectivePattern)) {
 				enabledNamespaces.add(ns);
 			}
@@ -1780,13 +1830,13 @@ export function createGgPlugin(
 				if (!filter) return;
 
 				// Add exclusion pattern (same logic as right-click segment)
-				const currentPattern = filterPattern || 'gg:*';
+				const currentPattern = filterPattern || '*';
 				const exclusion = `-${filter}`;
 				const parts = currentPattern.split(',').map((p) => p.trim());
 
 				if (parts.includes(exclusion)) {
 					// Already excluded, toggle off
-					filterPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
+					filterPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
 				} else {
 					const hasInclusion = parts.some((p) => !p.startsWith('-'));
 					if (hasInclusion) {
@@ -1800,14 +1850,14 @@ export function createGgPlugin(
 
 				// Sync enabledNamespaces
 				enabledNamespaces.clear();
-				const effectivePattern = filterPattern || 'gg:*';
+				const effectivePattern = filterPattern || '*';
 				getAllCapturedNamespaces().forEach((ns) => {
 					if (namespaceMatchesPattern(ns, effectivePattern)) {
 						enabledNamespaces.add(ns);
 					}
 				});
 
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				dismissToast();
 				renderFilterUI();
 				renderLogs();
@@ -1829,10 +1879,10 @@ export function createGgPlugin(
 
 			// Handle reset filter button (shown when all logs filtered out)
 			if (target?.classList?.contains('gg-reset-filter-btn')) {
-				filterPattern = 'gg:*';
+				filterPattern = '*';
 				enabledNamespaces.clear();
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;
@@ -1900,7 +1950,7 @@ export function createGgPlugin(
 
 				// Toggle behavior: if already at this filter, restore all
 				if (filterPattern === filter) {
-					filterPattern = 'gg:*';
+					filterPattern = '*';
 					enabledNamespaces.clear();
 					getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				} else {
@@ -1911,7 +1961,7 @@ export function createGgPlugin(
 						.forEach((ns) => enabledNamespaces.add(ns));
 				}
 
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;
@@ -1932,7 +1982,7 @@ export function createGgPlugin(
 				const previousPattern = filterPattern;
 
 				toggleNamespace(namespace, false);
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 
@@ -1944,13 +1994,13 @@ export function createGgPlugin(
 			// Clicking background (container or grid, not a log element) restores all
 			if (
 				filterExpanded &&
-				filterPattern !== 'gg:*' &&
+				filterPattern !== '*' &&
 				(target === containerEl || target?.classList?.contains('gg-log-grid'))
 			) {
-				filterPattern = 'gg:*';
+				filterPattern = '*';
 				enabledNamespaces.clear();
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 			}
@@ -1997,14 +2047,14 @@ export function createGgPlugin(
 				e.preventDefault();
 
 				// Add exclusion pattern: keep current base, add -<pattern>
-				const currentPattern = filterPattern || 'gg:*';
+				const currentPattern = filterPattern || '*';
 				const exclusion = `-${filter}`;
 
 				// Check if already excluded (toggle off)
 				const parts = currentPattern.split(',').map((p) => p.trim());
 				if (parts.includes(exclusion)) {
 					// Remove the exclusion to un-hide
-					filterPattern = parts.filter((p) => p !== exclusion).join(',') || 'gg:*';
+					filterPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
 				} else {
 					// Ensure we have a base inclusion pattern
 					const hasInclusion = parts.some((p) => !p.startsWith('-'));
@@ -2019,14 +2069,14 @@ export function createGgPlugin(
 
 				// Sync enabledNamespaces from the new pattern
 				enabledNamespaces.clear();
-				const effectivePattern = filterPattern || 'gg:*';
+				const effectivePattern = filterPattern || '*';
 				getAllCapturedNamespaces().forEach((ns) => {
 					if (namespaceMatchesPattern(ns, effectivePattern)) {
 						enabledNamespaces.add(ns);
 					}
 				});
 
-				localStorage.setItem(FILTER_KEY, filterPattern);
+				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
 				renderLogs();
 				return;

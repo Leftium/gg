@@ -28,14 +28,14 @@ function createGgDebugger(namespace: string): Debugger {
 			originalFormatArgs.call(dbg, args);
 		}
 
-		// Extract the callpoint from namespace (strip 'gg:' prefix and any URL suffix)
-		const nsMatch = dbg.namespace.match(/^gg:([^h]+?)(?:http|$)/);
-		const callpoint = nsMatch ? nsMatch[1] : dbg.namespace.replace(/^gg:/, '');
+		// Pad the namespace for aligned console output (strip URL suffix if present)
+		const nsMatch = dbg.namespace.match(/^([^h]+?)(?:http|$)/);
+		const callpoint = nsMatch ? nsMatch[1] : dbg.namespace;
 		const paddedCallpoint = callpoint.padEnd(maxCallpointLength, ' ');
 
 		// Replace the namespace in the formatted string with padded version
 		if (typeof args[0] === 'string') {
-			args[0] = args[0].replace(dbg.namespace, `gg:${paddedCallpoint}`);
+			args[0] = args[0].replace(dbg.namespace, paddedCallpoint);
 		}
 	};
 
@@ -330,7 +330,7 @@ gg.here = function (): { fileName: string; functionName: string; url: string } {
 		return { fileName: '', functionName: '', url: '' };
 	}
 	const callpoint = resolveCallpoint(3);
-	const namespace = `gg:${callpoint}`;
+	const namespace = callpoint;
 	// Log the call-site info
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
@@ -503,7 +503,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
 	}
 
-	const namespace = `gg:${nsLabel}`;
+	const namespace = nsLabel;
 
 	if (nsLabel.length < 80 && nsLabel.length > maxCallpointLength) {
 		maxCallpointLength = nsLabel.length;
@@ -559,8 +559,8 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		tableData
 	};
 
-	if (_onLogCallback) {
-		_onLogCallback(entry);
+	if (_logListeners.size > 0) {
+		_dispatchToListeners(entry);
 	} else {
 		earlyLogBuffer.push(entry);
 	}
@@ -606,7 +606,7 @@ gg._here = function (options: { ns: string; file?: string; line?: number; col?: 
 		return { fileName: '', functionName: '', url: '' };
 	}
 	const { ns: nsLabel, file, line, col } = options;
-	const namespace = `gg:${nsLabel}`;
+	const namespace = nsLabel;
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
 		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
@@ -1170,24 +1170,62 @@ export function dim(): ChainableColorFn {
 }
 
 /**
- * Hook for capturing gg() output (used by Eruda plugin)
- * Set this to a callback function to receive log entries
+ * Multi-listener hook for capturing gg() output.
+ *
+ * Listeners can be added/removed via gg.addLogListener / gg.removeLogListener.
+ * The legacy gg._onLog setter is preserved as a backward-compatible alias
+ * (it replaces the single "legacy" slot without affecting other listeners).
  */
-// Buffer for capturing early logs before Eruda initializes
+// Buffer for capturing early logs before any listener registers
 const earlyLogBuffer: CapturedEntry[] = [];
-let _onLogCallback: OnLogCallback | null = null;
+const _logListeners = new Set<OnLogCallback>();
+// Legacy single-slot: tracks the callback assigned via `gg._onLog = fn`
+let _legacyOnLogCallback: OnLogCallback | null = null;
 
-// Proxy property that replays buffered logs when hook is registered
+function _dispatchToListeners(entry: CapturedEntry): void {
+	_logListeners.forEach((fn) => fn(entry));
+}
+
+// gg.addLogListener / gg.removeLogListener — primary multi-listener API
+Object.defineProperty(gg, 'addLogListener', {
+	value(callback: OnLogCallback): void {
+		_logListeners.add(callback);
+		// Replay early buffer to first-ever listener
+		if (_logListeners.size === 1 && earlyLogBuffer.length > 0) {
+			earlyLogBuffer.forEach((entry) => callback(entry));
+			earlyLogBuffer.length = 0;
+		}
+	},
+	writable: false,
+	configurable: true
+});
+
+Object.defineProperty(gg, 'removeLogListener', {
+	value(callback: OnLogCallback): void {
+		_logListeners.delete(callback);
+	},
+	writable: false,
+	configurable: true
+});
+
+// Legacy gg._onLog — backward-compatible single-slot alias
 Object.defineProperty(gg, '_onLog', {
 	get() {
-		return _onLogCallback;
+		return _legacyOnLogCallback;
 	},
 	set(callback: OnLogCallback | null) {
-		_onLogCallback = callback;
-		// Replay buffered logs when callback is first registered
-		if (callback && earlyLogBuffer.length > 0) {
-			earlyLogBuffer.forEach((entry) => callback(entry));
-			earlyLogBuffer.length = 0; // Clear buffer after replay
+		// Remove previous legacy callback if any
+		if (_legacyOnLogCallback) {
+			_logListeners.delete(_legacyOnLogCallback);
+		}
+		_legacyOnLogCallback = callback;
+		if (callback) {
+			_logListeners.add(callback);
+			// Replay early buffer on first-ever listener registration
+			if (_logListeners.size === 1 && earlyLogBuffer.length > 0) {
+				earlyLogBuffer.forEach((entry) => callback(entry));
+				earlyLogBuffer.length = 0;
+			}
 		}
 	}
 });
@@ -1195,7 +1233,10 @@ Object.defineProperty(gg, '_onLog', {
 // Namespace for adding properties to the gg function
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace gg {
+	/** @deprecated Use gg.addLogListener / gg.removeLogListener instead */
 	export let _onLog: OnLogCallback | null;
+	export let addLogListener: (callback: OnLogCallback) => void;
+	export let removeLogListener: (callback: OnLogCallback) => void;
 
 	// Internal plugin-rewrite target
 	export let _ns: (
@@ -1270,7 +1311,7 @@ export async function runGgDiagnostics() {
 	await debugReady;
 
 	// Create test debugger for server-side enabled check
-	const ggLogTest = debugFactory('gg:TEST');
+	const ggLogTest = debugFactory('TEST');
 
 	let ggMessage = '\n';
 	const message = (s: string) => (ggMessage += `${s}\n`);
@@ -1303,12 +1344,15 @@ export async function runGgDiagnostics() {
 	message(`${checkbox(ggConfig.enabled)} gg enabled: ${ggConfig.enabled}${enableHint}`);
 
 	if (!BROWSER) {
-		// Server-side: check DEBUG env var (the only output path on the server)
+		// Server-side: GG_KEEP controls which namespaces are output to the server console.
+		// Falls back to '*' (all) if not set, so gg works zero-config.
 		const hint = makeHint(
 			!ggLogTest.enabled,
-			' (Try `DEBUG=gg:* npm run dev` or use --env-file=.env)'
+			' (Try setting GG_KEEP=* in your .env file or shell)'
 		);
-		message(`${checkbox(ggLogTest.enabled)} DEBUG env variable: ${process?.env?.DEBUG}${hint}`);
+		message(
+			`${checkbox(ggLogTest.enabled)} GG_KEEP env variable: ${process?.env?.GG_KEEP ?? '* (default)'}${hint}`
+		);
 	}
 
 	// Optional plugin diagnostics

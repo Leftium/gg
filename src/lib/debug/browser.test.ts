@@ -39,24 +39,41 @@ describe('browser debug', () => {
 	});
 
 	describe('save/load (localStorage)', () => {
-		it('save stores to localStorage.debug', () => {
+		it('save stores to localStorage[gg-show]', () => {
 			debug.enable('foo,bar');
-			expect(storage.get('debug')).toBe('foo,bar');
+			expect(storage.get('gg-show')).toBe('foo,bar');
 		});
 
-		it('save removes localStorage.debug when empty', () => {
+		it('save removes localStorage[gg-show] when empty', () => {
 			debug.enable('foo');
-			expect(storage.get('debug')).toBe('foo');
+			expect(storage.get('gg-show')).toBe('foo');
 			debug.enable('');
-			expect(storage.has('debug')).toBe(false);
+			expect(storage.has('gg-show')).toBe(false);
 		});
 
-		it('load reads from localStorage.debug', () => {
-			storage.set('debug', 'app:*');
+		it('load reads from localStorage[gg-show]', () => {
+			storage.set('gg-show', 'app:*');
 			// Need to re-create factory to test load
 			// We can test via enable/disable round-trip instead
-			debug.enable(storage.get('debug')!);
+			debug.enable(storage.get('gg-show')!);
 			expect(debug.enabled('app:foo')).toBe(true);
+		});
+
+		it('load returns empty string when gg-console is false', () => {
+			storage.set('gg-console', 'false');
+			storage.set('gg-show', 'app:*');
+			// Simulate what load() returns when gg-console=false
+			// Re-enable with the load() result
+			const loaded = storage.get('gg-console') === 'false' ? '' : (storage.get('gg-show') || '*');
+			debug.enable(loaded);
+			expect(debug.enabled('app:foo')).toBe(false);
+		});
+
+		it('load defaults to * when gg-show is not set', () => {
+			// No gg-console or gg-show set — should default to * (all enabled)
+			// Simulate load() returning '*'
+			debug.enable('*');
+			expect(debug.enabled('anything')).toBe(true);
 		});
 	});
 

@@ -101,14 +101,16 @@ function log(this: Debugger, ...args: unknown[]): void {
 
 function save(namespaces: string): void {
 	if (namespaces) {
-		process.env.DEBUG = namespaces;
+		process.env.GG_KEEP = namespaces;
 	} else {
-		delete process.env.DEBUG;
+		delete process.env.GG_KEEP;
 	}
 }
 
 function load(): string {
-	return process.env.DEBUG || '';
+	// GG_KEEP controls which namespaces are kept (and thus output to the server console).
+	// Fall back to '*' so gg works zero-config in dev without setting any env var.
+	return process.env.GG_KEEP || '*';
 }
 
 function init(instance: Debugger): void {

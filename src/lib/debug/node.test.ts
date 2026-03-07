@@ -11,10 +11,14 @@ describe('node debug', () => {
 	let debug: DebugFactory;
 	let originalDebug: string | undefined;
 
+	let originalGgKeep: string | undefined;
+
 	beforeEach(async () => {
 		// Save and clear env to get a clean factory
 		originalDebug = process.env.DEBUG;
+		originalGgKeep = process.env.GG_KEEP;
 		delete process.env.DEBUG;
+		delete process.env.GG_KEEP;
 
 		// Dynamic import to get a fresh module each time
 		// We import the setup + env pieces from node.ts
@@ -31,19 +35,24 @@ describe('node debug', () => {
 		} else {
 			delete process.env.DEBUG;
 		}
+		if (originalGgKeep !== undefined) {
+			process.env.GG_KEEP = originalGgKeep;
+		} else {
+			delete process.env.GG_KEEP;
+		}
 	});
 
-	describe('save/load (process.env.DEBUG)', () => {
-		it('save stores to process.env.DEBUG', () => {
+	describe('save/load (process.env.GG_KEEP)', () => {
+		it('save stores to process.env.GG_KEEP', () => {
 			debug.enable('foo,bar');
-			expect(process.env.DEBUG).toBe('foo,bar');
+			expect(process.env.GG_KEEP).toBe('foo,bar');
 		});
 
-		it('save removes process.env.DEBUG when empty', () => {
+		it('save removes process.env.GG_KEEP when empty', () => {
 			debug.enable('foo');
-			expect(process.env.DEBUG).toBe('foo');
+			expect(process.env.GG_KEEP).toBe('foo');
 			debug.enable('');
-			expect(process.env.DEBUG).toBeUndefined();
+			expect(process.env.GG_KEEP).toBeUndefined();
 		});
 	});
 

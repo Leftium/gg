@@ -427,6 +427,42 @@ The existing filter panel (toolbar button showing `Namespaces: N/M`) is split in
 
 Both panels follow the existing UI patterns (top 5 most frequent, "ALL" checkbox, "other" checkbox, complex pattern warning).
 
+## Implementation Phases
+
+The spec is split into three phases to allow incremental delivery. Each phase is independently mergeable.
+
+### Phase 1 — Core mechanics (unblocks file sink) [x]
+
+Changes to `gg.ts`, `debug/browser.ts`, `debug/node.ts`, and `plugin.ts` internals. No new UI elements.
+
+- [x] **`_onLog` multi-listener** — converted from a single `OnLogCallback | null` slot to a `Set<OnLogCallback>`. New API: `gg.addLogListener(fn)` / `gg.removeLogListener(fn)`. The `_onLog` setter remains as a backward-compatible single-slot alias. Early-buffer replay fires on first listener registration. Eruda plugin updated to use `addLogListener`/`removeLogListener` with legacy fallback.
+- [x] **Drop `gg:` prefix** — removed the `gg:` prefix from all generated namespaces in `gg.ts` (`ggLog()`, `gg.here()`, `gg._here()`). Namespace construction is now `nsLabel` directly instead of `` `gg:${nsLabel}` ``. Console padding in `createGgDebugger` updated. Diagnostics updated to reference `GG_KEEP` instead of `DEBUG=gg:*`.
+- [x] **Rename `gg-filter` → `gg-show`** — renamed the localStorage key (`SHOW_KEY = 'gg-show'`), all variable names. Legacy `gg-filter` key is read as fallback on init (no migration needed). Default pattern updated from `'gg:*'` to `'*'`. Placeholder text and `isSimplePattern()` updated.
+- [x] **Add `gg-keep` layer** — `keepPattern` variable loaded from `localStorage['gg-keep']` (default `'*'`). Applied in `onEntry` handler before `buffer.push()`: loggs not matching `keepPattern` are dropped (counted but not stored). `debug/node.ts` updated to use `GG_KEEP` env var instead of `DEBUG`; defaults to `'*'` (zero-config). `debug/browser.ts` updated to use `gg-show` key.
+- [x] **Add `gg-console` toggle** — removed `localStorage.debug` usage from `debug/browser.ts` (now uses `gg-console` + `gg-show`). Eruda plugin flips `gg-console` to `false` on init if not explicitly set. Settings panel Sync/Clear buttons replaced with a single "Native console output" checkbox. Debug factory re-enabled with correct pattern on toggle change.
+
+### Phase 2 — Dropped namespace tracking [ ]
+
+Data layer only. The tracker is wired up but sentinels are not yet rendered in the UI.
+
+- [ ] **`DroppedNamespaceInfo` map** — maintained outside the ring buffer in `plugin.ts`. Updated by the `gg-keep` gate on each dropped logg.
+- [ ] **Sentinel data available** — `getDroppedNamespaces()` returns the map for consumers (file sink, future UI).
+
+### Phase 3 — Full UI [ ]
+
+All UI changes described in the spec.
+
+- [ ] **New toolbar** — two rows: Keep filter input + "Namespaces: N/M" button; Show filter input + "Namespaces: N/M" button.
+- [ ] **Dropped sentinel section** — fixed-at-top section showing `DROPPED:ns` rows with `[+]` keep icon, count, and preview. Debounced updates.
+- [ ] **Per-logg icons** — `[x]` hide (existing, now targets `gg-show`), `[-]` drop (new, targets `gg-keep`). Dropped sentinels show `[+]` keep icon.
+- [ ] **Drop/Keep toasts** — segment-level control toasts mirroring existing hide toast.
+- [ ] **Truncation banner update** — include dropped counts; clickable to open Keep namespace panel.
+- [ ] **Empty state update** — show `[Keep All]` button when `gg-keep` is restrictive and buffer is empty.
+- [ ] **Settings panel update** — remove Sync/Clear buttons and `localStorage.debug` display; add `gg-console` toggle.
+- [ ] **Keep namespace panel** — separate checkbox panel for `gg-keep` (split from existing filter panel which becomes `gg-show` only).
+
+---
+
 ## Open Questions
 
 1. **`GG_ENABLED` / `VITE_GG_ENABLED` unification.** These exist as separate env vars due to Vite's `VITE_` prefix requirement for client-side exposure. Could the gg Vite plugin alias `GG_ENABLED` to `VITE_GG_ENABLED` automatically, so users only set one variable? This is orthogonal to the filtering proposal but worth addressing.

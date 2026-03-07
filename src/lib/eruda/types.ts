@@ -39,7 +39,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * A captured log entry from gg()
  */
 export interface CapturedEntry {
-	/** Namespace (e.g., "gg:routes/+page.svelte@handleClick") */
+	/** Namespace (e.g., "routes/+page.svelte@handleClick") */
 	namespace: string;
 	/** Color assigned by the debug library (e.g., "#CC3366") */
 	color: string;

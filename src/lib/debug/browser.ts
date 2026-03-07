@@ -2,7 +2,7 @@
  * Browser-specific debug implementation.
  *
  * Output: console.debug with %c CSS color formatting.
- * Persistence: localStorage.debug
+ * Persistence: localStorage['gg-show'] + localStorage['gg-console']
  * Format (patched): +123ms namespace message
  */
 
@@ -67,9 +67,9 @@ function formatArgs(this: Debugger, args: unknown[]): void {
 function save(namespaces: string): void {
 	try {
 		if (namespaces) {
-			localStorage.setItem('debug', namespaces);
+			localStorage.setItem('gg-show', namespaces);
 		} else {
-			localStorage.removeItem('debug');
+			localStorage.removeItem('gg-show');
 		}
 	} catch {
 		// localStorage may not be available
@@ -78,7 +78,14 @@ function save(namespaces: string): void {
 
 function load(): string {
 	try {
-		return localStorage.getItem('debug') || localStorage.getItem('DEBUG') || '';
+		// gg-console controls whether native console output is enabled at all.
+		// When it is 'false', disable all console output by returning '' (nothing enabled).
+		const consoleEnabled = localStorage.getItem('gg-console');
+		if (consoleEnabled === 'false') return '';
+
+		// Use gg-show as the namespace filter for console output.
+		// Fall back to '*' (show all) so zero-config works out of the box.
+		return localStorage.getItem('gg-show') || '*';
 	} catch {
 		return '';
 	}
