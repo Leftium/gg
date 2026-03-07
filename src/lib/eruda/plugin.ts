@@ -2560,13 +2560,24 @@ export function createGgPlugin(
 		containerEl.addEventListener('click', (e: MouseEvent) => {
 			const target = e.target as HTMLElement;
 
-			// Handle reset filter button (shown when all logs filtered out)
+			// Handle reset filter button (shown when all logs filtered out by gg-show)
 			if (target?.classList?.contains('gg-reset-filter-btn')) {
 				filterPattern = '*';
 				enabledNamespaces.clear();
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderLogs();
+				return;
+			}
+
+			// Handle keep-all button (shown when gg-keep is restrictive and buffer is empty)
+			if (target?.classList?.contains('gg-keep-all-btn')) {
+				keepPattern = '*';
+				localStorage.setItem(KEEP_KEY, keepPattern);
+				const keepInput = $el?.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+				if (keepInput) keepInput.value = keepPattern;
+				renderKeepUI();
 				renderLogs();
 				return;
 			}
@@ -3402,14 +3413,24 @@ export function createGgPlugin(
 			}
 
 			const hasFilteredLogs = buffer.size > 0;
-			const message = hasFilteredLogs
-				? `All ${buffer.size} logs filtered out.`
-				: 'No logs captured yet. Call gg() to see output here.';
-			const resetButton = hasFilteredLogs
-				? '<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (*)</button>'
-				: '';
+			const keepIsRestrictive = (keepPattern || '*') !== '*';
+			let message: string;
+			let actionButton: string;
+			if (hasFilteredLogs) {
+				message = `All ${buffer.size} logs filtered out.`;
+				actionButton =
+					'<button class="gg-reset-filter-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #2196F3; background: #2196F3; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Show all logs (*)</button>';
+			} else if (keepIsRestrictive) {
+				message = 'No loggs kept.';
+				actionButton =
+					`<button class="gg-keep-all-btn" style="margin-top: 12px; padding: 10px 20px; cursor: pointer; border: 1px solid #4CAF50; background: #4CAF50; color: white; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.2s;">Keep All</button>` +
+					`<div style="margin-top: 10px; font-size: 11px; opacity: 0.7;">gg-keep: ${escapeHtml(keepPattern || '*')}</div>`;
+			} else {
+				message = 'No loggs captured yet. Call gg() to see output here.';
+				actionButton = '';
+			}
 			logContainer.html(
-				`<div style="padding: 20px; text-align: center; opacity: 0.5;">${message}<div>${resetButton}</div></div>`
+				`<div style="padding: 20px; text-align: center; opacity: 0.5;">${message}<div>${actionButton}</div></div>`
 			);
 			return;
 		}
