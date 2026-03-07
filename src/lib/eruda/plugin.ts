@@ -8,6 +8,7 @@ import {
 	observeElementRect,
 	measureElement
 } from '@tanstack/virtual-core';
+import { matchesGlob, matchesPattern as _matchesPattern } from '../pattern.js';
 
 /** Compile-time flag set by ggCallSitesPlugin via Vite's `define` config. */
 declare const __GG_TAG_PLUGIN__: boolean;
@@ -568,45 +569,7 @@ export function createGgPlugin(
 
 	function namespaceMatchesPattern(namespace: string, pattern: string): boolean {
 		if (!pattern) return true; // Empty pattern = show all
-
-		// Split by comma for OR logic
-		const parts = pattern.split(',').map((p) => p.trim());
-		let included = false;
-		let excluded = false;
-
-		for (const part of parts) {
-			if (part.startsWith('-')) {
-				// Exclusion pattern
-				const excludePattern = part.slice(1);
-				if (matchesGlob(namespace, excludePattern)) {
-					excluded = true;
-				}
-			} else {
-				// Inclusion pattern
-				if (matchesGlob(namespace, part)) {
-					included = true;
-				}
-			}
-		}
-
-		// If no inclusion patterns, default to included
-		const hasInclusions = parts.some((p) => !p.startsWith('-'));
-		if (!hasInclusions) included = true;
-
-		return included && !excluded;
-	}
-
-	function matchesGlob(str: string, pattern: string): boolean {
-		// Trim both for comparison (namespaces may have trailing spaces from padEnd)
-		const s = str.trim();
-		const p = pattern.trim();
-
-		// Convert glob pattern to regex
-		const regexPattern = p
-			.replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape special chars
-			.replace(/\*/g, '.*'); // * becomes .*
-		const regex = new RegExp(`^${regexPattern}$`);
-		return regex.test(s);
+		return _matchesPattern(namespace, pattern);
 	}
 
 	function isSimplePattern(pattern: string): boolean {

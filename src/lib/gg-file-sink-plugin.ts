@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { CapturedEntry } from './eruda/types.js';
 import { gg } from './gg.js';
+import { matchesPattern } from './pattern.js';
 
 export interface GgFileSinkOptions {
 	/** Directory to write log files into. Defaults to `.gg/` in the project root. */
@@ -55,32 +56,6 @@ function serializeEntry(
 	if (entry.src) out.src = entry.src;
 	if (entry.tableData) out.table = entry.tableData;
 	return out;
-}
-
-function matchesGlob(str: string, pattern: string): boolean {
-	const s = str.trim();
-	const p = pattern.trim();
-	const regexPattern = p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-	const regex = new RegExp(`^${regexPattern}$`);
-	return regex.test(s);
-}
-
-/**
- * Match a namespace against a comma-separated pattern string (same logic as Eruda plugin).
- * Supports inclusions and exclusions (prefixed with `-`).
- */
-function matchesPattern(ns: string, pattern: string): boolean {
-	if (!pattern || pattern === '*' || pattern === 'gg:*') return true;
-	const parts = pattern
-		.split(',')
-		.map((p) => p.trim())
-		.filter(Boolean);
-	const inclusions = parts.filter((p) => !p.startsWith('-'));
-	const exclusions = parts.filter((p) => p.startsWith('-')).map((p) => p.slice(1));
-
-	const included = inclusions.length === 0 || inclusions.some((p) => matchesGlob(ns, p));
-	const excluded = exclusions.some((p) => matchesGlob(ns, p));
-	return included && !excluded;
 }
 
 /**
