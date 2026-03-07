@@ -441,12 +441,12 @@ Changes to `gg.ts`, `debug/browser.ts`, `debug/node.ts`, and `plugin.ts` interna
 - [x] **Add `gg-keep` layer** — `keepPattern` variable loaded from `localStorage['gg-keep']` (default `'*'`). Applied in `onEntry` handler before `buffer.push()`: loggs not matching `keepPattern` are dropped (counted but not stored). `debug/node.ts` updated to use `GG_KEEP` env var instead of `DEBUG`; defaults to `'*'` (zero-config). `debug/browser.ts` updated to use `gg-show` key.
 - [x] **Add `gg-console` toggle** — removed `localStorage.debug` usage from `debug/browser.ts` (now uses `gg-console` + `gg-show`). Eruda plugin flips `gg-console` to `false` on init if not explicitly set. Settings panel Sync/Clear buttons replaced with a single "Native console output" checkbox. Debug factory re-enabled with correct pattern on toggle change.
 
-### Phase 2 — Dropped namespace tracking [ ]
+### Phase 2 — Dropped namespace tracking [x]
 
 Data layer only. The tracker is wired up but sentinels are not yet rendered in the UI.
 
-- [ ] **`DroppedNamespaceInfo` map** — maintained outside the ring buffer in `plugin.ts`. Updated by the `gg-keep` gate on each dropped logg.
-- [ ] **Sentinel data available** — `getDroppedNamespaces()` returns the map for consumers (file sink, future UI).
+- [x] **`DroppedNamespaceInfo` map** — maintained outside the ring buffer in `plugin.ts`. Updated by the `gg-keep` gate on each dropped logg.
+- [x] **Sentinel data available** — `getDroppedNamespaces()` returns the map for consumers (file sink, future UI).
 
 ### Phase 3 — Full UI [ ]
 

@@ -68,6 +68,26 @@ export interface CapturedEntry {
 }
 
 /**
+ * Tracks loggs dropped by the keep gate (Layer 1) for a single namespace.
+ * Maintained outside the ring buffer — does not consume buffer slots.
+ * The `preview` field holds the most recent dropped logg so the future
+ * sentinel UI can show what the namespace is producing right now.
+ */
+export interface DroppedNamespaceInfo {
+	namespace: string;
+	/** Timestamp of the first dropped logg for this namespace */
+	firstSeen: number;
+	/** Timestamp of the most recent dropped logg */
+	lastSeen: number;
+	/** Total number of dropped loggs across all time */
+	total: number;
+	/** Count per logg type key ('log' for unlabelled calls, or 'debug'/'info'/'warn'/'error') */
+	byType: Record<string, number>;
+	/** Most recent dropped logg — overwritten on each drop, used for sentinel preview */
+	preview: CapturedEntry;
+}
+
+/**
  * Eruda plugin interface
  */
 export interface ErudaPlugin {

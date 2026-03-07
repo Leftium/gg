@@ -1,4 +1,4 @@
-import type { GgErudaOptions, CapturedEntry } from './types.js';
+import type { GgErudaOptions, CapturedEntry, DroppedNamespaceInfo } from './types.js';
 import { DEV } from 'esm-env';
 import { LogBuffer } from './buffer.js';
 import {
@@ -105,6 +105,10 @@ export function createGgPlugin(
 
 	// All namespaces ever seen (maintained incrementally, avoids scanning buffer)
 	const allNamespacesSet = new Set<string>();
+
+	// Phase 2: loggs dropped by the keep gate, tracked outside the ring buffer.
+	// Key: namespace string. Grows with distinct dropped namespaces (expected: tens, not thousands).
+	const droppedNamespaces = new Map<string, DroppedNamespaceInfo>();
 
 	// Plugin detection state (probed once at init)
 	let openInEditorPluginDetected: boolean | null = null; // null = not yet probed
@@ -249,8 +253,24 @@ export function createGgPlugin(
 					// Layer 1: Keep gate — drop loggs that don't match gg-keep
 					const effectiveKeep = keepPattern || '*';
 					if (!namespaceMatchesPattern(entry.namespace, effectiveKeep)) {
-						// Logg is dropped — not stored in ring buffer.
-						// (Phase 2 will add DroppedNamespace tracking here)
+						// Logg is dropped — not stored in ring buffer. Track it in droppedNamespaces.
+						const typeKey = entry.level ?? 'log';
+						const existing = droppedNamespaces.get(entry.namespace);
+						if (existing) {
+							existing.lastSeen = entry.timestamp;
+							existing.total++;
+							existing.byType[typeKey] = (existing.byType[typeKey] ?? 0) + 1;
+							existing.preview = entry;
+						} else {
+							droppedNamespaces.set(entry.namespace, {
+								namespace: entry.namespace,
+								firstSeen: entry.timestamp,
+								lastSeen: entry.timestamp,
+								total: 1,
+								byType: { [typeKey]: 1 },
+								preview: entry
+							});
+						}
 						return;
 					}
 
@@ -365,7 +385,13 @@ export function createGgPlugin(
 			}
 			buffer.clear();
 			allNamespacesSet.clear();
+			droppedNamespaces.clear();
 			filteredIndices = [];
+		},
+
+		/** Returns a read-only view of the dropped-namespace tracking map (Phase 2 data layer). */
+		getDroppedNamespaces(): ReadonlyMap<string, DroppedNamespaceInfo> {
+			return droppedNamespaces;
 		}
 	};
 
@@ -1602,6 +1628,7 @@ export function createGgPlugin(
 		$el.find('.gg-clear-btn').on('click', () => {
 			buffer.clear();
 			allNamespacesSet.clear();
+			droppedNamespaces.clear();
 			renderLogs();
 		});
 
