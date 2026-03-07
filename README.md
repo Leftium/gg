@@ -332,8 +332,15 @@ jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
 
 **Querying with `jq`:**
 
+In SSR apps, every `gg()` call in a component fires twice — once server-side, once on hydration — doubling entry count. **Default to `env=client` unless you specifically need the server side.** Only read both when investigating a hydration mismatch.
+
 ```bash
-# Server-side entries only
+# Client-side only (default — avoids SSR duplicates)
+jq 'select(.env == "client")' .gg/logs-5173.jsonl
+# or via HTTP:
+curl -s "http://localhost:5173/__gg/logs?env=client"
+
+# Server-side only (load functions, API routes)
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
 
 # Errors only
@@ -378,7 +385,7 @@ curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
 curl -s http://localhost:5173/__gg/
 ```
 
-The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. The `env` field distinguishes SSR/load function logs (`"server"`) from browser logs (`"client"`). When both a Tauri webview and a browser tab are open, the `origin` field distinguishes them.
+The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. In SSR apps, filter by `env=client` by default — every component `gg()` call fires on both server and client, so unfiltered reads contain twice the entries. Only read both sides when investigating a hydration mismatch. The `origin` field distinguishes Tauri webview (`"tauri"`) from browser tab (`"browser"`) when both are open.
 
 **Add to your project's `AGENTS.md`** -- see [Agent Instructions Template](specs/gg-agent-file-sink.md#agent-instructions-template-for-consuming-projects-agentsmd) in the spec for a copy-paste-ready block to add to consuming projects.
 

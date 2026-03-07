@@ -561,13 +561,19 @@ This project uses `@leftium/gg` with the file sink plugin. All `gg()` calls — 
 
 3. **Trigger** — Ask the user to perform the action under investigation (page load, button click, form submit, etc.). Wait for the user to confirm they're done.
 
-4. **Query** — Read and filter the log entries.
+4. **Query** — Read and filter the log entries. In SSR apps, filter by `env=client` by default — every component `gg()` call fires on both server and client, so unfiltered reads contain twice the entries. Only read both sides when investigating a hydration mismatch.
 
    ```bash
-   # Read everything
-   curl -s http://localhost:5173/__gg/logs
+   # Client-side only (default — avoids SSR duplicates)
+   curl -s "http://localhost:5173/__gg/logs?env=client"
 
    # Or query the file directly with jq
+   jq 'select(.env == "client")' .gg/logs-5173.jsonl
+
+   # Server-side only (load functions, API routes)
+   curl -s "http://localhost:5173/__gg/logs?env=server"
+
+   # Errors only
    jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
    ```
 
@@ -591,7 +597,10 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 **Querying with `jq` (preferred):**
 
 ```bash
-# Server-side entries only
+# Client-side only (default — avoids SSR duplicates)
+jq 'select(.env == "client")' .gg/logs-5173.jsonl
+
+# Server-side only (load functions, API routes)
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
 
 # Errors only
@@ -608,6 +617,20 @@ jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
 
 # Count entries by namespace
 jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
+
+# SSR hydration mismatches — call sites where server and client produced different values.
+# Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
+# Call sites that only run server-side (auth checks) or client-side (onMount) are ignored.
+jq -s '
+  group_by([.ns, .line]) |
+  map(select(map(.env) | (contains(["server"]) and contains(["client"])))) |
+  map({
+    ns: .[0].ns, line: .[0].line,
+    server: (map(select(.env=="server")) | .[0].msg),
+    client: (map(select(.env=="client")) | .[0].msg)
+  }) |
+  map(select(.server != .client))
+' .gg/logs-5173.jsonl
 ```
 
 **Querying with `grep` (fallback):**
