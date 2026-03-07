@@ -1177,8 +1177,12 @@ export function dim(): ChainableColorFn {
  * The legacy gg._onLog setter is preserved as a backward-compatible alias
  * (it replaces the single "legacy" slot without affecting other listeners).
  */
-// Persistent replay buffer — every new listener gets a full replay of recent entries.
-// Capped at 2005 entries (matches the Eruda ring buffer size) to bound memory.
+// Persistent replay buffer — every new listener gets a full replay of recent entries,
+// so late-registering listeners (e.g. Eruda mounting after the file-sink listener) still
+// receive entries that fired before they registered. In practice this only holds a handful
+// of page-load entries. Capped at 2000 to bound memory in pathological cases.
+// Note: this does NOT cap the JSONL file — the file grows unbounded and agents clear it
+// explicitly via DELETE /__gg/logs.
 const EARLY_BUFFER_MAX = 2000;
 const earlyLogBuffer: CapturedEntry[] = [];
 const _logListeners = new Set<OnLogCallback>();
