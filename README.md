@@ -273,15 +273,100 @@ import ggPlugins from '@leftium/gg/vite';
 
 ggPlugins({
 	callSites: { srcRootPattern: '.*?(/src/)' },
-	openInEditor: false // disable open-in-editor middleware
+	openInEditor: false, // disable open-in-editor middleware
+	fileSink: true // write all gg() calls to .gg/logs-{port}.jsonl (for coding agents)
 });
 ```
+
+| Option         | Type                          | Default | Description                                                   |
+| -------------- | ----------------------------- | ------- | ------------------------------------------------------------- |
+| `callSites`    | `boolean \| CallSiteOptions`  | `true`  | Rewrites `gg()` calls with source file/line/col metadata      |
+| `openInEditor` | `boolean`                     | `true`  | Adds dev server middleware for click-to-open source files     |
+| `fileSink`     | `boolean \| { dir?: string }` | `false` | Writes all `gg()` calls to `.gg/logs-{port}.jsonl` (dev only) |
 
 Individual plugins are also available for advanced setups:
 
 ```ts
-import { ggCallSitesPlugin, openInEditorPlugin } from '@leftium/gg/vite';
+import { ggCallSitesPlugin, openInEditorPlugin, ggFileSinkPlugin } from '@leftium/gg/vite';
 ```
+
+## Coding Agent Access
+
+With `fileSink: true`, all `gg()` calls -- both browser-side and server-side -- are written to `.gg/logs-{port}.jsonl` during development. Coding agents (Claude, Cursor, etc.) can read this file directly without clipboard, browser automation, or manual copy/paste.
+
+Add `.gg/` to your `.gitignore` to keep log files out of version control.
+
+**Enable in `vite.config.ts`:**
+
+```ts
+ggPlugins({ fileSink: true });
+```
+
+**Typical agent workflow:**
+
+```bash
+# 1. Clear logs before the action under investigation
+curl -X DELETE http://localhost:5173/__gg/logs
+
+# 2. Trigger the action (page load, button click, etc.)
+
+# 3. Read the logs
+curl -s http://localhost:5173/__gg/logs
+
+# Or query the file directly with jq
+jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
+```
+
+**Each JSONL line contains:**
+
+| Field    | Description                                                       |
+| -------- | ----------------------------------------------------------------- |
+| `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@click`) |
+| `msg`    | Formatted message string                                          |
+| `ts`     | Unix epoch ms                                                     |
+| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug) |
+| `env`    | `"client"` or `"server"` -- which runtime produced this entry     |
+| `origin` | `"tauri"` \| `"browser"` (client entries only)                    |
+| `file`   | Source file path                                                  |
+| `line`   | Source line number                                                |
+
+**Querying with `jq`:**
+
+```bash
+# Server-side entries only
+jq 'select(.env == "server")' .gg/logs-5173.jsonl
+
+# Errors only
+jq 'select(.lvl == "error")' .gg/logs-5173.jsonl
+
+# Entries from a specific file
+jq 'select(.file | contains("+page.svelte"))' .gg/logs-5173.jsonl
+
+# Messages with source location
+jq -r '"\(.file):\(.line) \(.msg)"' .gg/logs-5173.jsonl
+
+# Count entries by namespace
+jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
+```
+
+**HTTP API (alternative to file access):**
+
+```bash
+# Read all logs
+curl -s http://localhost:5173/__gg/logs
+
+# Filter by namespace glob, environment, or origin
+curl -s "http://localhost:5173/__gg/logs?filter=api:*&env=server"
+curl -s "http://localhost:5173/__gg/logs?origin=tauri"
+curl -s "http://localhost:5173/__gg/logs?since=1741234567890"
+
+# Status and endpoints
+curl -s http://localhost:5173/__gg/
+```
+
+The file is truncated on dev server restart. Use `DELETE /__gg/logs` to clear mid-session. The `env` field distinguishes SSR/load function logs (`"server"`) from browser logs (`"client"`). When both a Tauri webview and a browser tab are open, the `origin` field distinguishes them.
+
+**Add to your project's `AGENTS.md`** -- see [Agent Instructions Template](specs/gg-agent-file-sink.md#agent-instructions-template-for-consuming-projects-agentsmd) in the spec for a copy-paste-ready block to add to consuming projects.
 
 ## Color Support (ANSI)
 

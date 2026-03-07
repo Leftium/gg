@@ -1519,6 +1519,7 @@ export function createGgPlugin(
 			}
 		}
 		renderFilterUI();
+		renderSentinelSection();
 		renderLogs();
 	}
 
@@ -1591,6 +1592,7 @@ export function createGgPlugin(
 				}
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 				return;
 			}
@@ -1607,6 +1609,7 @@ export function createGgPlugin(
 
 				// localStorage already saved in toggleNamespaces()
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 				return;
 			}
@@ -1621,6 +1624,7 @@ export function createGgPlugin(
 
 				// Re-render to update UI
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 			}
 		});
@@ -1834,7 +1838,19 @@ export function createGgPlugin(
 		}
 
 		// Sort by total dropped count descending (noisiest first)
-		const sorted = [...droppedNamespaces.values()].sort((a, b) => b.total - a.total);
+		// Also respect filterPattern (Layer 2 show filter) — sentinels for hidden namespaces
+		// are themselves hidden, consistent with how filtered log entries are hidden.
+		const effectiveShowPattern = filterPattern || 'gg:*';
+		const sorted = [...droppedNamespaces.values()]
+			.filter((info) => namespaceMatchesPattern(info.namespace, effectiveShowPattern))
+			.sort((a, b) => b.total - a.total);
+
+		if (sorted.length === 0) {
+			sentinelSection.style.display = 'none';
+			sentinelSection.innerHTML = '';
+			return;
+		}
+
 		const total = sorted.reduce((sum, i) => sum + i.total, 0);
 
 		// Header: "▼ Dropped: 3 namespaces, 47 loggs" — click to collapse
@@ -2560,6 +2576,7 @@ export function createGgPlugin(
 			});
 			dismissToast();
 			renderFilterUI();
+			renderSentinelSection();
 			renderLogs();
 		}
 	}
@@ -2685,6 +2702,7 @@ export function createGgPlugin(
 					localStorage.setItem(SHOW_KEY, filterPattern);
 					dismissToast();
 					renderFilterUI();
+					renderSentinelSection();
 					renderLogs();
 				}
 				return;
@@ -2710,6 +2728,7 @@ export function createGgPlugin(
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 				return;
 			}
@@ -2800,6 +2819,7 @@ export function createGgPlugin(
 
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 				return;
 			}
@@ -2850,6 +2870,7 @@ export function createGgPlugin(
 				toggleNamespace(namespace, false);
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 
 				// Show toast with undo option
@@ -2867,6 +2888,7 @@ export function createGgPlugin(
 				getAllCapturedNamespaces().forEach((ns) => enabledNamespaces.add(ns));
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 			}
 		});
@@ -2943,6 +2965,7 @@ export function createGgPlugin(
 
 				localStorage.setItem(SHOW_KEY, filterPattern);
 				renderFilterUI();
+				renderSentinelSection();
 				renderLogs();
 				return;
 			}
