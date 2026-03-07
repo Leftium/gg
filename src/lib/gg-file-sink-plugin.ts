@@ -24,6 +24,18 @@ interface SerializedEntry {
 	table?: { keys: string[]; rows: Array<Record<string, unknown>> };
 }
 
+/**
+ * Serialize a CapturedEntry for writing to the JSONL log file.
+ *
+ * IMPORTANT: The SSR injection string (in the `transform` hook below) and the
+ * browser injection string hand-roll the same logic as plain JS because injected
+ * code cannot import from this module. If you change the SerializedEntry schema
+ * (add/rename/remove fields), update both injection strings to match.
+ *
+ * Server path: `serializeEntry(entry, 'server')` → appended via configureServer listener
+ * SSR path:    ssrInjection string (search for `__ggFileSinkServerWriter`)
+ * Browser path: injection string (search for `__ggFileSinkSender`)
+ */
 function serializeEntry(
 	entry: CapturedEntry,
 	env: 'client' | 'server',
@@ -202,6 +214,7 @@ export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugi
 				// We pass appendFileSync + the log file path via globalThis so the injected
 				// code has no imports of its own (avoids TLA / static import constraints).
 				// Guarded by import.meta.env.DEV — tree-shaken in production builds.
+				// NOTE: this string mirrors serializeEntry() above — keep in sync if schema changes.
 				const ssrInjection = `
 // gg-file-sink: server-side direct writer (injected by ggFileSinkPlugin)
 if (import.meta.env.DEV && globalThis.__ggFileSink) {
@@ -230,6 +243,7 @@ if (import.meta.env.DEV && globalThis.__ggFileSink) {
 			// Browser injection: relay entries to Vite dev server via HMR WebSocket.
 			// Runs once when the gg module is first loaded in the browser.
 			// Guarded by import.meta.hot — Vite tree-shakes this in production builds.
+			// NOTE: this string mirrors serializeEntry() above — keep in sync if schema changes.
 			const injection = `
 // gg-file-sink: client-side HMR sender (injected by ggFileSinkPlugin)
 if (import.meta.hot) {
