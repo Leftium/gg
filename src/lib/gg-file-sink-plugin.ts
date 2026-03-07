@@ -429,7 +429,7 @@ if (import.meta.hot) {
 				}
 
 				res.statusCode = 405;
-				res.setHeader('Allow', 'GET, DELETE');
+				res.setHeader('Allow', 'GET, HEAD, DELETE');
 				res.end('Method Not Allowed');
 			});
 		}

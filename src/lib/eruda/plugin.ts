@@ -125,9 +125,8 @@ export function createGgPlugin(
 	// Key: namespace string. Grows with distinct dropped namespaces (expected: tens, not thousands).
 	const droppedNamespaces = new Map<string, DroppedNamespaceInfo>();
 
-	// Total loggs ever received (kept + dropped), and distinct namespaces ever seen (including dropped).
+	// Total loggs ever received (kept + dropped).
 	let receivedTotal = 0;
-	const receivedNsSet = new Set<string>();
 
 	// Plugin detection state (probed once at init)
 	let openInEditorPluginDetected: boolean | null = null; // null = not yet probed
@@ -276,7 +275,6 @@ export function createGgPlugin(
 				const onEntry = (entry: CapturedEntry) => {
 					// Track total received (before any filtering)
 					receivedTotal++;
-					receivedNsSet.add(entry.namespace);
 
 					// Layer 1: Keep gate — drop loggs that don't match gg-keep
 					const effectiveKeep = keepPattern || 'gg:*';
@@ -419,7 +417,6 @@ export function createGgPlugin(
 			droppedNamespaces.clear();
 			filteredIndices = [];
 			receivedTotal = 0;
-			receivedNsSet.clear();
 		},
 
 		/** Returns a read-only view of the dropped-namespace tracking map (Phase 2 data layer). */
@@ -3341,11 +3338,6 @@ export function createGgPlugin(
 		);
 	}
 
-	/** Update the copy-button count text */
-	function updateTruncationBanner() {
-		// Truncation info is now shown in the pipeline buffer node (buf/cap ⚠).
-	}
-
 	function updateCopyCount() {
 		if (!$el) return;
 		const copyCountSpan = $el.find('.gg-copy-count');
@@ -3516,7 +3508,6 @@ export function createGgPlugin(
 		rebuildFilteredIndices();
 
 		updateCopyCount();
-		updateTruncationBanner();
 		renderPipelineUI();
 
 		// Check if user is near bottom before we update the virtualizer
@@ -3564,7 +3555,6 @@ export function createGgPlugin(
 
 		renderPipelineUI();
 		updateCopyCount();
-		updateTruncationBanner();
 
 		if (filteredIndices.length === 0) {
 			// Tear down virtualizer
