@@ -72,7 +72,9 @@ export function createGgPlugin(
 	// Toast state
 	let lastHiddenPattern: string | null = null; // filterPattern before the hide (for undo)
 	let lastDroppedPattern: string | null = null; // keepPattern before the drop (for undo)
-	let toastMode: 'hide' | 'drop' = 'hide'; // which layer the current toast targets
+	let lastKeptPattern: string | null = null; // keepPattern before the [+] keep (for undo)
+	let lastKeptNamespaceInfo: { ns: string; info: DroppedNamespaceInfo } | null = null; // sentinel entry to restore on undo
+	let toastMode: 'hide' | 'drop' | 'keep' = 'hide'; // which layer the current toast targets
 	let hasSeenToastExplanation = false; // first toast auto-expands help text
 
 	// Sentinel section debounce: pending rAF for re-rendering dropped sentinels
@@ -528,17 +530,40 @@ export function createGgPlugin(
 	function simplifyPattern(pattern: string): string {
 		if (!pattern) return '';
 
-		// Remove empty parts
-		let parts = pattern
-			.split(',')
-			.map((p) => p.trim())
-			.filter(Boolean);
+		// Remove empty parts and duplicates
+		let parts = Array.from(
+			new Set(
+				pattern
+					.split(',')
+					.map((p) => p.trim())
+					.filter(Boolean)
+			)
+		);
 
-		// Remove duplicates
-		parts = Array.from(new Set(parts));
+		const inclusions = parts.filter((p) => !p.startsWith('-'));
+		const exclusions = parts.filter((p) => p.startsWith('-'));
+		const hasWildcardBase = inclusions.includes('*');
 
-		// Clean up trailing/leading commas
-		return parts.join(',');
+		// If there's a wildcard base (*), drop all other inclusions (they're subsumed)
+		const finalInclusions = hasWildcardBase ? ['*'] : inclusions;
+
+		// Drop exclusions that are subsumed by a broader exclusion.
+		// e.g. -routes/demo-helpers.ts:validation is subsumed by -routes/demo-*
+		const finalExclusions = exclusions.filter((excl) => {
+			const exclNs = excl.slice(1); // strip leading '-'
+			// Keep this exclusion only if no other exclusion is broader and covers it
+			return !exclusions.some((other) => {
+				if (other === excl) return false;
+				const otherNs = other.slice(1);
+				return matchesGlob(exclNs, otherNs);
+			});
+		});
+
+		// If there's a wildcard base, also drop inclusions that match no exclusion boundary
+		// (they can't add any namespace that * doesn't already include)
+		// Final inclusions are already collapsed to ['*'] above, so nothing more to do.
+
+		return [...finalInclusions, ...finalExclusions].join(',');
 	}
 
 	function getAllCapturedNamespaces(): string[] {
@@ -1937,26 +1962,42 @@ export function createGgPlugin(
 					const namespace = keepBtn.getAttribute('data-namespace');
 					if (!namespace) return;
 
-					// Remove the exclusion for this namespace from keepPattern
+					const info = droppedNamespaces.get(namespace);
+					if (!info) return;
+
+					const previousKeep = keepPattern || '*';
+
+					// Remove the exact exclusion for this namespace from keepPattern.
+					// If no exclusion exists (Case B: namespace simply not included), add it.
 					const currentKeep = keepPattern || '*';
 					const exclusion = `-${namespace}`;
 					const parts = currentKeep
 						.split(',')
 						.map((p) => p.trim())
 						.filter(Boolean);
-					const filtered = parts.filter((p) => p !== exclusion);
-					keepPattern = filtered.join(',') || '*';
+					const hasExclusion = parts.includes(exclusion);
+					if (hasExclusion) {
+						keepPattern = parts.filter((p) => p !== exclusion).join(',') || '*';
+					} else {
+						// No explicit exclusion — add an inclusion for the exact namespace
+						keepPattern = parts.some((p) => !p.startsWith('-'))
+							? `${currentKeep},${namespace}`
+							: `*,${namespace}`;
+					}
 					keepPattern = simplifyPattern(keepPattern);
 					localStorage.setItem(KEEP_KEY, keepPattern);
 
 					// Sync keep input
 					if (keepInput) keepInput.value = keepPattern;
 
-					// Remove from droppedNamespaces map so sentinel disappears
+					// Remove from droppedNamespaces map so sentinel disappears immediately
 					droppedNamespaces.delete(namespace);
 
 					renderKeepUI();
 					renderSentinelSection();
+
+					// Show keep toast for undo / segment broadening
+					showKeepToast(namespace, previousKeep, info);
 				}
 			});
 		}
@@ -2413,6 +2454,35 @@ export function createGgPlugin(
 		if (showExplanation) hasSeenToastExplanation = true;
 	}
 
+	function showKeepToast(namespace: string, previousKeep: string, info: DroppedNamespaceInfo) {
+		if (!$el) return;
+		toastMode = 'keep';
+		lastKeptPattern = previousKeep;
+		lastKeptNamespaceInfo = { ns: namespace, info };
+
+		const toast = $el.find('.gg-toast').get(0) as HTMLElement;
+		if (!toast) return;
+
+		const nsHTML = buildToastNsHTML(namespace);
+		const showExplanation = !hasSeenToastExplanation;
+
+		toast.innerHTML =
+			`<button class="gg-toast-btn gg-toast-dismiss" title="Dismiss">\u00d7</button>` +
+			`<span class="gg-toast-label">Kept:</span>` +
+			`<span class="gg-toast-ns">${nsHTML}</span>` +
+			`<span class="gg-toast-actions">` +
+			`<button class="gg-toast-btn gg-toast-undo">Undo</button>` +
+			`<button class="gg-toast-btn gg-toast-help" title="Toggle help">?</button>` +
+			`</span>` +
+			`<div class="gg-toast-explanation${showExplanation ? ' visible' : ''}">` +
+			`Click a segment above to keep all matching namespaces (e.g. click "api" to keep api/*). ` +
+			`Only new loggs from this point forward will be captured.` +
+			`</div>`;
+
+		toast.classList.add('visible');
+		if (showExplanation) hasSeenToastExplanation = true;
+	}
+
 	/** Dismiss the toast bar */
 	function dismissToast() {
 		if (!$el) return;
@@ -2422,13 +2492,29 @@ export function createGgPlugin(
 		}
 		lastHiddenPattern = null;
 		lastDroppedPattern = null;
+		lastKeptPattern = null;
+		lastKeptNamespaceInfo = null;
 	}
 
-	/** Undo the last namespace hide or drop */
+	/** Undo the last namespace hide, drop, or keep */
 	function undoHide() {
 		if (!$el) return;
 
-		if (toastMode === 'drop' && lastDroppedPattern !== null) {
+		if (toastMode === 'keep' && lastKeptPattern !== null) {
+			// Restore keepPattern
+			keepPattern = lastKeptPattern;
+			localStorage.setItem(KEEP_KEY, keepPattern);
+			const keepInput = $el.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+			if (keepInput) keepInput.value = keepPattern;
+			// Re-insert the sentinel entry so it reappears
+			if (lastKeptNamespaceInfo) {
+				droppedNamespaces.set(lastKeptNamespaceInfo.ns, lastKeptNamespaceInfo.info);
+			}
+			dismissToast();
+			renderKeepUI();
+			renderSentinelSection();
+			renderLogs();
+		} else if (toastMode === 'drop' && lastDroppedPattern !== null) {
 			// Restore keepPattern
 			keepPattern = lastDroppedPattern;
 			localStorage.setItem(KEEP_KEY, keepPattern);
@@ -2497,7 +2583,45 @@ export function createGgPlugin(
 
 				const exclusion = `-${filter}`;
 
-				if (toastMode === 'drop') {
+				if (toastMode === 'keep') {
+					// Broaden the keep: remove all exclusions whose prefix matches `filter`,
+					// then add `filter` as an inclusion if pattern has no wildcard base.
+					const currentKeep = keepPattern || '*';
+					const keepParts = currentKeep
+						.split(',')
+						.map((p) => p.trim())
+						.filter(Boolean);
+					// Remove any exclusion that is a sub-pattern of filter (starts with -filter prefix)
+					const narrowed = keepParts.filter((p) => {
+						if (!p.startsWith('-')) return true;
+						const excl = p.slice(1).replace(/\*$/, '');
+						const filterBase = filter.replace(/\*$/, '');
+						return !excl.startsWith(filterBase) && !filterBase.startsWith(excl);
+					});
+					const hasWildcardBase = narrowed.some((p) => p === '*');
+					if (
+						!hasWildcardBase &&
+						!narrowed.some(
+							(p) => !p.startsWith('-') && namespaceMatchesPattern(filter.replace(/\*$/, 'x'), p)
+						)
+					) {
+						narrowed.push(filter);
+					}
+					keepPattern = simplifyPattern(narrowed.join(',') || '*');
+					localStorage.setItem(KEEP_KEY, keepPattern);
+					const keepInput = $el?.find('.gg-keep-input').get(0) as HTMLInputElement | undefined;
+					if (keepInput) keepInput.value = keepPattern;
+					// Remove all dropped namespaces that now match the new keepPattern
+					for (const ns of [...droppedNamespaces.keys()]) {
+						if (namespaceMatchesPattern(ns, keepPattern)) {
+							droppedNamespaces.delete(ns);
+						}
+					}
+					dismissToast();
+					renderKeepUI();
+					renderSentinelSection();
+					renderLogs();
+				} else if (toastMode === 'drop') {
 					// Add exclusion to keepPattern (Layer 1)
 					const currentKeep = keepPattern || '*';
 					const keepParts = currentKeep.split(',').map((p) => p.trim());
@@ -2523,7 +2647,7 @@ export function createGgPlugin(
 					renderLogs();
 					scheduleSentinelRender();
 				} else {
-					// Add exclusion to filterPattern (Layer 2 / hide)
+					// toastMode === 'hide': add exclusion to filterPattern (Layer 2)
 					const currentPattern = filterPattern || '*';
 					const parts = currentPattern.split(',').map((p) => p.trim());
 					if (parts.includes(exclusion)) {
