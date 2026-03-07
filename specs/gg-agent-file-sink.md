@@ -349,7 +349,7 @@ All query params can be combined: `GET /__gg/logs?filter=api:*&env=client&origin
 
 - The agent doesn't need to know the file path or port-based naming convention
 - Works even if the file path is customized via plugin options
-- Follows the same pattern as `/__open-in-editor` and `/__gg-project-root` that already exist
+- Follows the same pattern as `/__open-in-editor` and `/__gg/project-root` that already exist
 - Enables `filter` and `since` query params for server-side filtering (more efficient than the agent grepping the whole file)
 
 **Typical agent workflow:**
@@ -577,16 +577,16 @@ This cycle — instrument, reset, trigger, query, analyze — is the primary deb
 
 **Each JSONL line contains:**
 
-| Field    | Description                                                          |
-| -------- | -------------------------------------------------------------------- |
+| Field    | Description                                                             |
+| -------- | ----------------------------------------------------------------------- |
 | `ns`     | Namespace (file + function, e.g., `gg:routes/+page.svelte@handleClick`) |
-| `msg`    | Formatted message string                                             |
-| `ts`     | Unix epoch ms                                                        |
-| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)    |
-| `env`    | `"client"` or `"server"` — which runtime produced this entry         |
-| `origin` | `"tauri"` \| `"browser"` (client entries only)                       |
-| `file`   | Source file path                                                     |
-| `line`   | Source line number                                                   |
+| `msg`    | Formatted message string                                                |
+| `ts`     | Unix epoch ms                                                           |
+| `lvl`    | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)       |
+| `env`    | `"client"` or `"server"` — which runtime produced this entry            |
+| `origin` | `"tauri"` \| `"browser"` (client entries only)                          |
+| `file`   | Source file path                                                        |
+| `line`   | Source line number                                                      |
 
 **Querying with `jq` (preferred):**
 

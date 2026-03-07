@@ -1353,22 +1353,34 @@ export async function runGgDiagnostics() {
 		);
 	}
 
-	// Optional plugin diagnostics
-	message(
-		makeHint(
-			_ggCallSitesPlugin,
-			`✅ gg-call-sites vite plugin detected! Call-site namespaces and open-in-editor links baked in at build time.`,
-			`⚠️ gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for file:line call-site namespaces and open-in-editor links. Without plugin, using word-tuple names (e.g. calm-fox) as call-site identifiers.`
-		)
-	);
-
 	if (BROWSER && DEV) {
+		// Optional plugin diagnostics — only meaningful in browser where Vite's define
+		// replacements apply. Server-side Node.js load never sees __GG_TAG_PLUGIN__ = true.
+		message(
+			makeHint(
+				_ggCallSitesPlugin,
+				`✅ gg-call-sites vite plugin detected! Call-site namespaces and open-in-editor links baked in at build time.`,
+				`⚠️ gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for file:line call-site namespaces and open-in-editor links. Without plugin, using word-tuple names (e.g. calm-fox) as call-site identifiers.`
+			)
+		);
 		const { status } = await fetch('/__open-in-editor?file=+');
 		message(
 			makeHint(
 				status === 222,
 				`✅ (optional) open-in-editor vite plugin detected! (status code: ${status}) Clickable links open source files in editor.`,
 				`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}) Add openInEditorPlugin() to vite.config.ts for clickable links that open source files in editor`
+			)
+		);
+
+		const fileSinkStatus = await fetch('/__gg/logs', { method: 'HEAD' }).then(
+			(r) => r.status,
+			() => 0
+		);
+		message(
+			makeHint(
+				fileSinkStatus === 200,
+				`✅ gg-file-sink vite plugin detected! Logs written to .gg/logs-{port}.jsonl. Agent API at /__gg/logs.`,
+				`ℹ️ (optional) gg-file-sink vite plugin not detected. Add fileSink: true to ggPlugins() options to write logs to .gg/logs-{port}.jsonl for coding agent access.`
 			)
 		);
 	}

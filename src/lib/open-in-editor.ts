@@ -45,7 +45,7 @@ export default function openInEditorPlugin(
 			});
 
 			// Expose project root for client-side $ROOT variable (forward slashes for URI compat)
-			server.middlewares.use('/__gg-project-root', (_req, res) => {
+			server.middlewares.use('/__gg/project-root', (_req, res) => {
 				res.setHeader('Content-Type', 'text/plain');
 				res.end(srcRoot.replace(/\\/g, '/'));
 			});

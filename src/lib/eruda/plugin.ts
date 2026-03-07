@@ -347,7 +347,7 @@ export function createGgPlugin(
 						openInEditorPluginDetected = r.status === 222;
 						// If plugin detected, fetch project root for $ROOT variable
 						if (openInEditorPluginDetected && !projectRoot) {
-							return fetch('/__gg-project-root').then((r) => r.text());
+							return fetch('/__gg/project-root').then((r) => r.text());
 						}
 					})
 					.then((root) => {
