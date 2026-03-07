@@ -1,7 +1,7 @@
 # gg Agent File Sink: JSONL Log File via Vite HMR
 
-**Date**: 2026-03-06
-**Status**: Draft
+**Date**: 2026-03-08
+**Status**: Implemented (Phase 1 + Phase 2 complete)
 **Author**: AI-assisted
 
 ## Overview
@@ -104,10 +104,13 @@ One JSON object per line. Advantages for agents:
 | Truncation              | Auto on server start + agent-initiated clear via HTTP | Auto-truncate prevents unbounded growth. Agent clear (`DELETE /__gg/logs`) gives precise control -- agent clears right before triggering an action, then reads only the relevant entries. |
 | Browser-side batching   | Optional, deferred                                    | Simplicity first. One HMR message per `gg()` call. Batch later if profiling shows need.                                                                                                   |
 | Filtering               | Agent-side (grep the file)                            | No server-side filter config needed. JSONL fields are greppable. Agent uses its own tools.                                                                                                |
-| Serialization           | Subset of CapturedEntry fields                        | Skip `args` (may contain non-serializable objects). Include namespace, message, timestamp, level, env, origin, file, line, src.                                                           |
+| Serialization           | Subset of CapturedEntry fields                        | Skip `args` (may contain non-serializable objects). Include namespace, message, timestamp, level, env, origin, file, line, src, tableData.                                                |
 | Client origin detection | `window.__TAURI_INTERNALS__` check                    | Tauri injects this global in its webview. Detected once on init, stamped on every entry. Distinguishes Tauri webview from browser tab when both connect to the same Vite dev server.      |
 | Activation              | Dev-only, opt-in via plugin option                    | No file I/O in production. Explicit opt-in prevents surprise disk writes.                                                                                                                 |
 | Production behavior     | Automatic no-op, zero bundle cost                     | `import.meta.hot` is `undefined` in prod builds -- Vite dead-code-eliminates the client sender. `configureServer` only runs in dev.                                                       |
+| File writes             | `appendFileSync` (not async)                          | Preserves write order under high-volume bursts. At dev logging volumes the sync overhead is negligible.                                                                                   |
+| SSR server-side capture | Transform injection + `globalThis.__ggFileSink`       | Vite's SSR module runner is a separate module instance from `configureServer` — a direct listener on the plugin's `gg` import doesn't see SSR calls. `globalThis` bridges the gap.        |
+| `earlyLogBuffer`        | Persistent (never cleared), capped at 2000            | Multiple listeners register at different times (file-sink at module load, Eruda at component mount). Every new listener gets a full replay; clearing on first registration broke Eruda.   |
 
 ## Architecture
 
@@ -126,16 +129,21 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
 │       │    serialized) │                │                              │
 │       │                │                │  SERVER-SIDE gg() (SSR,      │
 │       ▼                │                │  load functions, API routes) │
-│  LogBuffer.push(entry) │                │       │                      │
-│  (existing flow)       │                │       ▼                      │
-│                        │                │  _onLog listener registered  │
-│  import.meta.hot is    │                │  in configureServer:         │
-│  undefined in prod     │                │    append(entry,             │
-│  → entire sender is    │                │      env: 'server')          │
-│    tree-shaken away    │                │       │  (direct, no HMR)    │
+│  LogBuffer.push(entry) │                │  [Vite SSR module runner —   │
+│  (existing flow)       │                │   separate module instance]  │
+│                        │                │       │                      │
+│  import.meta.hot is    │                │       ▼                      │
+│  undefined in prod     │                │  listener injected into      │
+│  → entire sender is    │                │  gg.ts via transform hook    │
+│    tree-shaken away    │                │  (SSR only, DEV only):       │
+│                        │                │    reads globalThis          │
+│                        │                │      .__ggFileSink.logFile   │
+│                        │                │    appendFileSync(entry,     │
+│                        │                │      env: 'server')          │
+│                        │                │       │  (direct, no HMR)    │
 │                        │                │       │                      │
 │                        │                │       ▼                      │
-│                        │                │  append = fs.appendFile(     │
+│                        │                │  fs.appendFileSync(          │
 │                        │                │    `.gg/logs-${port}.jsonl`, │
 │                        │                │    JSON.stringify(entry)     │
 │                        │                │    + '\n'                    │
@@ -144,7 +152,7 @@ BROWSER (client)                          VITE DEV SERVER (Node.js)
 │                        │                │  configureServer:            │
 │                        │                │    resolve port              │
 │                        │                │    truncate on start         │
-│                        │                │    register gg._onLog        │
+│                        │                │    set globalThis.__ggFileSink│
 │                        │                │                              │
 │                        │                │  middleware:                 │
 │                        │                │    DELETE /__gg/logs → clear │
@@ -181,18 +189,19 @@ Each JSONL line contains a subset of `CapturedEntry` fields, chosen for agent ut
 {"ns":"gg:routes/+page.server.ts@load","msg":"Fetching user data","ts":1741234567885,"env":"server","file":"src/routes/+page.server.ts","line":18,"diff":0}
 ```
 
-| Field    | Source      | Description                                                                |
-| -------- | ----------- | -------------------------------------------------------------------------- |
-| `ns`     | `namespace` | Namespace string (greppable)                                               |
-| `msg`    | `message`   | Formatted message string                                                   |
-| `ts`     | `timestamp` | Unix epoch ms                                                              |
-| `lvl`    | `level`     | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)          |
-| `env`    | (injected)  | `"client"` or `"server"` -- which runtime produced this entry              |
-| `origin` | (injected)  | `"tauri"` \| `"browser"` (client only) -- which client produced this entry |
-| `file`   | `file`      | Source file path                                                           |
-| `line`   | `line`      | Source line number                                                         |
-| `src`    | `src`       | Source expression text (icecream-style)                                    |
-| `diff`   | `diff`      | Ms since previous log in same namespace                                    |
+| Field    | Source      | Description                                                                                              |
+| -------- | ----------- | -------------------------------------------------------------------------------------------------------- |
+| `ns`     | `namespace` | Namespace string (greppable)                                                                             |
+| `msg`    | `message`   | Formatted message string                                                                                 |
+| `ts`     | `timestamp` | Unix epoch ms                                                                                            |
+| `lvl`    | `level`     | `"debug"` \| `"info"` \| `"warn"` \| `"error"` (omitted if debug)                                        |
+| `env`    | (injected)  | `"client"` or `"server"` -- which runtime produced this entry                                            |
+| `origin` | (injected)  | `"tauri"` \| `"browser"` (client only) -- which client produced this entry                               |
+| `file`   | `file`      | Source file path                                                                                         |
+| `line`   | `line`      | Source line number                                                                                       |
+| `src`    | `src`       | Source expression text (icecream-style)                                                                  |
+| `diff`   | `diff`      | Ms since previous log in same namespace                                                                  |
+| `table`  | `tableData` | Structured table data `{ keys: string[], rows: Record<string,unknown>[] }` (omitted if not a table logg) |
 
 The `env` field is added by the transport layer, not by `gg()` itself. The client-side HMR sender stamps `"client"`; the server-side direct writer stamps `"server"`. This lets agents distinguish SSR load function logs from hydrated component logs, even when both target the same source file.
 
@@ -212,9 +221,26 @@ Agents can filter by environment and origin:
 
 **Basic filtering:**
 
+In SSR apps, component `gg()` calls appear in the file twice — once as `env:"server"` (first render) and once as `env:"client"` (hydration). Pick the side you need, or use the dedup query for a full picture without duplicates.
+
 ```bash
-# All server-side entries
+# Check the env split first (useful in SSR apps)
+jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
+
+# Client-side only (component behavior, user interactions)
+jq 'select(.env == "client")' .gg/logs-5173.jsonl
+
+# Server-side only (load functions, API routes, auth)
 jq 'select(.env == "server")' .gg/logs-5173.jsonl
+
+# Full picture without SSR duplicates — server entries + client-only entries (e.g. onMount)
+jq -s '
+  (map(select(.env == "server")) | map([.ns, .line] | join(":")) | unique) as $server_keys |
+  map(select(
+    .env == "server" or
+    (([.ns, .line] | join(":")) | IN($server_keys[]) | not)
+  ))
+' .gg/logs-5173.jsonl
 
 # All entries from a specific namespace
 jq 'select(.ns | startswith("gg:routes/+page"))' .gg/logs-5173.jsonl
@@ -259,6 +285,24 @@ jq -s 'group_by(.env) | map({env: .[0].env, count: length})' .gg/logs-5173.jsonl
 jq -s 'group_by(.ns) | map({ns: .[0].ns, count: length}) | sort_by(-.count)' .gg/logs-5173.jsonl
 ```
 
+**SSR hydration mismatches:**
+
+```bash
+# Call sites where server and client produced different values.
+# Only flags entries where BOTH envs exist for the same [ns, line] AND msg differs.
+# Call sites that only run server-side (auth) or client-side (onMount) are ignored.
+jq -s '
+  group_by([.ns, .line]) |
+  map(select(map(.env) | (contains(["server"]) and contains(["client"])))) |
+  map({
+    ns: .[0].ns, line: .[0].line,
+    server: (map(select(.env=="server")) | .[0].msg),
+    client: (map(select(.env=="client")) | .[0].msg)
+  }) |
+  map(select(.server != .client))
+' .gg/logs-5173.jsonl
+```
+
 **Combining with other tools:**
 
 ```bash
@@ -282,7 +326,7 @@ curl -s http://localhost:5173/__gg/logs | jq 'select(.lvl == "error")'
 
 **Recommendation for agents**: Use `jq` as the default querying tool. Fall back to `grep` if `jq` is unavailable or for quick single-pattern searches where precision doesn't matter.
 
-**Excluded**: `args` (may contain circular refs, DOM nodes, non-serializable objects), `color` (cosmetic), `col` (rarely useful), `stack` (large, could be opt-in), `tableData` (complex structure).
+**Excluded**: `args` (may contain circular refs, DOM nodes, non-serializable objects), `color` (cosmetic), `col` (rarely useful), `stack` (large, could be opt-in).
 
 ### Hook Points: Client and Server
 
@@ -311,24 +355,42 @@ The plugin's configureServer hook registers server.hot.on('gg:log', ...)
 which appends the JSON line to .gg/logs-{port}.jsonl.
 ```
 
-#### Server-Side (Direct Write, No Transport)
+#### Server-Side (Transform Injection + globalThis Bridge)
 
 ```
-STEP 1: Plugin registers _onLog listener in configureServer
-────────────────────────────────────────────────────────────
-The plugin imports gg and registers a listener on gg._onLog
-directly in the Node.js process. This runs in the same process
-as SSR, SvelteKit load functions, API routes, etc.
+STEP 1: configureServer sets globalThis.__ggFileSink
+─────────────────────────────────────────────────────
+When the Vite dev server starts, configureServer resolves the log
+file path and sets:
+  globalThis.__ggFileSink = {
+    appendFileSync: fs.appendFileSync,
+    get logFile() { return logFile; }   // live getter — updates after port resolves
+  }
 
-STEP 2: Direct append
+STEP 2: Plugin injects server-side writer into gg.ts (SSR transform)
+──────────────────────────────────────────────────────────────────────
+The transform hook detects SSR builds (transformOptions.ssr === true)
+and appends a listener registration to gg.ts:
+
+  if (import.meta.env.DEV && globalThis.__ggFileSink) {
+    const { appendFileSync, logFile } = globalThis.__ggFileSink;
+    gg.addLogListener(function __ggFileSinkServerWriter(entry) {
+      // serialize and appendFileSync to logFile
+    });
+  }
+
+This runs inside Vite's SSR module runner — the same context as
+SvelteKit load functions, API routes, and SSR components.
+
+STEP 3: Direct append
 ─────────────────────
-On each server-side gg() call, the listener serializes the
-CapturedEntry, stamps env: 'server', and calls fs.appendFile
-on the same .gg/logs-{port}.jsonl file. No HMR relay needed --
-gg() and the file are in the same Node.js process.
+On each server-side gg() call, the injected listener serializes
+the CapturedEntry, stamps env: 'server', and calls
+fs.appendFileSync on the same .gg/logs-{port}.jsonl file.
+Guarded by import.meta.env.DEV — tree-shaken in production.
 ```
 
-Server-side capture is simpler than client-side because there's no transport gap. The `_onLog` callback fires synchronously (relative to the `gg()` call) in the same process that has filesystem access. The only consideration is that the server-side listener must coexist with any other `_onLog` consumers (same multi-listener requirement as the client-side hook -- see Open Question 4).
+**Why not a direct configureServer listener?** Vite's SSR module runner is a separate module instance from the plugin's Node.js context. A listener registered on the plugin's imported `gg` object never fires for SSR `gg()` calls — they're on a different object. The `globalThis` bridge and transform injection solve this: the injected code runs inside the SSR context and reads the file path from `globalThis`, which is shared across all Node.js contexts in the same process.
 
 ### Agent HTTP API (`/__gg/logs`)
 
@@ -395,25 +457,25 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 
 ### Phase 1: Core File Sink Plugin
 
-- [ ] **1.1** Create `src/lib/gg-file-sink-plugin.ts` -- Vite plugin with `configureServer` hook
-- [ ] **1.2** Server side: `server.hot.on('gg:log', ...)` handler that appends JSONL to `.gg/logs-{port}.jsonl`
-- [ ] **1.3** Server side: resolve port from server config, truncate/create `.gg/logs-{port}.jsonl` on server start (inside `configureServer`)
-- [ ] **1.4** Server side: ensure `.gg/` directory is created if missing
-- [ ] **1.5** Server side: `/__gg/logs` middleware -- `DELETE` truncates file (204), `GET` returns file contents as `text/plain` (200)
-- [ ] **1.6** Server side: `GET /__gg/logs?filter=` glob matching and `?since=` timestamp filtering
-- [ ] **1.7** Client side: inject `import.meta.hot.send('gg:log', serialized)` into the `_onLog` pipeline, guarded by `if (import.meta.hot)` for automatic prod tree-shaking. Stamp `env: 'client'` and `origin: 'tauri' | 'browser'` (detect once on init via `window.__TAURI_INTERNALS__`).
-- [ ] **1.8** Server side: register `gg._onLog` listener in `configureServer` for direct `fs.appendFile` of server-side entries. Stamp `env: 'server'`.
-- [ ] **1.9** Serialization: define the `SerializedEntry` subset (including `env` field), handle non-serializable args gracefully
-- [ ] **1.10** Add to `ggPlugins()` in `vite.ts` as an opt-in plugin (e.g., `fileSink?: boolean | { dir?: string }`)
-- [ ] **1.11** Add diagnostics check in `runGgDiagnostics()` -- probe for plugin presence, show `ℹ️` hint with install instructions when not active, `✅` with file path and API URL when active
+- [x] **1.1** Create `src/lib/gg-file-sink-plugin.ts` -- Vite plugin with `configureServer` hook
+- [x] **1.2** Server side: `server.hot.on('gg:log', ...)` handler that appends JSONL to `.gg/logs-{port}.jsonl`
+- [x] **1.3** Server side: resolve port from server config, truncate/create `.gg/logs-{port}.jsonl` on server start (inside `configureServer`)
+- [x] **1.4** Server side: ensure `.gg/` directory is created if missing
+- [x] **1.5** Server side: `/__gg/logs` middleware -- `DELETE` truncates file (204), `GET` returns file contents as `text/plain` (200)
+- [x] **1.6** Server side: `GET /__gg/logs?filter=` glob matching and `?since=` timestamp filtering
+- [x] **1.7** Client side: inject `import.meta.hot.send('gg:log', serialized)` into the `_onLog` pipeline, guarded by `if (import.meta.hot)` for automatic prod tree-shaking. Stamp `env: 'client'` and `origin: 'tauri' | 'browser'` (detect once on init via `window.__TAURI_INTERNALS__`).
+- [x] **1.8** Server side: SSR entries captured via transform injection + `globalThis.__ggFileSink` bridge. Uses `appendFileSync` for write-order preservation. Stamp `env: 'server'`. _(Implementation differs from original plan — see Server-Side Hook Points section)_
+- [x] **1.9** Serialization: define the `SerializedEntry` subset (including `env`, `table` fields), handle non-serializable args gracefully
+- [x] **1.10** Add to `ggPlugins()` in `vite.ts` as an opt-in plugin (`fileSink?: boolean | { dir?: string }`)
+- [x] **1.11** Add diagnostics check in `runGgDiagnostics()` -- `HEAD /__gg/logs` probe, `✅` with file path and API URL when active, `ℹ️` hint when not active
 
 ### Phase 2: Integration and Polish
 
-- [ ] **2.1** Add `.gg/` to the project's `.gitignore` template / documentation
-- [ ] **2.2** Test with the demo app (`src/routes/`) -- verify entries appear in the file
+- [x] **2.1** Add `.gg/` to `.gitignore`
+- [x] **2.2** Test with the demo app (`src/routes/`) -- entries appear in file for both client and SSR paths
 - [ ] **2.3** Test with a non-SvelteKit Vite app (plain Vite + React/Vue) to verify framework-agnostic behavior
-- [ ] **2.4** Document in README: how to enable, file location, JSONL format, example `jq`/`grep` commands
-- [ ] **2.5** Extract the "Agent Instructions Template" section into consuming projects' `AGENTS.md` files (e.g., epicenter). Adapt paths/ports as needed.
+- [x] **2.4** Document in README: how to enable, file location, JSONL format, `jq`/`grep` commands, SSR guidance
+- [ ] **2.5** Extract Agent Instructions Template into consuming projects' `AGENTS.md` (e.g., epicenter)
 
 ### Phase 3: Agent Ergonomics (future)
 
@@ -499,43 +561,38 @@ Uses `ℹ️` (not `❌` or `⚠️`) because this is an optional feature that m
 ## Open Questions
 
 1. **Opt-in vs opt-out?**
-   - Options: (a) Off by default, enabled via `fileSink: true` in plugin options, (b) On by default in dev mode
-   - **Recommendation**: Opt-in (a). Writing to the filesystem is a side effect that users should explicitly enable. Can revisit once the feature is proven.
+   - **Resolved**: Opt-in (`fileSink: true`). Implemented.
 
 2. **File path configurability?**
-   - The default `.gg/logs-{port}.jsonl` is a sensible convention. Should users be able to override the directory or filename pattern?
-   - **Recommendation**: Yes, via `fileSink: { dir: 'custom/dir' }`. The port suffix should always be appended to prevent multi-server collisions. Default `.gg/` is good enough for most cases.
+   - **Resolved**: Yes, via `fileSink: { dir: 'custom/dir' }`. Implemented.
 
 3. **Should `args` be serialized with a safe stringify?**
-   - Could use a `JSON.stringify` replacer that handles circular refs, DOM nodes, etc.
-   - **Recommendation**: Defer. The `message` field already contains the formatted string representation. Adding safe `args` serialization is useful for structured queries but adds complexity. Start without it.
+   - **Resolved**: Deferred. `message` field contains the formatted string. `tableData` is now serialized as `table` field (structured, safe). `args` remains excluded.
 
 4. **Client-side hook mechanism**
-   - The current `_onLog` is a single callback (set by Eruda plugin). The file sink needs to also receive entries.
-   - Options: (a) Chain callbacks -- the file sink wraps the existing callback, (b) Convert to an event emitter / array of listeners, (c) The file sink taps into `earlyLogBuffer` replay + wraps `_onLog`
-   - **Recommendation**: (b) Convert `_onLog` to support multiple listeners. This is a small internal change and future-proofs for other consumers.
+   - **Resolved**: `_onLog` converted to multi-listener via `addLogListener`/`removeLogListener`. `earlyLogBuffer` made persistent (never cleared, capped at 2000) so late-registering listeners (Eruda mounts after file-sink) still receive early entries. Implemented.
 
 ## Success Criteria
 
-- [ ] With `fileSink: true` in plugin options, `gg()` calls in the browser produce lines in `.gg/logs-{port}.jsonl` with `"env":"client"`
-- [ ] Server-side `gg()` calls (SSR, load functions, API routes) produce lines in the same file with `"env":"server"`
-- [ ] File is port-scoped -- multiple dev servers write to separate files
-- [ ] File is truncated on dev server start
-- [ ] Each line is valid JSON and independently parseable
-- [ ] Every line contains an `env` field (`"client"` or `"server"`)
-- [ ] Client entries contain an `origin` field (`"tauri"` or `"browser"`)
-- [ ] `jq 'select(.ns | startswith("some:namespace"))' .gg/logs-5173.jsonl` returns matching entries
-- [ ] `jq 'select(.env == "server")' .gg/logs-5173.jsonl` returns only server-side entries
-- [ ] `jq 'select(.origin == "tauri")' .gg/logs-5173.jsonl` returns only Tauri webview entries
-- [ ] `grep` equivalents also work: `grep '"env":"server"' .gg/logs-5173.jsonl`
-- [ ] `curl -X DELETE http://localhost:5173/__gg/logs` truncates the file and returns 204
-- [ ] `curl http://localhost:5173/__gg/logs` returns the full JSONL contents
-- [ ] `curl "http://localhost:5173/__gg/logs?filter=api:*&env=server"` returns only matching server entries
-- [ ] `curl "http://localhost:5173/__gg/logs?origin=tauri"` returns only Tauri webview entries
-- [ ] Eruda plugin continues to work normally (file sink does not interfere)
-- [ ] `DELETE` does not affect the browser-side ring buffer or Eruda UI
-- [ ] No file writes in production builds (client sender is tree-shaken, `configureServer` doesn't run)
-- [ ] No measurable dev server performance impact at typical logging volumes (< 100 entries/sec)
+- [x] With `fileSink: true` in plugin options, `gg()` calls in the browser produce lines in `.gg/logs-{port}.jsonl` with `"env":"client"`
+- [x] Server-side `gg()` calls (SSR, load functions, API routes) produce lines in the same file with `"env":"server"`
+- [x] File is port-scoped -- multiple dev servers write to separate files
+- [x] File is truncated on dev server start
+- [x] Each line is valid JSON and independently parseable
+- [x] Every line contains an `env` field (`"client"` or `"server"`)
+- [x] Client entries contain an `origin` field (`"tauri"` or `"browser"`)
+- [x] `jq 'select(.ns | startswith("some:namespace"))' .gg/logs-5173.jsonl` returns matching entries
+- [x] `jq 'select(.env == "server")' .gg/logs-5173.jsonl` returns only server-side entries
+- [x] `jq 'select(.origin == "tauri")' .gg/logs-5173.jsonl` returns only Tauri webview entries
+- [x] `grep` equivalents also work: `grep '"env":"server"' .gg/logs-5173.jsonl`
+- [x] `curl -X DELETE http://localhost:5173/__gg/logs` truncates the file and returns 204
+- [x] `curl http://localhost:5173/__gg/logs` returns the full JSONL contents
+- [x] `curl "http://localhost:5173/__gg/logs?filter=api:*&env=server"` returns only matching server entries
+- [x] `curl "http://localhost:5173/__gg/logs?origin=tauri"` returns only Tauri webview entries
+- [x] Eruda plugin continues to work normally (file sink does not interfere)
+- [x] `DELETE` does not affect the browser-side ring buffer or Eruda UI
+- [x] No file writes in production builds (client sender is tree-shaken, `configureServer` doesn't run)
+- [x] No measurable dev server performance impact at typical logging volumes (verified with 3000-entry stress test in ~4s)
 
 ## Agent Instructions Template (for consuming projects' AGENTS.md)
 
