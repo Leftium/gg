@@ -75,10 +75,21 @@ Controls whether shown loggs are also output to the native browser console.
 
 | Environment | Setting                          | Default           |
 | ----------- | -------------------------------- | ----------------- |
-| Browser     | `localStorage['gg-console']`     | `false`           |
+| Browser     | `localStorage['gg-console']`     | `true`            |
 | Server      | N/A (console is the only output) | Follows `GG_KEEP` |
 
-**Default `false` rationale:** Native console output is expensive (DOM rendering in devtools, string formatting, object serialization) and redundant when the GG panel is the primary debugging surface. Users who want native console output enable it explicitly. Diagnostics will include a hint explaining how to enable it.
+**Default `true` rationale:** `gg()` is designed to be useful without the Eruda widget. Console output is the baseline experience -- the proof that `gg()` is doing something. The Eruda widget is an optional upgrade, not a requirement. Zero-config means it works out of the box.
+
+When the Eruda plugin initializes, it flips `gg-console` to `false` automatically -- but only if `localStorage['gg-console']` has not been explicitly set by the user. This way, users who want both console output and the widget can have both by setting `localStorage['gg-console'] = 'true'` manually.
+
+**Disabling console output** (if the noise is unwanted):
+
+```js
+// In DevTools console, or in your app's init code:
+localStorage['gg-console'] = 'false';
+```
+
+Or via the Settings panel in the Eruda widget (toggle: "Native console output").
 
 When enabled, native console output follows the `gg-show` filter -- the console shows exactly what the panel shows. When `gg-show` changes (e.g., via the panel UI), the debug instances are immediately re-evaluated so console output updates without a reload.
 
@@ -319,7 +330,7 @@ No migration logic. Clean break. The old keys (`gg-filter`, `debug`) will be ign
 | `gg-enabled`          | boolean      | `true` in dev | Production activation flag (unchanged)            |
 | `gg-keep`             | glob pattern | `*`           | Layer 1: which loggs enter the ring buffer        |
 | `gg-show`             | glob pattern | `*`           | Layer 2: which loggs are shown in panel + console |
-| `gg-console`          | boolean      | `false`       | Whether shown loggs also go to native console     |
+| `gg-console`          | boolean      | `true`        | Whether shown loggs also go to native console     |
 | `gg-show-expressions` | boolean      | `true`        | Expression visibility (unchanged)                 |
 | `gg-ns-action`        | string       | `'open'`      | Namespace click action (unchanged)                |
 | `gg-editor-bin`       | string       | `''`          | Editor binary for open-in-editor (unchanged)      |
@@ -404,8 +415,8 @@ The toolbar area (above the log view) should show both filter controls, followin
 
 Update the Settings panel to show:
 
-- **Native console output** (`gg-console`): toggle, default off. Replaces the current Sync/Clear buttons and `localStorage.debug` display.
-- **Diagnostics hint** when `gg-console` is off: "Native console output is disabled. Enable to mirror GG panel output in DevTools console."
+- **Native console output** (`gg-console`): toggle, default on. Replaces the current Sync/Clear buttons and `localStorage.debug` display. The Eruda plugin turns this off automatically on init (unless the user has explicitly set it).
+- **Diagnostics hint** when `gg-console` is on: "Native console output is enabled. Disable to silence gg loggs in DevTools console."
 
 ### Filter Panel (Namespace Checkboxes)
 
@@ -432,7 +443,7 @@ Both panels follow the existing UI patterns (top 5 most frequent, "ALL" checkbox
 
 4. **~~Migration logic.~~** None. Clean break. ~2 users can clear old localStorage keys manually.
 
-5. **~~`gg-console` default.~~** Always `false`. Diagnostics will include a hint explaining how to enable native console output for users who want it.
+5. **~~`gg-console` default.~~** `true`. `gg()` is useful without the Eruda widget; console output is the baseline experience. The Eruda plugin flips it to `false` on init if the user hasn't explicitly set it. Users who want both can set `localStorage['gg-console'] = 'true'` to override.
 
 6. **~~Sentinel positioning.~~** Fixed at top of the log view. Sentinels don't interleave with regular loggs and don't reposition as new loggs arrive. Count and preview updates are debounced. Alternative positions considered: fixed at bottom, inline at first occurrence, inline repositioned on each drop, collapsible section.
 
