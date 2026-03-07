@@ -1,7 +1,6 @@
 import type { Plugin } from 'vite';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as url from 'url';
 import type { CapturedEntry } from './eruda/types.js';
 import { gg } from './gg.js';
 
@@ -317,7 +316,7 @@ if (import.meta.hot) {
 
 			// /__gg/ index — JSON status for agents and developers
 			server.middlewares.use('/__gg', (req, res, next) => {
-				const pathname = url.parse(req.url || '').pathname || '';
+				const pathname = new URL(req.url || '/', 'http://x').pathname;
 				// Only handle exact /__gg or /__gg/ — let other /__gg/* routes fall through
 				if (pathname !== '' && pathname !== '/') return next();
 				if (req.method?.toUpperCase() !== 'GET') return next();
@@ -381,7 +380,7 @@ if (import.meta.hot) {
 
 				if (method === 'GET') {
 					try {
-						const params = new URLSearchParams(url.parse(req.url || '').query || '');
+						const params = new URL(req.url || '/', 'http://x').searchParams;
 						const all = params.has('all');
 						const mismatch = params.has('mismatch');
 
