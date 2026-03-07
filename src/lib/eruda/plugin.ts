@@ -529,7 +529,7 @@ export function createGgPlugin(
 		if (!pattern) return '';
 
 		// Remove empty parts and duplicates
-		let parts = Array.from(
+		const parts = Array.from(
 			new Set(
 				pattern
 					.split(',')
