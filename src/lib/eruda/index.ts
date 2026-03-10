@@ -1,6 +1,7 @@
 import { BROWSER } from 'esm-env';
 import type { GgErudaOptions } from './types.js';
 import { shouldLoadEruda, loadEruda } from './loader.js';
+import { enableGgRuntime } from '../gg.js';
 
 // Re-export types for consumers
 export type { GgErudaOptions, CapturedEntry, ErudaPlugin } from './types.js';
@@ -76,15 +77,13 @@ function setupGestureDetection(options: GgErudaOptions): void {
 		// Reset timer on each tap
 		if (tapTimer) clearTimeout(tapTimer);
 
-		// If 5 taps detected, load Eruda
+		// If 5 taps detected, enable gg logging and load Eruda
 		if (tapCount >= 5) {
-			console.log('[gg] 5 taps detected, loading Eruda...');
-			// Persist the decision
-			try {
-				localStorage.setItem('gg-enabled', 'true');
-			} catch {
-				// localStorage might not be available
-			}
+			console.log(
+				'[gg] 5 taps detected, enabling gg logging and loading Eruda (session-only). For persistent logging across app restarts, run: localStorage.setItem("gg-enabled", "true")'
+			);
+			// Enable gg runtime for this session (flips ggConfig.enabled in memory only)
+			enableGgRuntime();
 			loadEruda(options);
 			resetTaps();
 			return;

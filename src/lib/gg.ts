@@ -718,6 +718,23 @@ gg.clearPersist = () => {
 	}
 };
 
+/**
+ * Enable gg logging at runtime (e.g., after 5-tap gesture in production).
+ * Flips the internal enabled flag so subsequent gg() calls start capturing.
+ * This is session-only — does not persist to localStorage, so the next
+ * page load / app launch starts with gg disabled again.
+ *
+ * To enable gg across app restarts (e.g., in a prod Tauri app), run this
+ * in the Eruda console instead:
+ *   localStorage.setItem("gg-enabled", "true")
+ * Clear with: localStorage.removeItem("gg-enabled") or gg.clearPersist()
+ *
+ * @internal Used by the Eruda gesture handler — not part of the public API.
+ */
+export function enableGgRuntime(): void {
+	ggConfig.enabled = true;
+}
+
 // ── Console-like methods ───────────────────────────────────────────────
 // Each public method (gg.warn, gg.error, etc.) has a corresponding internal
 // method (gg._warn, gg._error, etc.) that accepts call-site metadata from
