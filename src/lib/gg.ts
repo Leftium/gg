@@ -1,5 +1,5 @@
-import debugFactory, { debugReady, type Debugger } from './debug/index.js';
 import { BROWSER, DEV } from 'esm-env';
+import debugFactory, { type Debugger, debugReady } from './debug/index.js';
 import { toWordTuple } from './words.js';
 
 /**
@@ -22,7 +22,7 @@ function createGgDebugger(namespace: string): Debugger {
 	const originalFormatArgs = dbg.formatArgs;
 
 	// Override formatArgs to add padding to the namespace display
-	dbg.formatArgs = function (args: unknown[]) {
+	dbg.formatArgs = (args: unknown[]) => {
 		// Call original formatArgs first
 		if (originalFormatArgs) {
 			originalFormatArgs.call(dbg, args);
@@ -323,7 +323,7 @@ export function gg(...args: unknown[]): GgChain<unknown> {
  * @example
  * <OpenInEditorLink gg={gg.here()} />
  */
-gg.here = function (): { fileName: string; functionName: string; url: string } {
+gg.here = (): { fileName: string; functionName: string; url: string } => {
 	if (!ggConfig.enabled) {
 		return { fileName: '', functionName: '', url: '' };
 	}
@@ -565,12 +565,15 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 	const logArgs: unknown[] = args.length === 0 ? ['(no args)'] : [...args];
 
 	// Add level prefix emoji for info/warn/error
-	if (level === 'info') {
-		logArgs[0] = `ℹ️ ${logArgs[0]}`;
-	} else if (level === 'warn') {
-		logArgs[0] = `⚠️ ${logArgs[0]}`;
-	} else if (level === 'error') {
-		logArgs[0] = `⛔ ${logArgs[0]}`;
+	const levelEmoji =
+		level === 'info' ? 'ℹ️' : level === 'warn' ? '⚠️' : level === 'error' ? '⛔' : '';
+	if (levelEmoji) {
+		if (typeof logArgs[0] === 'string') {
+			logArgs[0] = `${levelEmoji} ${logArgs[0]}`;
+		} else {
+			// Don't coerce objects to string via template literal — prepend emoji as separate arg
+			logArgs.unshift(levelEmoji);
+		}
 	}
 
 	// Compute diff independently of the debug library's enabled state.
@@ -626,7 +629,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
  *
  * Returns a GgChain for chaining modifiers (.ns(), .warn(), etc.)
  */
-gg._ns = function (
+gg._ns = (
 	options: {
 		ns: string;
 		file?: string;
@@ -637,7 +640,7 @@ gg._ns = function (
 		stack?: string;
 	},
 	...args: unknown[]
-): GgChain<unknown> {
+): GgChain<unknown> => {
 	const disabled = !ggConfig.enabled;
 	return new GgChain(args[0], args, options, disabled);
 };
@@ -647,11 +650,16 @@ gg._ns = function (
  *
  * Called by the ggCallSitesPlugin when it rewrites gg.here() calls.
  */
-gg._here = function (options: { ns: string; file?: string; line?: number; col?: number }): {
+gg._here = (options: {
+	ns: string;
+	file?: string;
+	line?: number;
+	col?: number;
+}): {
 	fileName: string;
 	functionName: string;
 	url: string;
-} {
+} => {
 	if (!ggConfig.enabled) {
 		return { fileName: '', functionName: '', url: '' };
 	}
@@ -677,15 +685,19 @@ gg._here = function (options: { ns: string; file?: string; line?: number; col?: 
  * In <script> blocks:  gg._ns({ns:'...', file:'...', line:1, col:1}, args)
  * In template markup:  gg._ns(gg._o('...','...',1,1), args)
  */
-gg._o = function (
+gg._o = (
 	ns: string,
 	file?: string,
 	line?: number,
 	col?: number,
 	src?: string
-): { ns: string; file?: string; line?: number; col?: number; src?: string } {
-	return { ns, file, line, col, src };
-};
+): {
+	ns: string;
+	file?: string;
+	line?: number;
+	col?: number;
+	src?: string;
+} => ({ ns, file, line, col, src });
 
 gg.disable = isCloudflareWorker() ? () => '' : () => debugFactory.disable();
 
@@ -786,10 +798,16 @@ gg.time = function (this: void, label = 'default'): GgTimerChain {
 };
 
 /** gg._time() - Internal: time with call-site metadata from Vite plugin. */
-gg._time = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+gg._time = (
+	options: {
+		ns: string;
+		file?: string;
+		line?: number;
+		col?: number;
+		src?: string;
+	},
 	label = 'default'
-): GgTimerChain {
+): GgTimerChain => {
 	if (ggConfig.enabled) {
 		timers.set(label, { start: performance.now(), options });
 	}
@@ -822,11 +840,17 @@ gg.timeLog = function (this: void, label = 'default', ...args: unknown[]): void 
 };
 
 /** gg._timeLog() - Internal: timeLog with call-site metadata from Vite plugin. */
-gg._timeLog = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+gg._timeLog = (
+	options: {
+		ns: string;
+		file?: string;
+		line?: number;
+		col?: number;
+		src?: string;
+	},
 	label = 'default',
 	...args: unknown[]
-): void {
+): void => {
 	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
@@ -863,10 +887,16 @@ gg.timeEnd = function (this: void, label = 'default'): void {
 };
 
 /** gg._timeEnd() - Internal: timeEnd with call-site metadata from Vite plugin. */
-gg._timeEnd = function (
-	options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+gg._timeEnd = (
+	options: {
+		ns: string;
+		file?: string;
+		line?: number;
+		col?: number;
+		src?: string;
+	},
 	label = 'default'
-): void {
+): void => {
 	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
@@ -1100,7 +1130,7 @@ function createColorFunction(
 	bgCode: string = '',
 	styleCode: string = ''
 ): ChainableColorFn {
-	const tagFn = function (strings: TemplateStringsArray, ...values: unknown[]): string {
+	const tagFn = (strings: TemplateStringsArray, ...values: unknown[]): string => {
 		const text = strings.reduce(
 			(acc, str, i) => acc + str + (values[i] !== undefined ? String(values[i]) : ''),
 			''
@@ -1319,7 +1349,11 @@ export namespace gg {
 	) => { ns: string; file?: string; line?: number; col?: number; src?: string };
 
 	// Introspection
-	export let here: () => { fileName: string; functionName: string; url: string };
+	export let here: () => {
+		fileName: string;
+		functionName: string;
+		url: string;
+	};
 	export let _here: (options: { ns: string; file?: string; line?: number; col?: number }) => {
 		fileName: string;
 		functionName: string;
@@ -1338,16 +1372,34 @@ export namespace gg {
 
 	// Internal plugin-rewrite targets for timers
 	export let _time: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+		options: {
+			ns: string;
+			file?: string;
+			line?: number;
+			col?: number;
+			src?: string;
+		},
 		label?: string
 	) => GgTimerChain;
 	export let _timeLog: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+		options: {
+			ns: string;
+			file?: string;
+			line?: number;
+			col?: number;
+			src?: string;
+		},
 		label?: string,
 		...args: unknown[]
 	) => void;
 	export let _timeEnd: (
-		options: { ns: string; file?: string; line?: number; col?: number; src?: string },
+		options: {
+			ns: string;
+			file?: string;
+			line?: number;
+			col?: number;
+			src?: string;
+		},
 		label?: string
 	) => void;
 }
