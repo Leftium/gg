@@ -1,6 +1,6 @@
-import type { Plugin } from 'vite';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { Plugin } from 'vite';
 import type { CapturedEntry } from './eruda/types.js';
 import { gg } from './gg.js';
 import { matchesPattern } from './pattern.js';
@@ -33,26 +33,22 @@ interface OutputEntry extends SerializedEntry {
 /**
  * Serialize a CapturedEntry for writing to the JSONL log file.
  *
- * IMPORTANT: The SSR injection string (in the `transform` hook below) and the
- * browser injection string hand-roll the same logic as plain JS because injected
- * code cannot import from this module. If you change the SerializedEntry schema
- * (add/rename/remove fields), update both injection strings to match.
- *
- * Server path: `serializeEntry(entry, 'server')` → appended via configureServer listener
- * SSR path:    ssrInjection string (search for `__ggFileSinkServerWriter`)
- * Browser path: injection string (search for `__ggFileSinkSender`)
+ * Used by:
+ * - configureServer listener (plugin's own gg instance)
+ * - globalThis.__ggFileSink.write() (SSR gg instances via self-registration)
+ * - Virtual module sender mirrors this schema as inline JS (search for `__ggFileSinkSender`)
  */
 function serializeEntry(
 	entry: CapturedEntry,
 	env: 'client' | 'server',
-	origin?: 'tauri' | 'browser'
+	origin?: 'tauri' | 'browser',
 ): SerializedEntry {
 	const out: SerializedEntry = {
 		ns: entry.namespace,
 		msg: entry.message,
 		ts: entry.timestamp,
 		env,
-		diff: entry.diff
+		diff: entry.diff,
 	};
 	if (entry.level && entry.level !== 'debug') out.lvl = entry.level;
 	if (origin) out.origin = origin;
@@ -89,7 +85,10 @@ function filterLinePreDedup(line: string, params: URLSearchParams): boolean {
  * Applied after dedup/mismatch so cross-env comparisons see both sides first.
  * e.g. ?mismatch&env=server correctly returns the server half of mismatch pairs.
  */
-function filterEntryPostDedup(entry: SerializedEntry, params: URLSearchParams): boolean {
+function filterEntryPostDedup(
+	entry: SerializedEntry,
+	params: URLSearchParams,
+): boolean {
 	const env = params.get('env');
 	if (env && entry.env !== env) return false;
 
@@ -129,15 +128,19 @@ function dedupKey(entry: SerializedEntry): string {
 function applyDedup(
 	entries: SerializedEntry[],
 	all: boolean,
-	mismatch: boolean
+	mismatch: boolean,
 ): SerializedEntry[] {
 	if (all) return entries;
 
 	// Build index: dedupKey → { serverMsgs, clientMsgs }
-	const index = new Map<string, { serverMsgs: Set<string>; clientMsgs: Set<string> }>();
+	const index = new Map<
+		string,
+		{ serverMsgs: Set<string>; clientMsgs: Set<string> }
+	>();
 	for (const e of entries) {
 		const k = dedupKey(e);
-		if (!index.has(k)) index.set(k, { serverMsgs: new Set(), clientMsgs: new Set() });
+		if (!index.has(k))
+			index.set(k, { serverMsgs: new Set(), clientMsgs: new Set() });
 		const slot = index.get(k)!;
 		if (e.env === 'server') slot.serverMsgs.add(e.msg);
 		else slot.clientMsgs.add(e.msg);
@@ -148,7 +151,8 @@ function applyDedup(
 		// msg is present in one env but not the other (i.e. any difference exists).
 		return entries.filter((e) => {
 			const slot = index.get(dedupKey(e))!;
-			if (slot.serverMsgs.size === 0 || slot.clientMsgs.size === 0) return false;
+			if (slot.serverMsgs.size === 0 || slot.clientMsgs.size === 0)
+				return false;
 			// Check for any msg that exists on one side but not the other
 			for (const m of slot.serverMsgs) if (!slot.clientMsgs.has(m)) return true;
 			for (const m of slot.clientMsgs) if (!slot.serverMsgs.has(m)) return true;
@@ -188,92 +192,103 @@ function collapseRepeats(entries: SerializedEntry[]): OutputEntry[] {
 	return out;
 }
 
-export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugin {
+/**
+ * Virtual module ID for the browser-side file sink sender.
+ *
+ * Virtual modules go through Vite's normal transform pipeline (NOT pre-bundled
+ * by esbuild), so `import.meta.hot` is available. This solves the fundamental
+ * problem: code inside pre-bundled deps (like gg.js) cannot use import.meta.hot
+ * because esbuild evaluates `typeof import.meta.hot` as "undefined" during
+ * dep optimization and tree-shakes the entire block.
+ *
+ * The virtual module is imported via a <script type="module"> tag injected by
+ * the `transformIndexHtml` hook below.
+ */
+const VIRTUAL_MODULE_ID = 'virtual:gg-file-sink-sender';
+const RESOLVED_VIRTUAL_MODULE_ID = '\0' + VIRTUAL_MODULE_ID;
+
+export default function ggFileSinkPlugin(
+	options: GgFileSinkOptions = {},
+): Plugin {
 	let logFile: string;
 	let serverSideListener: ((entry: CapturedEntry) => void) | null = null;
-	let ggModulePath = '';
 
 	return {
 		name: 'gg-file-sink',
 
-		configResolved(config) {
-			// Resolve the absolute path to gg.ts — works both in this repo (src/lib/gg.ts)
-			// and in consumer projects where gg is in node_modules/@leftium/gg/src/lib/gg.ts.
-			// We try both locations; whichever resolves to an existing file wins.
-			const candidates = [
-				path.resolve(config.root, 'src/lib/gg.ts'),
-				path.resolve(config.root, 'node_modules/@leftium/gg/src/lib/gg.ts')
-			];
-			ggModulePath = candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
+		// Virtual module: resolve and load the browser-side HMR sender.
+		resolveId(id) {
+			if (id === VIRTUAL_MODULE_ID) return RESOLVED_VIRTUAL_MODULE_ID;
 		},
 
-		transform(code, id, transformOptions) {
-			if (id !== ggModulePath) return null;
+		load(id) {
+			if (id === RESOLVED_VIRTUAL_MODULE_ID) {
+				// This code runs through Vite's normal transform pipeline (not
+				// pre-bundled), so import.meta.hot is properly available.
+				//
+				// Uses a dual strategy for sending log entries to the dev server:
+				// 1. import.meta.hot.send() via HMR WebSocket (fast, no HTTP overhead)
+				// 2. fetch() POST to /__gg/logs as fallback (works even if HMR is unavailable)
+				//
+				// NOTE: this string mirrors serializeEntry() above — keep in sync.
+				return `
+import { gg } from '@leftium/gg';
 
-			if (transformOptions?.ssr) {
-				// SSR injection: write server-side entries directly to the log file.
-				// Runs in Vite's SSR module runner (same Node.js process but separate module
-				// instance from configureServer, so we can't share a listener — inject instead).
-				// We pass appendFileSync + the log file path via globalThis so the injected
-				// code has no imports of its own (avoids TLA / static import constraints).
-				// Guarded by import.meta.env.DEV — tree-shaken in production builds.
-				// NOTE: this string mirrors serializeEntry() above — keep in sync if schema changes.
-				const ssrInjection = `
-// gg-file-sink: server-side direct writer (injected by ggFileSinkPlugin)
-if (import.meta.env.DEV && globalThis.__ggFileSink) {
-	const { appendFileSync: __ggAppendFileSync, logFile: __ggLogFile } = globalThis.__ggFileSink;
-	gg.addLogListener(function __ggFileSinkServerWriter(entry) {
-		if (!__ggLogFile) return;
-		const s = {
-			ns: entry.namespace,
-			msg: entry.message,
-			ts: entry.timestamp,
-			env: 'server',
-			diff: entry.diff,
-		};
-		if (entry.level && entry.level !== 'debug') s.lvl = entry.level;
-		if (entry.file) s.file = entry.file;
-		if (entry.line !== undefined) s.line = entry.line;
-		if (entry.src) s.src = entry.src;
-		if (entry.tableData) s.table = entry.tableData;
-		try { __ggAppendFileSync(__ggLogFile, JSON.stringify(s) + '\\n'); } catch {}
-	});
+const origin =
+	typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+		? 'tauri'
+		: 'browser';
+
+// Batch entries and flush via fetch POST — works regardless of HMR state.
+let __ggPendingEntries = [];
+let __ggFlushTimer = null;
+function __ggFlushEntries() {
+	__ggFlushTimer = null;
+	if (__ggPendingEntries.length === 0) return;
+	const batch = __ggPendingEntries;
+	__ggPendingEntries = [];
+	const body = batch.map(e => JSON.stringify(e)).join('\\n');
+	fetch('/__gg/logs', { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } }).catch(() => {});
 }
-`;
-				return { code: code + ssrInjection, map: null };
-			}
 
-			// Browser injection: relay entries to Vite dev server via HMR WebSocket.
-			// Runs once when the gg module is first loaded in the browser.
-			// Guarded by import.meta.hot — Vite tree-shakes this in production builds.
-			// NOTE: this string mirrors serializeEntry() above — keep in sync if schema changes.
-			const injection = `
-// gg-file-sink: client-side HMR sender (injected by ggFileSinkPlugin)
-if (import.meta.hot) {
-	const __ggFileSinkOrigin =
-		typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-			? 'tauri'
-			: 'browser';
-	gg.addLogListener(function __ggFileSinkSender(entry) {
-		if (!import.meta.hot) return;
-		const s = {
-			ns: entry.namespace,
-			msg: entry.message,
-			ts: entry.timestamp,
-			env: 'client',
-			origin: __ggFileSinkOrigin,
-			diff: entry.diff,
-		};
-		if (entry.level && entry.level !== 'debug') s.lvl = entry.level;
-		if (entry.file) s.file = entry.file;
-		if (entry.line !== undefined) s.line = entry.line;
-		if (entry.src) s.src = entry.src;
-		if (entry.tableData) s.table = entry.tableData;
+gg.addLogListener(function __ggFileSinkSender(entry) {
+	const s = {
+		ns: entry.namespace,
+		msg: entry.message,
+		ts: entry.timestamp,
+		env: 'client',
+		origin,
+		diff: entry.diff,
+	};
+	if (entry.level && entry.level !== 'debug') s.lvl = entry.level;
+	if (entry.file) s.file = entry.file;
+	if (entry.line !== undefined) s.line = entry.line;
+	if (entry.src) s.src = entry.src;
+	if (entry.tableData) s.table = entry.tableData;
+
+	// Try HMR first (lowest latency), fall back to batched fetch
+	if (import.meta.hot) {
 		import.meta.hot.send('gg:log', { entry: s });
-	});
-}
+	} else {
+		__ggPendingEntries.push(s);
+		if (!__ggFlushTimer) __ggFlushTimer = setTimeout(__ggFlushEntries, 100);
+	}
+});
 `;
-			return { code: code + injection, map: null };
+			}
+		},
+
+		// Inject the virtual module into the HTML page so it runs in the browser.
+		// Uses both transformIndexHtml (plain Vite apps) and a response-intercepting
+		// middleware (SvelteKit and other frameworks that bypass Vite's HTML pipeline).
+		transformIndexHtml() {
+			return [
+				{
+					tag: 'script',
+					attrs: { type: 'module', src: `/@id/${VIRTUAL_MODULE_ID}` },
+					injectTo: 'head',
+				},
+			];
 		},
 
 		configureServer(server) {
@@ -283,26 +298,33 @@ if (import.meta.hot) {
 			server.httpServer?.once('listening', () => {
 				const addr = server.httpServer?.address();
 				const port =
-					addr && typeof addr === 'object' ? addr.port : (server.config.server.port ?? 5173);
-				const dir = options.dir ? path.resolve(options.dir) : path.resolve(process.cwd(), '.gg');
+					addr && typeof addr === 'object'
+						? addr.port
+						: (server.config.server.port ?? 5173);
+				const dir = options.dir
+					? path.resolve(options.dir)
+					: path.resolve(process.cwd(), '.gg');
 				fs.mkdirSync(dir, { recursive: true });
 				logFile = path.join(dir, `logs-${port}.jsonl`);
 				fs.writeFileSync(logFile, '');
 			});
 
-			// Expose appendFileSync + logFile path via globalThis so the SSR-injected
-			// listener (running in Vite's separate module runner context) can write to the
-			// same file without needing its own fs import.
-			(globalThis as Record<string, unknown>).__ggFileSink = {
-				appendFileSync: fs.appendFileSync.bind(fs),
-				get logFile() {
-					return logFile;
-				}
-			};
-
 			const appendEntry = (serialized: SerializedEntry) => {
 				if (!logFile) return;
 				fs.appendFileSync(logFile, JSON.stringify(serialized) + '\n');
+			};
+
+			// Expose a write() function via globalThis so ANY gg module instance
+			// (SSR, pre-bundled, monorepo-hoisted) can self-register a listener
+			// that writes to the log file. This replaces the broken transform hook.
+			(globalThis as Record<string, unknown>).__ggFileSink = {
+				write(
+					entry: CapturedEntry,
+					env: 'client' | 'server',
+					origin?: 'tauri' | 'browser',
+				) {
+					appendEntry(serializeEntry(entry, env, origin));
+				},
 			};
 
 			// Client-side entries arrive via HMR custom event
@@ -311,7 +333,7 @@ if (import.meta.hot) {
 				const serialized: SerializedEntry = {
 					...data.entry,
 					env: 'client',
-					origin: data.entry.origin ?? 'browser'
+					origin: data.entry.origin ?? 'browser',
 				};
 				appendEntry(serialized);
 			});
@@ -334,6 +356,36 @@ if (import.meta.hot) {
 			// /__gg/ index — JSON status for agents and developers
 			server.middlewares.use('/__gg', (req, res, next) => {
 				const pathname = new URL(req.url || '/', 'http://x').pathname;
+
+				// /__gg/stack — dump Connect middleware stack for debugging
+				if (pathname === '/stack') {
+					const stack = (
+						server.middlewares as unknown as {
+							stack: Array<{ route: string; handle: { name?: string } }>;
+						}
+					).stack;
+					const routes = stack.map((layer, i) => ({
+						i,
+						route: layer.route,
+						name: layer.handle?.name || '(anonymous)',
+					}));
+					res.writeHead(200, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify(routes, null, 2));
+					return;
+				}
+
+				// /__gg/sender — redirect to the virtual module URL so Vite's
+				// normal transform pipeline handles it (including HMR injection).
+				// Direct transformRequest() fails in consumer apps because the
+				// module graph hasn't loaded the virtual module yet at request time.
+				if (pathname === '/sender') {
+					res.writeHead(302, {
+						Location: `/@id/${VIRTUAL_MODULE_ID}`,
+					});
+					res.end();
+					return;
+				}
+
 				// Only handle exact /__gg or /__gg/ — let other /__gg/* routes fall through
 				if (pathname !== '' && pathname !== '/') return next();
 				if (req.method?.toUpperCase() !== 'GET') return next();
@@ -348,7 +400,9 @@ if (import.meta.hot) {
 
 				const port = (() => {
 					const addr = server.httpServer?.address();
-					return addr && typeof addr === 'object' ? addr.port : (server.config.server.port ?? 5173);
+					return addr && typeof addr === 'object'
+						? addr.port
+						: (server.config.server.port ?? 5173);
 				})();
 
 				const body = JSON.stringify(
@@ -360,11 +414,11 @@ if (import.meta.hot) {
 							'GET /__gg/logs':
 								'read deduplicated JSONL entries (?filter=, ?since=, ?env=, ?origin=, ?all, ?mismatch, ?raw)',
 							'DELETE /__gg/logs': 'truncate log file',
-							'GET /__gg/project-root': 'project root path'
-						}
+							'GET /__gg/project-root': 'project root path',
+						},
 					},
 					null,
-					2
+					2,
 				);
 
 				res.statusCode = 200;
@@ -380,6 +434,31 @@ if (import.meta.hot) {
 				if (method === 'HEAD') {
 					res.statusCode = 200;
 					res.end();
+					return;
+				}
+
+				// POST: receive client-side log entries via fetch (fallback for HMR)
+				if (method === 'POST') {
+					let body = '';
+					req.on('data', (chunk: Buffer) => {
+						body += chunk.toString();
+					});
+					req.on('end', () => {
+						try {
+							const lines = body.split('\n').filter((l: string) => l.trim());
+							for (const line of lines) {
+								const entry = JSON.parse(line) as SerializedEntry;
+								entry.env = 'client';
+								entry.origin = entry.origin ?? 'browser';
+								appendEntry(entry);
+							}
+							res.statusCode = 204;
+							res.end();
+						} catch (err) {
+							res.statusCode = 400;
+							res.end(String(err));
+						}
+					});
 					return;
 				}
 
@@ -406,10 +485,14 @@ if (import.meta.hot) {
 						res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
 						const fileContent = fs.readFileSync(logFile, 'utf-8');
-						const lines = fileContent.split('\n').filter((l: string) => l.trim());
+						const lines = fileContent
+							.split('\n')
+							.filter((l: string) => l.trim());
 
 						// Pre-dedup filters: namespace glob and timestamp (symmetric — don't affect cross-env index)
-						const preFiltered = lines.filter((l) => filterLinePreDedup(l, params));
+						const preFiltered = lines.filter((l) =>
+							filterLinePreDedup(l, params),
+						);
 
 						// Parse surviving lines for dedup/mismatch pass
 						const entries = preFiltered.flatMap((l) => {
@@ -424,13 +507,20 @@ if (import.meta.hot) {
 						const deduped = applyDedup(entries, all, mismatch);
 
 						// Post-dedup filters: env and origin (applied after so cross-env index is intact)
-						const postFiltered = deduped.filter((e) => filterEntryPostDedup(e, params));
+						const postFiltered = deduped.filter((e) =>
+							filterEntryPostDedup(e, params),
+						);
 
 						// Collapse consecutive repeated messages (count field), unless ?raw
-						const result = noCollapse ? postFiltered : collapseRepeats(postFiltered);
+						const result = noCollapse
+							? postFiltered
+							: collapseRepeats(postFiltered);
 
 						res.statusCode = 200;
-						res.end(result.map((e) => JSON.stringify(e)).join('\n') + (result.length ? '\n' : ''));
+						res.end(
+							result.map((e) => JSON.stringify(e)).join('\n') +
+								(result.length ? '\n' : ''),
+						);
 					} catch (err) {
 						res.statusCode = 500;
 						res.end(String(err));
@@ -442,6 +532,6 @@ if (import.meta.hot) {
 				res.setHeader('Allow', 'GET, HEAD, DELETE');
 				res.end('Method Not Allowed');
 			});
-		}
+		},
 	};
 }
