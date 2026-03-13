@@ -95,6 +95,12 @@
 		margin: 1.25rem 0 0.5rem;
 	}
 
+	div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
 	button {
 		padding: 0.5rem 1rem;
 		border: none;
