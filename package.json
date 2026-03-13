@@ -55,7 +55,6 @@
 	"devDependencies": {
 		"@eslint/compat": "^2.0.3",
 		"@eslint/js": "^10.0.1",
-		"@picocss/pico": "^2.1.1",
 		"@sveltejs/adapter-vercel": "^6.3.3",
 		"@sveltejs/kit": "^2.53.4",
 		"@sveltejs/package": "^2.5.7",

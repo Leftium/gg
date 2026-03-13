@@ -85,3 +85,35 @@
 <OpenInEditorLink gg={gg.here()} />
 
 <p><small>Template expression: {gg('inline template gg()').v}</small></p>
+
+<style>
+	h1 {
+		margin: 0.5rem 0;
+	}
+
+	h3 {
+		margin: 1.25rem 0 0.5rem;
+	}
+
+	button {
+		padding: 0.5rem 1rem;
+		border: none;
+		border-radius: 6px;
+		background: #2563eb;
+		color: #fff;
+		font-size: 0.9rem;
+		cursor: pointer;
+	}
+
+	button:hover {
+		background: #1d4ed8;
+	}
+
+	button:active {
+		background: #1e40af;
+	}
+
+	small {
+		color: #666;
+	}
+</style>
