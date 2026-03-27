@@ -33,6 +33,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.0.3(supports-color@10.2.2))
+      '@leftium/nimble.css':
+        specifier: ^0.9.0
+        version: 0.9.0
       '@sveltejs/adapter-vercel':
         specifier: ^6.3.3
         version: 6.3.3(@sveltejs/kit@2.53.4(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.53.7)(vite@7.3.1(@types/node@25.3.5)(terser@5.46.0)(yaml@2.8.1)))(svelte@5.53.7)(typescript@5.9.3)(vite@7.3.1(@types/node@25.3.5)(terser@5.46.0)(yaml@2.8.1)))(rollup@4.59.0)(supports-color@10.2.2)
@@ -500,6 +503,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@leftium/nimble.css@0.9.0':
+    resolution: {integrity: sha512-axY3+H4ZcLaplSIbuhQ2O7p+szGzFG+xpYcCbinLRU+zy8emkMP3/pKNJZh2foXwrkg5LlWG8buBDI/0aYOk1Q==}
 
   '@mapbox/node-pre-gyp@2.0.3':
     resolution: {integrity: sha512-uwPAhccfFJlsfCxMYTwOdVfOz3xqyj8xYL3zJj8f0pb30tLohnnFPhLuqp4/qoEz8sNxe4SESZedcBojRefIzg==}
@@ -1870,6 +1876,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@leftium/nimble.css@0.9.0': {}
 
   '@mapbox/node-pre-gyp@2.0.3(supports-color@10.2.2)':
     dependencies:

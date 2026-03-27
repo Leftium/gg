@@ -56,7 +56,7 @@
 
 <p>Check the Eruda GG tab below or the browser dev console to see the output of gg().</p>
 
-<div style="margin-bottom: 1rem;">
+<div class="button-group">
 	<button onclick={testLog}>🧪 Test gg() Log</button>
 	<button onclick={testManualNs}>🏷️ .ns() Templates</button>
 	<button onclick={testAnsiColors}>🎨 ANSI Colors</button>
@@ -67,7 +67,7 @@
 </div>
 
 <h3>Console-like Methods</h3>
-<div style="margin-bottom: 1rem;">
+<div class="button-group">
 	<button onclick={testInfo}>ℹ️ info</button>
 	<button onclick={testWarnError}>⚠️ warn / error</button>
 	<button onclick={testTable}>📊 table</button>
@@ -76,7 +76,7 @@
 </div>
 
 <h3>Performance</h3>
-<div style="margin-bottom: 1rem;">
+<div class="button-group">
 	<button onclick={handleStress}
 		>{stopStress ? '⏹️ Stop Stress Test' : '🔥 Stress Test (3K msgs)'}</button
 	>
@@ -87,39 +87,15 @@
 <p><small>Template expression: {gg('inline template gg()').v}</small></p>
 
 <style>
-	h1 {
-		margin: 0.5rem 0;
-	}
-
-	h3 {
-		margin: 1.25rem 0 0.5rem;
-	}
-
-	div {
+	.button-group {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+		margin-bottom: 1rem;
 	}
 
-	button {
-		padding: 0.5rem 1rem;
-		border: none;
-		border-radius: 6px;
-		background: #2563eb;
-		color: #fff;
-		font-size: 0.9rem;
-		cursor: pointer;
-	}
-
-	button:hover {
-		background: #1d4ed8;
-	}
-
-	button:active {
-		background: #1e40af;
-	}
-
-	small {
-		color: #666;
+	.button-group button {
+		width: auto;
+		margin-bottom: 0;
 	}
 </style>

@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import GgConsole from '$lib/GgConsole.svelte';
+	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -11,24 +12,6 @@
 </script>
 
 <GgConsole open={isDemo} />
-<main class="container">
+<main>
 	{@render children()}
 </main>
-
-<style>
-	:global(body) {
-		margin: 0;
-		font-family:
-			system-ui,
-			-apple-system,
-			sans-serif;
-		line-height: 1.5;
-		color: #1a1a1a;
-	}
-
-	.container {
-		max-width: 960px;
-		margin: 0 auto;
-		padding: 1rem 1.5rem;
-	}
-</style>
