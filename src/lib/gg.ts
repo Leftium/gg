@@ -1336,7 +1336,7 @@ Object.defineProperty(gg, '_onLog', {
 
 // Namespace for adding properties to the gg function
 // eslint-disable-next-line @typescript-eslint/no-namespace
-export namespace gg {
+export declare namespace gg {
 	/** @deprecated Use gg.addLogListener / gg.removeLogListener instead */
 	export let _onLog: OnLogCallback | null;
 	export let addLogListener: (callback: OnLogCallback) => void;
