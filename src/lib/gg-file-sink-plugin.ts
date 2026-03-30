@@ -207,8 +207,13 @@ export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugi
 		name: 'gg-file-sink',
 
 		// Virtual module: resolve and load the browser-side HMR sender.
+		// Also handle /@id/-prefixed form: Vite 8's esbuild pre-bundler strips
+		// @vite-ignore comments, so vite:import-analysis sees the raw
+		// /@id/virtual:gg-file-sink-sender URL and needs explicit resolution.
 		resolveId(id) {
-			if (id === VIRTUAL_MODULE_ID) return RESOLVED_VIRTUAL_MODULE_ID;
+			if (id === VIRTUAL_MODULE_ID || id === '/@id/' + VIRTUAL_MODULE_ID) {
+				return RESOLVED_VIRTUAL_MODULE_ID;
+			}
 		},
 
 		load(id) {

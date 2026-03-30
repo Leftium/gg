@@ -58,10 +58,10 @@ interface SvelteCodeInfo {
  *
  * @example
  * // vite.config.ts
- * import { ggCallSitesPlugin } from '@leftium/gg';
+ * import ggPlugins from '@leftium/gg/vite';
  *
  * export default defineConfig({
- *   plugins: [ggCallSitesPlugin()]
+ *   plugins: [...ggPlugins()]
  * });
  */
 export default function ggCallSitesPlugin(options: GgCallSitesPluginOptions = {}): Plugin {
