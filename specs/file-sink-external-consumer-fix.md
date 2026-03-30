@@ -85,13 +85,13 @@ This part already exists in v53. The `transformIndexHtml` hook and virtual modul
 
 ## Design Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Server-side mechanism | `globalThis.__ggFileSink.write()` called from gg.ts | Same pattern as middleware — pure server-side. No transform hook, no path matching, no module identity issues. |
-| Plugin exposes `write()` not raw `appendFileSync` + `serializeEntry` | Single function | Keeps serialization schema in one place. gg.ts doesn't need to know the JSONL format. |
-| Client-side mechanism | Keep existing `transformIndexHtml` + virtual module | Already implemented in v53. Virtual modules bypass pre-bundling. |
-| Remove transform-based injection | Yes, both SSR and browser branches | Fundamentally broken for external deps. Source of all complexity. |
-| Guard in gg.ts | `globalThis.__ggFileSink` existence only, no `import.meta.env.DEV` | The bridge only exists when the plugin sets it during dev. No need to couple gg.ts to Vite. |
+| Decision                                                             | Choice                                                             | Rationale                                                                                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Server-side mechanism                                                | `globalThis.__ggFileSink.write()` called from gg.ts                | Same pattern as middleware — pure server-side. No transform hook, no path matching, no module identity issues. |
+| Plugin exposes `write()` not raw `appendFileSync` + `serializeEntry` | Single function                                                    | Keeps serialization schema in one place. gg.ts doesn't need to know the JSONL format.                          |
+| Client-side mechanism                                                | Keep existing `transformIndexHtml` + virtual module                | Already implemented in v53. Virtual modules bypass pre-bundling.                                               |
+| Remove transform-based injection                                     | Yes, both SSR and browser branches                                 | Fundamentally broken for external deps. Source of all complexity.                                              |
+| Guard in gg.ts                                                       | `globalThis.__ggFileSink` existence only, no `import.meta.env.DEV` | The bridge only exists when the plugin sets it during dev. No need to couple gg.ts to Vite.                    |
 
 ## Implementation Plan
 
@@ -101,7 +101,7 @@ This part already exists in v53. The `transformIndexHtml` hook and virtual modul
 - [ ] **1.2** At the end of gg.ts module init (after `addLogListener` is defined, ~line 1408), add:
   ```ts
   if (typeof globalThis !== 'undefined' && globalThis.__ggFileSink?.write) {
-      gg.addLogListener((entry) => globalThis.__ggFileSink.write(entry, 'server'));
+  	gg.addLogListener((entry) => globalThis.__ggFileSink.write(entry, 'server'));
   }
   ```
 - [ ] **1.3** Remove the `transform` hook entirely (both SSR and browser injection branches).

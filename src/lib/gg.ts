@@ -9,8 +9,7 @@ import { toWordTuple } from './words.js';
  * Without the plugin, gg() falls back to word-tuple callpoint names.
  */
 declare const __GG_TAG_PLUGIN__: boolean;
-const _ggCallSitesPlugin =
-	typeof __GG_TAG_PLUGIN__ !== 'undefined' ? __GG_TAG_PLUGIN__ : false;
+const _ggCallSitesPlugin = typeof __GG_TAG_PLUGIN__ !== 'undefined' ? __GG_TAG_PLUGIN__ : false;
 
 /**
  * Creates a debug instance with custom formatArgs to add namespace padding
@@ -105,8 +104,7 @@ function getServerPort(): Promise<string | number> {
 		if (BROWSER) {
 			// Browser environment
 			const currentPort =
-				window.location.port ||
-				(window.location.protocol === 'https:' ? '443' : '80');
+				window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
 
 			// Resolve the promise with the detected port
 			resolve(currentPort);
@@ -201,7 +199,7 @@ const ggConfig = {
 	// filename B        : http://localhost:5173/src/lib/gg.ts
 	// srcRootprefix     : http://localhost:5173/src/
 	// <folderName> group:                       src
-	srcRootPattern: '.*?(/(?<folderName>src|chunks)/)',
+	srcRootPattern: '.*?(/(?<folderName>src|chunks)/)'
 };
 const srcRootRegex = new RegExp(ggConfig.srcRootPattern, 'i');
 
@@ -250,7 +248,7 @@ function resetNamespaceWidth() {
 function openInEditorUrl(fileName: string, line?: number, col?: number) {
 	let url = ggConfig.openInEditorUrlTemplate.replace(
 		'$FILENAME',
-		encodeURIComponent(fileName).replaceAll('%2F', '/'),
+		encodeURIComponent(fileName).replaceAll('%2F', '/')
 	);
 	if (line != null) url += `&line=${line}`;
 	if (col != null) url += `&col=${col}`;
@@ -334,17 +332,13 @@ gg.here = (): { fileName: string; functionName: string; url: string } => {
 	// Log the call-site info
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
-		namespaceToLogFunction
-			.set(namespace, createGgDebugger(namespace))
-			.get(namespace)!;
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 	ggLogFunction(`    📝 ${callpoint}`);
 
 	return {
 		fileName: callpoint,
-		functionName: callpoint.includes('@')
-			? callpoint.split('@').pop() || ''
-			: '',
-		url: '',
+		functionName: callpoint.includes('@') ? callpoint.split('@').pop() || '' : '',
+		url: ''
 	};
 };
 
@@ -418,12 +412,7 @@ export class GgChain<T> {
 	#args: unknown[];
 	#options: LogOptions;
 	#flushed = false;
-	constructor(
-		value: T,
-		args: unknown[],
-		options: LogOptions,
-		disabled = false,
-	) {
+	constructor(value: T, args: unknown[], options: LogOptions, disabled = false) {
 		this.#value = value;
 		this.#args = args;
 		this.#options = options;
@@ -545,12 +534,7 @@ function formatValue(v: unknown): string {
 /** JSON replacer that limits nesting depth to avoid huge output. */
 function jsonReplacer(this: unknown, key: string, value: unknown): unknown {
 	// 'this' is the parent object; key === '' at the root level
-	if (
-		key !== '' &&
-		typeof value === 'object' &&
-		value !== null &&
-		!Array.isArray(value)
-	) {
+	if (key !== '' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
 		// Count depth by checking how many ancestors are objects/arrays
 		// Simple approximation: truncate any nested object at depth > 2
 		const str = JSON.stringify(value);
@@ -560,16 +544,7 @@ function jsonReplacer(this: unknown, key: string, value: unknown): unknown {
 }
 
 function ggLog(options: LogOptions, ...args: unknown[]): unknown {
-	const {
-		ns: nsLabel,
-		file,
-		line,
-		col,
-		src,
-		level,
-		stack,
-		tableData,
-	} = options;
+	const { ns: nsLabel, file, line, col, src, level, stack, tableData } = options;
 
 	if (!ggConfig.enabled) {
 		return args.length ? args[0] : { fileName: '', functionName: '', url: '' };
@@ -583,9 +558,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
-		namespaceToLogFunction
-			.set(namespace, createGgDebugger(namespace))
-			.get(namespace)!;
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 
 	// Prepare args for logging (console output is value-only; src is carried
 	// on CapturedEntry for the Eruda UI to display on hover)
@@ -593,13 +566,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 
 	// Add level prefix emoji for info/warn/error
 	const levelEmoji =
-		level === 'info'
-			? 'ℹ️'
-			: level === 'warn'
-				? '⚠️'
-				: level === 'error'
-					? '⛔'
-					: '';
+		level === 'info' ? 'ℹ️' : level === 'warn' ? '⚠️' : level === 'error' ? '⛔' : '';
 	if (levelEmoji) {
 		if (typeof logArgs[0] === 'string') {
 			logArgs[0] = `${levelEmoji} ${logArgs[0]}`;
@@ -630,10 +597,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		namespace,
 		color: ggLogFunction.color,
 		diff,
-		message:
-			logArgs.length === 1
-				? formatValue(logArgs[0])
-				: logArgs.map(formatValue).join(' '),
+		message: logArgs.length === 1 ? formatValue(logArgs[0]) : logArgs.map(formatValue).join(' '),
 		args: logArgs,
 		timestamp: Date.now(),
 		file,
@@ -642,7 +606,7 @@ function ggLog(options: LogOptions, ...args: unknown[]): unknown {
 		src,
 		level,
 		stack,
-		tableData,
+		tableData
 	};
 
 	// Always buffer — earlyLogBuffer is a persistent replay log so late-registering
@@ -703,15 +667,11 @@ gg._here = (options: {
 	const namespace = nsLabel.startsWith('gg:') ? nsLabel : `gg:${nsLabel}`;
 	const ggLogFunction =
 		namespaceToLogFunction.get(namespace) ||
-		namespaceToLogFunction
-			.set(namespace, createGgDebugger(namespace))
-			.get(namespace)!;
+		namespaceToLogFunction.set(namespace, createGgDebugger(namespace)).get(namespace)!;
 	ggLogFunction(`    📝 ${namespace}`);
 
 	const fileName = file ? file.replace(srcRootRegex, '') : nsLabel;
-	const functionName = nsLabel.includes('@')
-		? nsLabel.split('@').pop() || ''
-		: '';
+	const functionName = nsLabel.includes('@') ? nsLabel.split('@').pop() || '' : '';
 	const url = file ? openInEditorUrl(file, line, col) : '';
 	return { fileName, functionName, url };
 };
@@ -730,7 +690,7 @@ gg._o = (
 	file?: string,
 	line?: number,
 	col?: number,
-	src?: string,
+	src?: string
 ): {
 	ns: string;
 	file?: string;
@@ -741,9 +701,7 @@ gg._o = (
 
 gg.disable = isCloudflareWorker() ? () => '' : () => debugFactory.disable();
 
-gg.enable = isCloudflareWorker()
-	? () => {}
-	: (ns: string) => debugFactory.enable(ns);
+gg.enable = isCloudflareWorker() ? () => {} : (ns: string) => debugFactory.enable(ns);
 
 /**
  * Clear the persisted gg-enabled state from localStorage.
@@ -799,10 +757,7 @@ function captureStack(skipFrames: number): string | undefined {
 /**
  * Get stack from an Error arg or capture a fresh one.
  */
-function getErrorStack(
-	firstArg: unknown,
-	skipFrames: number,
-): string | undefined {
+function getErrorStack(firstArg: unknown, skipFrames: number): string | undefined {
 	if (firstArg instanceof Error && firstArg.stack) {
 		return firstArg.stack;
 	}
@@ -811,10 +766,7 @@ function getErrorStack(
 
 // Timer storage for gg.time / gg.timeEnd / gg.timeLog
 // Maps timer label → { start: number, ns?: string, options?: LogOptions }
-const timers = new Map<
-	string,
-	{ start: number; ns?: string; options?: LogOptions }
->();
+const timers = new Map<string, { start: number; ns?: string; options?: LogOptions }>();
 
 /**
  * Chainable wrapper returned by gg.time(). Only supports .ns() for setting
@@ -871,7 +823,7 @@ gg._time = (
 		col?: number;
 		src?: string;
 	},
-	label = 'default',
+	label = 'default'
 ): GgTimerChain => {
 	if (ggConfig.enabled) {
 		timers.set(label, { start: performance.now(), options });
@@ -891,11 +843,7 @@ gg._time = (
  * // ... step 2 ...
  * gg.timeEnd('process');
  */
-gg.timeLog = function (
-	this: void,
-	label = 'default',
-	...args: unknown[]
-): void {
+gg.timeLog = function (this: void, label = 'default', ...args: unknown[]): void {
 	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
 	if (timer === undefined) {
@@ -905,11 +853,7 @@ gg.timeLog = function (
 	}
 	const elapsed = performance.now() - timer.start;
 	const ns = timer.ns ?? timer.options?.ns ?? resolveCallpoint(3);
-	ggLog(
-		{ ...timer.options, ns },
-		`${label}: ${formatElapsed(elapsed)}`,
-		...args,
-	);
+	ggLog({ ...timer.options, ns }, `${label}: ${formatElapsed(elapsed)}`, ...args);
 };
 
 /** gg._timeLog() - Internal: timeLog with call-site metadata from Vite plugin. */
@@ -968,7 +912,7 @@ gg._timeEnd = (
 		col?: number;
 		src?: string;
 	},
-	label = 'default',
+	label = 'default'
 ): void => {
 	if (!ggConfig.enabled) return;
 	const timer = timers.get(label);
@@ -1027,17 +971,13 @@ function formatTable(data: unknown, columns?: string[]): TableResult {
 			keySet.add('(index)');
 			for (const item of data) {
 				if (item && typeof item === 'object') {
-					Object.keys(item as Record<string, unknown>).forEach((k) =>
-						keySet.add(k),
-					);
+					Object.keys(item as Record<string, unknown>).forEach((k) => keySet.add(k));
 				}
 			}
 			allKeys = Array.from(keySet);
 			rows = data.map((item, i) => ({
 				'(index)': i,
-				...((item && typeof item === 'object'
-					? item
-					: { Value: item }) as Record<string, unknown>),
+				...((item && typeof item === 'object' ? item : { Value: item }) as Record<string, unknown>)
 			}));
 		}
 	} else {
@@ -1049,9 +989,7 @@ function formatTable(data: unknown, columns?: string[]): TableResult {
 		keySet.add('(index)');
 		for (const [, val] of entries) {
 			if (val && typeof val === 'object' && !Array.isArray(val)) {
-				Object.keys(val as Record<string, unknown>).forEach((k) =>
-					keySet.add(k),
-				);
+				Object.keys(val as Record<string, unknown>).forEach((k) => keySet.add(k));
 			} else {
 				keySet.add('Value');
 			}
@@ -1061,7 +999,7 @@ function formatTable(data: unknown, columns?: string[]): TableResult {
 			'(index)': key,
 			...(val && typeof val === 'object' && !Array.isArray(val)
 				? (val as Record<string, unknown>)
-				: { Value: val }),
+				: { Value: val })
 		}));
 	}
 
@@ -1108,10 +1046,7 @@ function formatTable(data: unknown, columns?: string[]): TableResult {
  * gg(bg('magenta')`Magenta background`);
  */
 
-type ColorTagFunction = (
-	strings: TemplateStringsArray,
-	...values: unknown[]
-) => string;
+type ColorTagFunction = (strings: TemplateStringsArray, ...values: unknown[]) => string;
 
 interface ChainableColorFn extends ColorTagFunction {
 	// Method chaining: fg('red').bg('green').bold()
@@ -1152,7 +1087,7 @@ function parseColor(color: string): { r: number; g: number; b: number } | null {
 		grey: '#808080',
 		orange: '#ffa500',
 		purple: '#800080',
-		pink: '#ffc0cb',
+		pink: '#ffc0cb'
 	};
 
 	// Check named colors first
@@ -1167,7 +1102,7 @@ function parseColor(color: string): { r: number; g: number; b: number } | null {
 		return {
 			r: parseInt(hexMatch[1], 16),
 			g: parseInt(hexMatch[2], 16),
-			b: parseInt(hexMatch[3], 16),
+			b: parseInt(hexMatch[3], 16)
 		};
 	}
 
@@ -1177,7 +1112,7 @@ function parseColor(color: string): { r: number; g: number; b: number } | null {
 		return {
 			r: parseInt(shortHexMatch[1] + shortHexMatch[1], 16),
 			g: parseInt(shortHexMatch[2] + shortHexMatch[2], 16),
-			b: parseInt(shortHexMatch[3] + shortHexMatch[3], 16),
+			b: parseInt(shortHexMatch[3] + shortHexMatch[3], 16)
 		};
 	}
 
@@ -1187,7 +1122,7 @@ function parseColor(color: string): { r: number; g: number; b: number } | null {
 		return {
 			r: parseInt(rgbMatch[1]),
 			g: parseInt(rgbMatch[2]),
-			b: parseInt(rgbMatch[3]),
+			b: parseInt(rgbMatch[3])
 		};
 	}
 
@@ -1201,7 +1136,7 @@ const STYLE_CODES = {
 	bold: '\x1b[1m',
 	dim: '\x1b[2m',
 	italic: '\x1b[3m',
-	underline: '\x1b[4m',
+	underline: '\x1b[4m'
 } as const;
 
 /**
@@ -1210,16 +1145,12 @@ const STYLE_CODES = {
 function createColorFunction(
 	fgCode: string = '',
 	bgCode: string = '',
-	styleCode: string = '',
+	styleCode: string = ''
 ): ChainableColorFn {
-	const tagFn = (
-		strings: TemplateStringsArray,
-		...values: unknown[]
-	): string => {
+	const tagFn = (strings: TemplateStringsArray, ...values: unknown[]): string => {
 		const text = strings.reduce(
-			(acc, str, i) =>
-				acc + str + (values[i] !== undefined ? String(values[i]) : ''),
-			'',
+			(acc, str, i) => acc + str + (values[i] !== undefined ? String(values[i]) : ''),
+			''
 		);
 		return fgCode + bgCode + styleCode + text + '\x1b[0m';
 	};
@@ -1246,11 +1177,7 @@ function createColorFunction(
 	};
 
 	tagFn.underline = () => {
-		return createColorFunction(
-			fgCode,
-			bgCode,
-			styleCode + STYLE_CODES.underline,
-		);
+		return createColorFunction(fgCode, bgCode, styleCode + STYLE_CODES.underline);
 	};
 
 	tagFn.dim = () => {
@@ -1375,7 +1302,7 @@ Object.defineProperty(gg, 'addLogListener', {
 		}
 	},
 	writable: false,
-	configurable: true,
+	configurable: true
 });
 
 Object.defineProperty(gg, 'removeLogListener', {
@@ -1383,7 +1310,7 @@ Object.defineProperty(gg, 'removeLogListener', {
 		_logListeners.delete(callback);
 	},
 	writable: false,
-	configurable: true,
+	configurable: true
 });
 
 // Legacy gg._onLog — backward-compatible single-slot alias
@@ -1404,7 +1331,7 @@ Object.defineProperty(gg, '_onLog', {
 				earlyLogBuffer.forEach((entry) => callback(entry));
 			}
 		}
-	},
+	}
 });
 
 // Namespace for adding properties to the gg function
@@ -1435,7 +1362,7 @@ export namespace gg {
 		file?: string,
 		line?: number,
 		col?: number,
-		src?: string,
+		src?: string
 	) => { ns: string; file?: string; line?: number; col?: number; src?: string };
 
 	// Introspection
@@ -1444,12 +1371,7 @@ export namespace gg {
 		functionName: string;
 		url: string;
 	};
-	export let _here: (options: {
-		ns: string;
-		file?: string;
-		line?: number;
-		col?: number;
-	}) => {
+	export let _here: (options: { ns: string; file?: string; line?: number; col?: number }) => {
 		fileName: string;
 		functionName: string;
 		url: string;
@@ -1474,7 +1396,7 @@ export namespace gg {
 			col?: number;
 			src?: string;
 		},
-		label?: string,
+		label?: string
 	) => GgTimerChain;
 	export let _timeLog: (
 		options: {
@@ -1495,7 +1417,7 @@ export namespace gg {
 			col?: number;
 			src?: string;
 		},
-		label?: string,
+		label?: string
 	) => void;
 }
 
@@ -1520,20 +1442,17 @@ export async function runGgDiagnostics() {
 	let ggMessage = '\n';
 	const message = (s: string) => (ggMessage += `${s}\n`);
 	const checkbox = (test: boolean) => (test ? '✅' : '❌');
-	const makeHint = (test: boolean, ifTrue: string, ifFalse = '') =>
-		test ? ifTrue : ifFalse;
+	const makeHint = (test: boolean, ifTrue: string, ifFalse = '') => (test ? ifTrue : ifFalse);
 
 	console.log(`Loaded gg module. Checking configuration...`);
 
-	const configOk = BROWSER
-		? ggConfig.enabled
-		: ggConfig.enabled && ggLogTest.enabled;
+	const configOk = BROWSER ? ggConfig.enabled : ggConfig.enabled && ggLogTest.enabled;
 
 	if (configOk) {
 		message(`No problems detected:`);
 		if (BROWSER) {
 			message(
-				`ℹ️ gg messages appear in the Eruda GG panel. Use Settings > Native Console to also show in browser console.`,
+				`ℹ️ gg messages appear in the Eruda GG panel. Use Settings > Native Console to also show in browser console.`
 			);
 		}
 	} else {
@@ -1548,19 +1467,17 @@ export async function runGgDiagnostics() {
 			enableHint = ' (Add ?gg to URL or set localStorage["gg-enabled"]="true")';
 		}
 	}
-	message(
-		`${checkbox(ggConfig.enabled)} gg enabled: ${ggConfig.enabled}${enableHint}`,
-	);
+	message(`${checkbox(ggConfig.enabled)} gg enabled: ${ggConfig.enabled}${enableHint}`);
 
 	if (!BROWSER) {
 		// Server-side: GG_KEEP controls which namespaces are output to the server console.
 		// Falls back to '*' (all) if not set, so gg works zero-config.
 		const hint = makeHint(
 			!ggLogTest.enabled,
-			' (Try setting GG_KEEP=* in your .env file or shell)',
+			' (Try setting GG_KEEP=* in your .env file or shell)'
 		);
 		message(
-			`${checkbox(ggLogTest.enabled)} GG_KEEP env variable: ${process?.env?.GG_KEEP ?? '* (default)'}${hint}`,
+			`${checkbox(ggLogTest.enabled)} GG_KEEP env variable: ${process?.env?.GG_KEEP ?? '* (default)'}${hint}`
 		);
 	}
 
@@ -1571,28 +1488,28 @@ export async function runGgDiagnostics() {
 			makeHint(
 				_ggCallSitesPlugin,
 				`✅ gg-call-sites vite plugin detected! Call-site namespaces and open-in-editor links baked in at build time.`,
-				`⚠️ gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for file:line call-site namespaces and open-in-editor links. Without plugin, using word-tuple names (e.g. calm-fox) as call-site identifiers.`,
-			),
+				`⚠️ gg-call-sites vite plugin not detected. Add ggCallSitesPlugin() to vite.config.ts for file:line call-site namespaces and open-in-editor links. Without plugin, using word-tuple names (e.g. calm-fox) as call-site identifiers.`
+			)
 		);
 		const { status } = await fetch('/__open-in-editor?file=+');
 		message(
 			makeHint(
 				status === 222,
 				`✅ (optional) open-in-editor vite plugin detected! (status code: ${status}) Clickable links open source files in editor.`,
-				`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}) Add openInEditorPlugin() to vite.config.ts for clickable links that open source files in editor`,
-			),
+				`⚠️ (optional) open-in-editor vite plugin not detected. (status code: ${status}) Add openInEditorPlugin() to vite.config.ts for clickable links that open source files in editor`
+			)
 		);
 
 		const fileSinkStatus = await fetch('/__gg/logs', { method: 'HEAD' }).then(
 			(r) => r.status,
-			() => 0,
+			() => 0
 		);
 		message(
 			makeHint(
 				fileSinkStatus === 200,
 				`✅ gg-file-sink vite plugin detected! Logs written to .gg/logs-{port}.jsonl. Agent API at /__gg/logs.`,
-				`ℹ️ (optional) gg-file-sink vite plugin not detected. Add fileSink: true to ggPlugins() options to write logs to .gg/logs-{port}.jsonl for coding agent access.`,
-			),
+				`ℹ️ (optional) gg-file-sink vite plugin not detected. Add fileSink: true to ggPlugins() options to write logs to .gg/logs-{port}.jsonl for coding agent access.`
+			)
 		);
 	}
 
@@ -1642,12 +1559,8 @@ if (
 	!BROWSER &&
 	typeof globalThis !== 'undefined' &&
 	(globalThis as Record<string, unknown>).__ggFileSink &&
-	typeof (
-		(globalThis as Record<string, unknown>).__ggFileSink as Record<
-			string,
-			unknown
-		>
-	)?.write === 'function'
+	typeof ((globalThis as Record<string, unknown>).__ggFileSink as Record<string, unknown>)
+		?.write === 'function'
 ) {
 	const sink = (globalThis as Record<string, unknown>).__ggFileSink as {
 		write: (entry: CapturedEntry, env: 'client' | 'server') => void;

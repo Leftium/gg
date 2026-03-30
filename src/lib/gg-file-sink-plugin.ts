@@ -41,14 +41,14 @@ interface OutputEntry extends SerializedEntry {
 function serializeEntry(
 	entry: CapturedEntry,
 	env: 'client' | 'server',
-	origin?: 'tauri' | 'browser',
+	origin?: 'tauri' | 'browser'
 ): SerializedEntry {
 	const out: SerializedEntry = {
 		ns: entry.namespace,
 		msg: entry.message,
 		ts: entry.timestamp,
 		env,
-		diff: entry.diff,
+		diff: entry.diff
 	};
 	if (entry.level && entry.level !== 'debug') out.lvl = entry.level;
 	if (origin) out.origin = origin;
@@ -85,10 +85,7 @@ function filterLinePreDedup(line: string, params: URLSearchParams): boolean {
  * Applied after dedup/mismatch so cross-env comparisons see both sides first.
  * e.g. ?mismatch&env=server correctly returns the server half of mismatch pairs.
  */
-function filterEntryPostDedup(
-	entry: SerializedEntry,
-	params: URLSearchParams,
-): boolean {
+function filterEntryPostDedup(entry: SerializedEntry, params: URLSearchParams): boolean {
 	const env = params.get('env');
 	if (env && entry.env !== env) return false;
 
@@ -128,19 +125,15 @@ function dedupKey(entry: SerializedEntry): string {
 function applyDedup(
 	entries: SerializedEntry[],
 	all: boolean,
-	mismatch: boolean,
+	mismatch: boolean
 ): SerializedEntry[] {
 	if (all) return entries;
 
 	// Build index: dedupKey → { serverMsgs, clientMsgs }
-	const index = new Map<
-		string,
-		{ serverMsgs: Set<string>; clientMsgs: Set<string> }
-	>();
+	const index = new Map<string, { serverMsgs: Set<string>; clientMsgs: Set<string> }>();
 	for (const e of entries) {
 		const k = dedupKey(e);
-		if (!index.has(k))
-			index.set(k, { serverMsgs: new Set(), clientMsgs: new Set() });
+		if (!index.has(k)) index.set(k, { serverMsgs: new Set(), clientMsgs: new Set() });
 		const slot = index.get(k)!;
 		if (e.env === 'server') slot.serverMsgs.add(e.msg);
 		else slot.clientMsgs.add(e.msg);
@@ -151,8 +144,7 @@ function applyDedup(
 		// msg is present in one env but not the other (i.e. any difference exists).
 		return entries.filter((e) => {
 			const slot = index.get(dedupKey(e))!;
-			if (slot.serverMsgs.size === 0 || slot.clientMsgs.size === 0)
-				return false;
+			if (slot.serverMsgs.size === 0 || slot.clientMsgs.size === 0) return false;
 			// Check for any msg that exists on one side but not the other
 			for (const m of slot.serverMsgs) if (!slot.clientMsgs.has(m)) return true;
 			for (const m of slot.clientMsgs) if (!slot.serverMsgs.has(m)) return true;
@@ -207,9 +199,7 @@ function collapseRepeats(entries: SerializedEntry[]): OutputEntry[] {
 const VIRTUAL_MODULE_ID = 'virtual:gg-file-sink-sender';
 const RESOLVED_VIRTUAL_MODULE_ID = '\0' + VIRTUAL_MODULE_ID;
 
-export default function ggFileSinkPlugin(
-	options: GgFileSinkOptions = {},
-): Plugin {
+export default function ggFileSinkPlugin(options: GgFileSinkOptions = {}): Plugin {
 	let logFile: string;
 	let serverSideListener: ((entry: CapturedEntry) => void) | null = null;
 
@@ -286,8 +276,8 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 				{
 					tag: 'script',
 					attrs: { type: 'module', src: `/@id/${VIRTUAL_MODULE_ID}` },
-					injectTo: 'head',
-				},
+					injectTo: 'head'
+				}
 			];
 		},
 
@@ -298,12 +288,8 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 			server.httpServer?.once('listening', () => {
 				const addr = server.httpServer?.address();
 				const port =
-					addr && typeof addr === 'object'
-						? addr.port
-						: (server.config.server.port ?? 5173);
-				const dir = options.dir
-					? path.resolve(options.dir)
-					: path.resolve(process.cwd(), '.gg');
+					addr && typeof addr === 'object' ? addr.port : (server.config.server.port ?? 5173);
+				const dir = options.dir ? path.resolve(options.dir) : path.resolve(process.cwd(), '.gg');
 				fs.mkdirSync(dir, { recursive: true });
 				logFile = path.join(dir, `logs-${port}.jsonl`);
 				fs.writeFileSync(logFile, '');
@@ -318,13 +304,9 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 			// (SSR, pre-bundled, monorepo-hoisted) can self-register a listener
 			// that writes to the log file. This replaces the broken transform hook.
 			(globalThis as Record<string, unknown>).__ggFileSink = {
-				write(
-					entry: CapturedEntry,
-					env: 'client' | 'server',
-					origin?: 'tauri' | 'browser',
-				) {
+				write(entry: CapturedEntry, env: 'client' | 'server', origin?: 'tauri' | 'browser') {
 					appendEntry(serializeEntry(entry, env, origin));
-				},
+				}
 			};
 
 			// Client-side entries arrive via HMR custom event
@@ -333,7 +315,7 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 				const serialized: SerializedEntry = {
 					...data.entry,
 					env: 'client',
-					origin: data.entry.origin ?? 'browser',
+					origin: data.entry.origin ?? 'browser'
 				};
 				appendEntry(serialized);
 			});
@@ -367,7 +349,7 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 					const routes = stack.map((layer, i) => ({
 						i,
 						route: layer.route,
-						name: layer.handle?.name || '(anonymous)',
+						name: layer.handle?.name || '(anonymous)'
 					}));
 					res.writeHead(200, { 'Content-Type': 'application/json' });
 					res.end(JSON.stringify(routes, null, 2));
@@ -380,7 +362,7 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 				// module graph hasn't loaded the virtual module yet at request time.
 				if (pathname === '/sender') {
 					res.writeHead(302, {
-						Location: `/@id/${VIRTUAL_MODULE_ID}`,
+						Location: `/@id/${VIRTUAL_MODULE_ID}`
 					});
 					res.end();
 					return;
@@ -400,9 +382,7 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 
 				const port = (() => {
 					const addr = server.httpServer?.address();
-					return addr && typeof addr === 'object'
-						? addr.port
-						: (server.config.server.port ?? 5173);
+					return addr && typeof addr === 'object' ? addr.port : (server.config.server.port ?? 5173);
 				})();
 
 				const body = JSON.stringify(
@@ -414,11 +394,11 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 							'GET /__gg/logs':
 								'read deduplicated JSONL entries (?filter=, ?since=, ?env=, ?origin=, ?all, ?mismatch, ?raw)',
 							'DELETE /__gg/logs': 'truncate log file',
-							'GET /__gg/project-root': 'project root path',
-						},
+							'GET /__gg/project-root': 'project root path'
+						}
 					},
 					null,
-					2,
+					2
 				);
 
 				res.statusCode = 200;
@@ -485,14 +465,10 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 						res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
 						const fileContent = fs.readFileSync(logFile, 'utf-8');
-						const lines = fileContent
-							.split('\n')
-							.filter((l: string) => l.trim());
+						const lines = fileContent.split('\n').filter((l: string) => l.trim());
 
 						// Pre-dedup filters: namespace glob and timestamp (symmetric — don't affect cross-env index)
-						const preFiltered = lines.filter((l) =>
-							filterLinePreDedup(l, params),
-						);
+						const preFiltered = lines.filter((l) => filterLinePreDedup(l, params));
 
 						// Parse surviving lines for dedup/mismatch pass
 						const entries = preFiltered.flatMap((l) => {
@@ -507,20 +483,13 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 						const deduped = applyDedup(entries, all, mismatch);
 
 						// Post-dedup filters: env and origin (applied after so cross-env index is intact)
-						const postFiltered = deduped.filter((e) =>
-							filterEntryPostDedup(e, params),
-						);
+						const postFiltered = deduped.filter((e) => filterEntryPostDedup(e, params));
 
 						// Collapse consecutive repeated messages (count field), unless ?raw
-						const result = noCollapse
-							? postFiltered
-							: collapseRepeats(postFiltered);
+						const result = noCollapse ? postFiltered : collapseRepeats(postFiltered);
 
 						res.statusCode = 200;
-						res.end(
-							result.map((e) => JSON.stringify(e)).join('\n') +
-								(result.length ? '\n' : ''),
-						);
+						res.end(result.map((e) => JSON.stringify(e)).join('\n') + (result.length ? '\n' : ''));
 					} catch (err) {
 						res.statusCode = 500;
 						res.end(String(err));
@@ -532,6 +501,6 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 				res.setHeader('Allow', 'GET, HEAD, DELETE');
 				res.end('Method Not Allowed');
 			});
-		},
+		}
 	};
 }
