@@ -9,7 +9,7 @@
 Add two new APIs to gg for persisting debug artifacts alongside the existing JSONL log stream:
 
 - `gg.file(name, data)` — persist any serializable data as a named file (the primitive)
-- `gg.dom(selector, options?)` — capture a DOM element as SVG/PNG (sugar built on `gg.file()`)
+- `gg.dom(selector, options?)` — capture a DOM element as SVG/WebP (sugar built on `gg.file()`)
 
 Files are stored on disk via `node:fs`, served at `/__gg/files/<id>`, and referenced from log entries by URL. The primary consumer is an automated agent that fetches file URLs from the logs. Human consumers get a lightweight viewer page with copy/download controls.
 
@@ -35,7 +35,7 @@ Automated coding agents can read `gg()` text logs via `/__gg/logs`, but have no 
 2. Inline all computed styles onto each cloned node
 3. Embed fonts and images as base64 data URLs
 4. Serialize into `<svg><foreignObject>...</foreignObject></svg>`
-5. Optionally rasterize to PNG via an off-screen canvas
+5. Optionally rasterize to WebP via an off-screen canvas
 
 Because the **browser's own rendering engine** processes the SVG `foreignObject`, CSS fidelity is near-perfect — whatever the browser renders, the snapshot captures. The library is ~10KB minified.
 
@@ -93,8 +93,9 @@ Captures a DOM element as an image. Internally, this captures the element then c
 ```ts
 // CSS selector
 gg.dom('#app > .main-content');
-gg.dom('.hero-section', { format: 'png' });
-gg.dom('body', { format: 'png', scale: 2 });
+gg.dom('.hero-section', { format: 'webp' });
+gg.dom('body', { format: 'webp', scale: 2 });
+gg.dom('.photo-gallery', { format: 'webp', quality: 0.8 }); // lossy
 
 // Direct element reference
 let container; // bind:this in Svelte
@@ -108,11 +109,12 @@ function handleClick(e) {
 
 **Parameters:**
 
-| Parameter        | Type                | Default  | Description                                                                     |
-| ---------------- | ------------------- | -------- | ------------------------------------------------------------------------------- |
-| `target`         | `string \| Element` | required | CSS selector or direct DOM element reference                                    |
-| `options.format` | `'svg' \| 'png'`    | `'svg'`  | Capture format. SVG is lossless and fast. PNG rasterizes via off-screen canvas. |
-| `options.scale`  | `number`            | `1`      | Device pixel ratio for PNG rasterization (ignored for SVG)                      |
+| Parameter         | Type                | Default  | Description                                                                                   |
+| ----------------- | ------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `target`          | `string \| Element` | required | CSS selector or direct DOM element reference                                                  |
+| `options.format`  | `'svg' \| 'webp'`   | `'svg'`  | Capture format. SVG is lossless and fast. WebP rasterizes via off-screen canvas.              |
+| `options.scale`   | `number`            | `1`      | Device pixel ratio for WebP rasterization (ignored for SVG)                                   |
+| `options.quality` | `number`            | `1`      | WebP quality, 0–1. Default 1 = lossless. Values < 1 = lossy (smaller files). Ignored for SVG. |
 
 **Returns:** `void` (fire-and-forget)
 
@@ -120,10 +122,10 @@ function handleClick(e) {
 
 1. Resolve target: if `string`, call `document.querySelector(target)` (warn if not found). If `Element`, use directly.
 2. Capture the element using the SVG `foreignObject` approach (clone, inline styles, embed resources)
-3. If `format: 'png'`, rasterize the SVG to PNG via off-screen canvas
+3. If `format: 'webp'`, rasterize the SVG to WebP via off-screen canvas (lossless by default, lossy if `quality < 1`)
 4. Call `gg.file()` internally to persist the result(s)
 
-When `format: 'png'`, both SVG and PNG are stored — the SVG is always captured as an intermediate step, so it's free to keep.
+When `format: 'webp'`, both SVG and WebP are stored — the SVG is always captured as an intermediate step, so it's free to keep. WebP is lossless by default (`quality: 1`), matching PNG quality in a smaller file. Set `quality < 1` for lossy compression (covers the JPEG use case, same format, still supports transparency).
 
 **Relationship to `gg.file()`:**
 
@@ -191,10 +193,10 @@ The `msg` field contains the selector string (for `gg.dom` with a CSS selector),
 
 A self-contained HTML page (inline CSS/JS, no framework dependencies) that adapts based on content type:
 
-**For images (SVG/PNG):**
+**For images (SVG/WebP):**
 
 - Renders the image centered on a checkerboard transparency background
-- Toolbar: **Copy as PNG**, **Download SVG**, **Download PNG**, **Zoom**
+- Toolbar: **Copy as PNG**, **Download SVG**, **Download WebP**, **Zoom**
 
 **For JSON:**
 
@@ -220,9 +222,9 @@ A self-contained HTML page (inline CSS/JS, no framework dependencies) that adapt
 For DOM captures specifically, there are exactly two raw URLs:
 
 - `/__gg/files/<id>.svg` — always exists (the lossless SVG original)
-- `/__gg/files/<id>.png` — capture-time PNG if `format: 'png'` was used, otherwise rasterized from SVG on demand
+- `/__gg/files/<id>.webp` — capture-time WebP if `format: 'webp'` was used, otherwise rasterized from SVG on demand
 
-This means the agent doesn't need to know what format was captured — `.svg` always works for the lossless version, `.png` always works for a raster version. The log entry records the original capture format as metadata.
+This means the agent doesn't need to know what format was captured — `.svg` always works for the lossless version, `.webp` always works for a raster version. The log entry records the original capture format as metadata.
 
 ### `/__gg/files` — Index
 
@@ -238,7 +240,7 @@ Files are stored in `.gg/files/` alongside the existing `.gg/logs-*.jsonl`:
   logs-5173.jsonl
   files/
     dom-a1b2c3.svg       # DOM snapshot (SVG)
-    dom-a1b2c3.png       # DOM snapshot (PNG, only if format: 'png')
+    dom-a1b2c3.webp      # DOM snapshot (WebP, only if format: 'webp')
     d4e5f6.json          # JSON state capture
     g7h8i9.html          # HTML fragment
 ```
@@ -275,7 +277,7 @@ Content-Type: application/json
 }
 ```
 
-For PNG captures, both files are sent in the same request:
+For WebP captures, both files are sent in the same request:
 
 ```
 POST /__gg/files
@@ -285,7 +287,7 @@ Content-Type: application/json
   "fileName": "dom-snapshot",
   "files": {
     "svg": "<svg>...</svg>",
-    "png": "<base64-encoded-png>"
+    "webp": "<base64-encoded-webp>"
   },
   "meta": { ... }
 }
@@ -295,22 +297,22 @@ Server responds with `{ "id": "a1b2c3" }`, writes the file(s), and appends the l
 
 ## Design Decisions
 
-| Decision                        | Choice                                            | Rationale                                                                                                                                                                                                                      |
-| ------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `gg.dom()` built on `gg.file()` | `gg.file()` is the primitive; `gg.dom()` is sugar | Clean separation: `gg.file()` handles persistence, `gg.dom()` handles DOM capture. Testable independently. Users can capture with custom logic and call `gg.file()` directly.                                                  |
-| API naming: `gg.dom()`          | Not `gg.image`, `gg.snap`, `gg.capture`           | Short, consistent with gg's terse style. CSS selector argument makes DOM context obvious. Called occasionally, not on every line — brevity over explicitness is fine.                                                          |
-| Generalized file storage        | `/__gg/files/` not `/__gg/images/`                | DOM snapshots are one use case. JSON state, HTML fragments, text are equally valuable for agents. Same infrastructure serves all.                                                                                              |
-| Default image format            | SVG                                               | Lossless, fast to capture, compact (text-based, compresses well). Agents can consume SVG directly via vision models.                                                                                                           |
-| Optional PNG                    | At capture time, stored alongside SVG             | Browser-rendered PNG is higher fidelity than server-side SVG→PNG conversion. SVG is always captured as intermediate — free to keep. JPEG omitted to keep the endpoint URL scheme simple (two formats, two URLs, no ambiguity). |
-| DOM capture endpoint scheme     | `<id>.svg` (always), `<id>.png` (on demand)       | Two URLs per capture, no format negotiation. Agent doesn't need to know capture options — `.svg` for lossless, `.png` for raster, always. Capture-time PNG served if available, else rasterized from SVG.                      |
-| Persistence layer               | `node:fs` (existing)                              | 6 lines of proven, synchronous code. Survives restarts. No new dependencies.                                                                                                                                                   |
-| No `/__gg/bash` endpoint        | Deferred                                          | Agents with tool access already have real `bash`, `jq`, `curl`. A sandboxed bash endpoint adds complexity for a niche use case (browser-only or MCP-only agents). Can be added later if demand emerges.                        |
-| Log entry format                | URL reference, not inline data                    | Keeps logs compact. Agent fetches file separately.                                                                                                                                                                             |
-| Transport                       | HTTP POST, not WebSocket                          | Large payloads; no ack needed; already-established pattern.                                                                                                                                                                    |
-| Viewer page                     | Self-contained HTML, adapts to content type       | No build step, no framework dependency. Copy-as-PNG is the key value-add for images.                                                                                                                                           |
-| DOM-to-image library            | `html-to-image` or `modern-screenshot`            | SVG `foreignObject` approach — browser renders CSS natively, near-perfect fidelity. ~10KB.                                                                                                                                     |
-| SSR behavior                    | `gg.dom()` is no-op; `gg.file()` works            | `gg.dom()` requires `document`. `gg.file()` can serialize data server-side via the globalThis bridge.                                                                                                                          |
-| Name collision                  | Overwrite, no append                              | Same name = latest state wins. Reactive blocks may fire hundreds of times — storing every version is waste. History is in the log entries. Append is what `gg()` itself does.                                                  |
+| Decision                        | Choice                                            | Rationale                                                                                                                                                                                                                                            |
+| ------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gg.dom()` built on `gg.file()` | `gg.file()` is the primitive; `gg.dom()` is sugar | Clean separation: `gg.file()` handles persistence, `gg.dom()` handles DOM capture. Testable independently. Users can capture with custom logic and call `gg.file()` directly.                                                                        |
+| API naming: `gg.dom()`          | Not `gg.image`, `gg.snap`, `gg.capture`           | Short, consistent with gg's terse style. CSS selector argument makes DOM context obvious. Called occasionally, not on every line — brevity over explicitness is fine.                                                                                |
+| Generalized file storage        | `/__gg/files/` not `/__gg/images/`                | DOM snapshots are one use case. JSON state, HTML fragments, text are equally valuable for agents. Same infrastructure serves all.                                                                                                                    |
+| Default image format            | SVG                                               | Lossless, fast to capture, compact (text-based, compresses well). Agents can consume SVG directly via vision models.                                                                                                                                 |
+| Single raster format: WebP      | Not PNG, not JPEG — WebP only                     | WebP supports both lossless (replaces PNG) and lossy (replaces JPEG) in one format, with transparency. One raster URL per capture (`<id>.webp`), no format ambiguity. Universal browser support since 2020. All major vision-model APIs accept WebP. |
+| DOM capture endpoint scheme     | `<id>.svg` (always), `<id>.webp` (on demand)      | Two URLs per capture, no format negotiation. Agent doesn't need to know capture options — `.svg` for lossless, `.webp` for raster, always. Capture-time WebP served if available, else rasterized from SVG.                                          |
+| Persistence layer               | `node:fs` (existing)                              | 6 lines of proven, synchronous code. Survives restarts. No new dependencies.                                                                                                                                                                         |
+| No `/__gg/bash` endpoint        | Deferred                                          | Agents with tool access already have real `bash`, `jq`, `curl`. A sandboxed bash endpoint adds complexity for a niche use case (browser-only or MCP-only agents). Can be added later if demand emerges.                                              |
+| Log entry format                | URL reference, not inline data                    | Keeps logs compact. Agent fetches file separately.                                                                                                                                                                                                   |
+| Transport                       | HTTP POST, not WebSocket                          | Large payloads; no ack needed; already-established pattern.                                                                                                                                                                                          |
+| Viewer page                     | Self-contained HTML, adapts to content type       | No build step, no framework dependency. Copy-as-PNG (clipboard requires PNG) is the key value-add for images.                                                                                                                                        |
+| DOM-to-image library            | `html-to-image` or `modern-screenshot`            | SVG `foreignObject` approach — browser renders CSS natively, near-perfect fidelity. ~10KB.                                                                                                                                                           |
+| SSR behavior                    | `gg.dom()` is no-op; `gg.file()` works            | `gg.dom()` requires `document`. `gg.file()` can serialize data server-side via the globalThis bridge.                                                                                                                                                |
+| Name collision                  | Overwrite, no append                              | Same name = latest state wins. Reactive blocks may fire hundreds of times — storing every version is waste. History is in the log entries. Append is what `gg()` itself does.                                                                        |
 
 ## Implementation Plan
 
@@ -336,13 +338,13 @@ Server responds with `{ "id": "a1b2c3" }`, writes the file(s), and appends the l
 - [ ] **3.1** Evaluate `html-to-image` vs `modern-screenshot` — bundle size, maintenance, mobile Safari compat, TypeScript types. Pick one.
 - [ ] **3.2** Add chosen library as a dependency (or vendor if small enough). Dynamic import on first `gg.dom()` call.
 - [ ] **3.3** Add `gg.dom(selector, options?)` method to `gg.ts`. Guard with `BROWSER` check — no-op in SSR.
-- [ ] **3.4** Implement capture flow: querySelector → foreignObject SVG. Optionally rasterize to PNG.
+- [ ] **3.4** Implement capture flow: querySelector → foreignObject SVG. Optionally rasterize to WebP.
 - [ ] **3.5** Internally call `gg.file()` to persist the result(s).
 
 ### Phase 4: Viewer Page
 
 - [ ] **4.1** Create self-contained HTML template (inline CSS/JS) served at `/__gg/files/<id>`.
-- [ ] **4.2** Image viewer: checkerboard background, zoom, copy-as-PNG, download SVG/PNG.
+- [ ] **4.2** Image viewer: checkerboard background, zoom, copy-as-PNG (clipboard requires PNG), download SVG/WebP.
 - [ ] **4.3** JSON viewer: syntax highlighting, collapsible tree.
 - [ ] **4.4** Text/HTML viewer: syntax highlighting, copy, download.
 
@@ -386,7 +388,7 @@ Each `gg.dom()` call generates a unique filename (`dom-<id>.svg`) since it build
 
 ### Safari `foreignObject` Quirks
 
-Safari has known issues with `foreignObject` rendering (images may repeat or clip). PNG capture (which rasterizes via canvas in the browser) may produce better results on Safari since rasterization happens before the SVG quirks manifest.
+Safari has known issues with `foreignObject` rendering (images may repeat or clip). WebP capture (which rasterizes via canvas in the browser) may produce better results on Safari since rasterization happens before the SVG quirks manifest.
 
 ### SSR for `gg.file()`
 
@@ -410,7 +412,7 @@ Unlike `gg.dom()` (which needs `document`), `gg.file()` can work in SSR. It seri
 
 ## Success Criteria
 
-- [ ] `gg.dom('.selector')` captures the element and stores SVG (and optionally PNG) server-side
+- [ ] `gg.dom('.selector')` captures the element and stores SVG (and optionally WebP) server-side
 - [ ] `gg.file('name.json', obj)` stores arbitrary JSON server-side
 - [ ] `curl /__gg/logs` shows file entries with `type: "file"`, `fileId`, `mimeType`
 - [ ] `curl /__gg/files/<id>.svg` returns a valid SVG that visually matches the DOM element
