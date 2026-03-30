@@ -22,7 +22,7 @@ export interface GgCallSitesPluginOptions {
  * - 'script': inside a `<script>` block — use object literal `{...}` syntax
  * - 'template': inside a template expression `{...}` or event handler — use `gg._o()` syntax
  */
-export interface CodeRange {
+interface CodeRange {
 	start: number;
 	end: number;
 	context: 'script' | 'template';
@@ -32,7 +32,7 @@ export interface CodeRange {
  * A function scope range, mapping a byte range to the enclosing function name.
  * Built from the estree AST during `collectCodeRanges()`.
  */
-export interface FunctionScope {
+interface FunctionScope {
 	start: number;
 	end: number;
 	name: string;
@@ -41,7 +41,7 @@ export interface FunctionScope {
 /**
  * Result of `collectCodeRanges()` — code ranges plus function scope info.
  */
-export interface SvelteCodeInfo {
+interface SvelteCodeInfo {
 	ranges: CodeRange[];
 	/** Function scopes extracted from the estree AST, sorted by start position. */
 	functionScopes: FunctionScope[];
@@ -655,7 +655,7 @@ function findMatchingParen(code: string, openPos: number): number {
 /**
  * Escape a string for embedding as a single-quoted JS string literal.
  */
-export function escapeForString(s: string): string {
+function escapeForString(s: string): string {
 	return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
 

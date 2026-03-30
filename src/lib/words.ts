@@ -13,7 +13,7 @@
  */
 
 // prettier-ignore
-export const adjectives = [
+const adjectives = [
 	'able',   'acid',   'aged',   'airy',   'apt',    'avid',   'awry',   'balmy',
 	'bare',   'beefy',  'bent',   'big',    'bland',  'bleak',  'blind',  'bliss',
 	'blue',   'blunt',  'bold',   'brash',  'brave',  'brief',  'briny',  'brisk',
@@ -49,7 +49,7 @@ export const adjectives = [
 ] as const;
 
 // prettier-ignore
-export const nouns = [
+const nouns = [
 	'ant',    'ape',    'asp',    'auk',    'bass',   'bat',    'bear',   'bee',
 	'bird',   'bison',  'boar',   'bream',  'buck',   'bug',    'bull',   'bunny',
 	'calf',   'carp',   'cat',    'chick',  'chimp',  'clam',   'cobra',  'cod',
@@ -88,7 +88,7 @@ export const nouns = [
  * FNV-1a hash (32-bit). Fast, good distribution, zero dependencies.
  * Reference: http://www.isthe.com/chongo/tech/comp/fnv/
  */
-export function fnv1a(str: string): number {
+function fnv1a(str: string): number {
 	let hash = 0x811c9dc5; // FNV offset basis
 	for (let i = 0; i < str.length; i++) {
 		hash ^= str.charCodeAt(i);

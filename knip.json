@@ -1,0 +1,12 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"tags": ["-lintignore"],
+	"entry": [
+		"src/lib/index.ts",
+		"src/lib/vite.ts",
+		"src/lib/eruda/index.ts",
+		"src/lib/**/*.test.ts"
+	],
+	"ignoreDependencies": ["@leftium/nimble.css"],
+	"ignoreMembers": ["_onLog"]
+}
