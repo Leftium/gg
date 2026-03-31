@@ -54,9 +54,6 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
-      add:
-        specifier: ^2.0.6
-        version: 2.0.6
       eslint:
         specifier: ^10.1.0
         version: 10.1.0(jiti@2.6.1)(supports-color@10.2.2)
@@ -1266,9 +1263,6 @@ packages:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
-
-  add@2.0.6:
-    resolution: {integrity: sha512-j5QzrmsokwWWp6kUcJQySpbG+xfOBqqKnup3OIk1pz+kB/80SLorZ9V8zHFLO92Lcd+hbvq8bT+zOGoPkmBV0Q==}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -3202,8 +3196,6 @@ snapshots:
       acorn: 8.16.0
 
   acorn@8.16.0: {}
-
-  add@2.0.6: {}
 
   agent-base@7.1.4: {}
 
