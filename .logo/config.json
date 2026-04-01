@@ -1,0 +1,56 @@
+{
+	"icon": "boxicons:glasses",
+	"iconColor": "#ffffff",
+	"iconColorMode": "auto",
+	"background": {
+		"colors": [
+			"#0029c1",
+			"#3973ff",
+			"#0029c1"
+		],
+		"stops": [
+			0,
+			0.29,
+			1
+		],
+		"angle": 45,
+		"position": 0,
+		"scale": 1
+	},
+	"cornerRadius": 50,
+	"cornerShape": "superellipse(2)",
+	"logo": {
+		"iconSize": 90,
+		"iconOffsetX": 0,
+		"iconOffsetY": 2,
+		"iconRotation": 180,
+		"grayscaleLightness": 100
+	},
+	"favicon": {
+		"icon": "boxicons:glasses",
+		"iconColor": "#ffffff",
+		"iconColorMode": "auto",
+		"background": {
+			"colors": [
+				"#0029c1",
+				"#3973ff",
+				"#0029c1"
+			],
+			"stops": [
+				0,
+				0.29,
+				1
+			],
+			"angle": 45,
+			"position": 0,
+			"scale": 1
+		},
+		"cornerRadius": 50,
+		"cornerShape": "superellipse(2)",
+		"iconSize": 90,
+		"iconOffsetX": 0,
+		"iconOffsetY": 2,
+		"iconRotation": 180,
+		"grayscaleLightness": 100
+	}
+}
