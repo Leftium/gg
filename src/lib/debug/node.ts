@@ -4,11 +4,40 @@
  * Output: process.stderr via util.formatWithOptions.
  * Persistence: process.env.DEBUG
  * Format (patched): +123ms namespace message (ANSI colored)
+ *
+ * IMPORTANT: No static imports of Node built-ins (tty, util).
+ * Vite 8's rolldown statically resolves even dynamic `import('tty')` when
+ * it appears as a bare specifier, pulling in a `createRequire(import.meta.url)`
+ * shim that breaks Cloudflare Workers (where import.meta.url is undefined).
+ * Instead, tty and util are loaded lazily and accessed through mutable
+ * module-level variables with synchronous fallbacks.
  */
 
 import { setup, humanize, type Debugger, type DebugEnv, type DebugFactory } from './common.js';
-import tty from 'tty';
-import util from 'util';
+
+// ── Lazy-loaded Node modules ────────────────────────────────────────────
+// Loaded asynchronously at module init; functions fall back gracefully
+// until the modules are available (typically resolved within one microtask).
+
+let ttyModule: typeof import('tty') | null = null;
+let utilModule: typeof import('util') | null = null;
+
+/** Promise that resolves once tty + util are loaded (or failed). */
+export const nodeModulesReady: Promise<void> = (async () => {
+	try {
+		// Use Function constructor to create a truly opaque import that
+		// no bundler can statically analyze. This prevents Vite 8/rolldown
+		// from resolving the specifier and injecting createRequire shims.
+		const dynamicImport = new Function('specifier', 'return import(specifier)') as (
+			specifier: string
+		) => Promise<Record<string, unknown>>;
+		const [tty, util] = await Promise.all([dynamicImport('tty'), dynamicImport('util')]);
+		ttyModule = tty as typeof import('tty');
+		utilModule = util as typeof import('util');
+	} catch {
+		// Not available (e.g., Cloudflare Workers) — fallbacks remain active
+	}
+})();
 
 /**
  * Basic ANSI colors (6) — used when 256-color support is not detected.
@@ -44,7 +73,10 @@ function detectColors(): number[] {
  * Build inspectOpts from DEBUG_* environment variables.
  * Supports: DEBUG_COLORS, DEBUG_DEPTH, DEBUG_SHOW_HIDDEN, DEBUG_HIDE_DATE
  */
-const inspectOpts: Record<string, unknown> = Object.keys(process.env)
+const inspectOpts: Record<string, unknown> = (typeof process !== 'undefined' && process.env
+	? Object.keys(process.env)
+	: []
+)
 	.filter((key) => /^debug_/i.test(key))
 	.reduce<Record<string, unknown>>((obj, key) => {
 		const prop = key
@@ -63,9 +95,14 @@ const inspectOpts: Record<string, unknown> = Object.keys(process.env)
 	}, {});
 
 function useColors(): boolean {
-	return 'colors' in inspectOpts
-		? Boolean(inspectOpts.colors)
-		: tty.isatty(process.stderr.fd);
+	if ('colors' in inspectOpts) return Boolean(inspectOpts.colors);
+	// ttyModule may not be loaded yet on first call — default to false
+	if (!ttyModule) return false;
+	try {
+		return ttyModule.isatty((process.stderr as unknown as { fd: number }).fd);
+	} catch {
+		return false;
+	}
 }
 
 function getDate(): string {
@@ -96,10 +133,19 @@ function formatArgs(this: Debugger, args: unknown[]): void {
 }
 
 function log(this: Debugger, ...args: unknown[]): void {
-	process.stderr.write(util.formatWithOptions(inspectOpts, ...args) + '\n');
+	if (utilModule && typeof process !== 'undefined' && process.stderr) {
+		process.stderr.write(utilModule.formatWithOptions(inspectOpts, ...args) + '\n');
+	} else if (typeof process !== 'undefined' && process.stderr) {
+		// Fallback: no util available yet (or ever on Cloudflare)
+		process.stderr.write(args.map(String).join(' ') + '\n');
+	} else {
+		// Last resort
+		console.error(...args);
+	}
 }
 
 function save(namespaces: string): void {
+	if (typeof process === 'undefined') return;
 	if (namespaces) {
 		process.env.GG_KEEP = namespaces;
 	} else {
@@ -110,12 +156,26 @@ function save(namespaces: string): void {
 function load(): string {
 	// GG_KEEP controls which namespaces are kept (and thus output to the server console).
 	// Fall back to '*' so gg works zero-config in dev without setting any env var.
+	if (typeof process === 'undefined') return '*';
 	return process.env.GG_KEEP || '*';
 }
 
 function init(instance: Debugger): void {
 	// Each instance gets its own inspectOpts copy (for per-instance color override)
 	(instance as Debugger & { inspectOpts: Record<string, unknown> }).inspectOpts = { ...inspectOpts };
+}
+
+/** util.inspect wrapper with fallback */
+function inspectValue(v: unknown, opts: Record<string, unknown>): string {
+	if (utilModule) {
+		return utilModule.inspect(v, opts as import('util').InspectOptions);
+	}
+	// Fallback when util is not yet loaded
+	try {
+		return JSON.stringify(v, null, 2) ?? String(v);
+	} catch {
+		return String(v);
+	}
 }
 
 const env: DebugEnv = {
@@ -131,7 +191,7 @@ const env: DebugEnv = {
 		o(this: Debugger, v: unknown): string {
 			const opts = (this as Debugger & { inspectOpts?: Record<string, unknown> }).inspectOpts || {};
 			opts.colors = this.useColors;
-			return util.inspect(v, opts as util.InspectOptions)
+			return inspectValue(v, opts)
 				.split('\n')
 				.map((str) => str.trim())
 				.join(' ');
@@ -140,7 +200,7 @@ const env: DebugEnv = {
 		O(this: Debugger, v: unknown): string {
 			const opts = (this as Debugger & { inspectOpts?: Record<string, unknown> }).inspectOpts || {};
 			opts.colors = this.useColors;
-			return util.inspect(v, opts as util.InspectOptions);
+			return inspectValue(v, opts);
 		}
 	}
 };

@@ -26,6 +26,16 @@ export default function openInEditorPlugin(
 	return {
 		name: 'open-in-editor',
 		configureServer(server) {
+			// Expose dev server port via globalThis so gg.ts can build the
+			// openInEditorUrlTemplate without importing Node's http module.
+			// (gg-file-sink-plugin also sets this; whichever fires first wins.)
+			server.httpServer?.once('listening', () => {
+				const addr = server.httpServer?.address();
+				const port =
+					addr && typeof addr === 'object' ? addr.port : (server.config.server.port ?? 5173);
+				(globalThis as Record<string, unknown>).__ggDevServerPort ??= port;
+			});
+
 			server.middlewares.use('/__open-in-editor', (req, res) => {
 				const { file, line, col, editor } = url.parse(req.url || '', true).query || {};
 				if (!file) {

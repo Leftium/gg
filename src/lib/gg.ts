@@ -60,76 +60,57 @@ const isCloudflareWorker = (): boolean => {
 // gg() calls will work but produce no log output until a worker-compatible
 // debug backend is added.
 
-// Type definitions for the modules
-type HttpModule = typeof import('http');
-type AddressInfo = import('net').AddressInfo;
+// ── Dev server port detection ───────────────────────────────────────────
+// The port is needed for the openInEditorUrlTemplate. Instead of importing
+// Node's `http` module (which causes Vite 8/rolldown to pull in a
+// createRequire(import.meta.url) shim that breaks Cloudflare Workers),
+// we read the port from globalThis.__ggDevServerPort — set by
+// ggFileSinkPlugin's configureServer hook, which already knows the port
+// from server.httpServer.address().
 
-// Lazy-load Node.js modules to avoid top-level await (Safari compatibility).
-// The imports start immediately but don't block module evaluation.
-let httpModule: HttpModule | null = null;
+function getServerPort(): string | number {
+	if (BROWSER) {
+		return window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+	}
 
-function loadServerModules(): Promise<void> {
-	if (isCloudflareWorker() || BROWSER) return Promise.resolve();
+	// Server-side: read port injected by ggFileSinkPlugin (or openInEditorPlugin).
+	// Falls back to PORT env var or Vite's default.
+	const injectedPort = (globalThis as Record<string, unknown>).__ggDevServerPort;
+	if (typeof injectedPort === 'number' || typeof injectedPort === 'string') {
+		return injectedPort;
+	}
 
-	return (async () => {
-		try {
-			httpModule = await import('http');
-		} catch {
-			console.warn('gg: Node.js http module not available');
+	if (typeof process !== 'undefined' && process.env?.PORT) {
+		return Number(process.env.PORT) || 5173;
+	}
+
+	return 5173;
+}
+
+// Port is read synchronously at init — globalThis.__ggDevServerPort may not
+// be set yet (the Vite plugin sets it on httpServer 'listening'). We poll
+// briefly so the template updates once the port is known.
+let port: string | number = getServerPort();
+
+if (!BROWSER && DEV) {
+	// Poll for the injected port (set asynchronously by configureServer).
+	// Check a few times during startup, then stop. Only needed in dev
+	// mode — in production there's no Vite dev server to discover.
+	let checks = 0;
+	const maxChecks = 20; // 20 × 100ms = 2s window
+	const timer = setInterval(() => {
+		const injected = (globalThis as Record<string, unknown>).__ggDevServerPort;
+		if ((typeof injected === 'number' || typeof injected === 'string') && injected !== port) {
+			port = injected;
+			ggConfig.openInEditorUrlTemplate = `http://localhost:${port}/__open-in-editor?file=$FILENAME`;
+			clearInterval(timer);
+		} else if (++checks >= maxChecks) {
+			clearInterval(timer);
 		}
-	})();
+	}, 100);
+	// Don't keep Node.js alive just for this timer
+	if (typeof timer === 'object' && 'unref' in timer) timer.unref();
 }
-
-// Start loading immediately (non-blocking)
-const serverModulesReady = loadServerModules();
-
-function findAvailablePort(startingPort: number): Promise<number> {
-	if (!httpModule) return Promise.resolve(startingPort);
-
-	return new Promise((resolve) => {
-		const server = httpModule!.createServer();
-		server.listen(startingPort, () => {
-			const actualPort = (server?.address() as AddressInfo)?.port;
-			server.close(() => resolve(actualPort));
-		});
-		server.on('error', () => {
-			// If the port is in use, try the next one
-			findAvailablePort(startingPort + 1).then(resolve);
-		});
-	});
-}
-
-function getServerPort(): Promise<string | number> {
-	return new Promise((resolve) => {
-		if (BROWSER) {
-			// Browser environment
-			const currentPort =
-				window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-
-			// Resolve the promise with the detected port
-			resolve(currentPort);
-		} else if (isCloudflareWorker()) {
-			// CloudFlare Workers - return default port
-			resolve('5173');
-		} else {
-			// Node.js environment — wait for http module to be available
-			serverModulesReady.then(() => {
-				const startingPort = Number(process?.env?.PORT) || 5173; // Default to Vite's default port
-				findAvailablePort(startingPort).then((actualPort) => {
-					resolve(actualPort);
-				});
-			});
-		}
-	});
-}
-
-// Port resolution starts immediately but doesn't block module evaluation.
-// The template is updated asynchronously once the port is known.
-let port: string | number = 5173; // Default fallback
-void getServerPort().then((p) => {
-	port = p;
-	ggConfig.openInEditorUrlTemplate = `http://localhost:${port}/__open-in-editor?file=$FILENAME`;
-});
 
 /**
  * Determines if gg should be enabled based on environment and runtime triggers.
@@ -1432,8 +1413,7 @@ export async function runGgDiagnostics() {
 	if (!ggConfig.showHints || isCloudflareWorker() || diagnosticsRan) return;
 	diagnosticsRan = true;
 
-	// Ensure server modules and debug factory are loaded before diagnostics
-	await serverModulesReady;
+	// Ensure debug factory is loaded before diagnostics
 	await debugReady;
 
 	// Create test debugger for server-side enabled check

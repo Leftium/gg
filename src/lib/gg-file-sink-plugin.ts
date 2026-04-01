@@ -298,6 +298,11 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 				fs.mkdirSync(dir, { recursive: true });
 				logFile = path.join(dir, `logs-${port}.jsonl`);
 				fs.writeFileSync(logFile, '');
+
+				// Expose port via globalThis so gg.ts can build the
+				// openInEditorUrlTemplate without importing Node's http module
+				// (which would pull in createRequire shims that break Cloudflare Workers).
+				(globalThis as Record<string, unknown>).__ggDevServerPort = port;
 			});
 
 			const appendEntry = (serialized: SerializedEntry) => {
@@ -338,6 +343,7 @@ gg.addLogListener(function __ggFileSinkSender(entry) {
 					serverSideListener = null;
 				}
 				delete (globalThis as Record<string, unknown>).__ggFileSink;
+				delete (globalThis as Record<string, unknown>).__ggDevServerPort;
 			});
 
 			// /__gg/ index — JSON status for agents and developers
