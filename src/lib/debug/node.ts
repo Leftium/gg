@@ -54,18 +54,44 @@ const extendedColors: number[] = [
 	202, 203, 204, 205, 206, 207, 208, 209, 214, 215, 220, 221
 ];
 
-/** Detect 256-color support via supports-color (optional) or heuristic */
+/**
+ * Detect 256-color support using environment heuristics.
+ *
+ * Previous versions used `require('supports-color')` here, but that pulls
+ * the CJS supports-color package into the SSR bundle. supports-color
+ * internally does `require('os')` and `require('tty')`, which causes
+ * Vite 8/rolldown to emit a `createRequire(import.meta.url)` runtime
+ * shim that breaks Cloudflare Workers (where import.meta.url is undefined).
+ *
+ * Instead, we use the same TERM/COLORTERM heuristics that supports-color
+ * itself uses, avoiding the problematic CJS dependency chain.
+ */
 function detectColors(): number[] {
-	try {
-		// Try supports-color if available (same as debug@4)
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const supportsColor = require('supports-color');
-		if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
-			return extendedColors;
+	if (typeof process === 'undefined' || !process.env) return basicColors;
+
+	// Check FORCE_COLOR env var (same as supports-color)
+	const forceColor = process.env.FORCE_COLOR;
+	if (forceColor === '0' || forceColor === 'false') return basicColors;
+	if (forceColor !== undefined) return extendedColors;
+
+	// No color if not a TTY (unless forced)
+	if (ttyModule) {
+		try {
+			if (!ttyModule.isatty((process.stderr as unknown as { fd: number }).fd)) {
+				return basicColors;
+			}
+		} catch {
+			return basicColors;
 		}
-	} catch {
-		// Not installed — fall through
 	}
+
+	// Check for 256-color support via TERM/COLORTERM
+	const term = process.env.TERM || '';
+	const colorterm = process.env.COLORTERM || '';
+	if (colorterm === 'truecolor' || colorterm === '24bit' || term === 'xterm-256color') {
+		return extendedColors;
+	}
+
 	return basicColors;
 }
 
