@@ -56,7 +56,7 @@
 	"devDependencies": {
 		"@eslint/compat": "^2.0.3",
 		"@eslint/js": "^10.0.1",
-		"@leftium/nimble.css": "^0.16.0",
+		"@leftium/nimble.css": "^0.17.0",
 		"@sveltejs/adapter-vercel": "^6.3.3",
 		"@sveltejs/kit": "^2.55.0",
 		"@sveltejs/package": "^2.5.7",
