@@ -3,16 +3,8 @@
 	"iconColor": "#ffffff",
 	"iconColorMode": "auto",
 	"background": {
-		"colors": [
-			"#0029c1",
-			"#3973ff",
-			"#0029c1"
-		],
-		"stops": [
-			0,
-			0.29,
-			1
-		],
+		"colors": ["#0029c1", "#3973ff", "#0029c1"],
+		"stops": [0, 0.29, 1],
 		"angle": 45,
 		"position": 0,
 		"scale": 1
@@ -31,16 +23,8 @@
 		"iconColor": "#ffffff",
 		"iconColorMode": "auto",
 		"background": {
-			"colors": [
-				"#0029c1",
-				"#3973ff",
-				"#0029c1"
-			],
-			"stops": [
-				0,
-				0.29,
-				1
-			],
+			"colors": ["#0029c1", "#3973ff", "#0029c1"],
+			"stops": [0, 0.29, 1],
 			"angle": 45,
 			"position": 0,
 			"scale": 1

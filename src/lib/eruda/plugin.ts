@@ -1510,8 +1510,7 @@ export function createGgPlugin(
 				if (!open) {
 					const keepPanel = $el?.find('.gg-keep-panel').get(0) as HTMLElement | undefined;
 					const keepHandle = $el?.find('.gg-pipeline-keep-handle').get(0) as
-						| HTMLElement
-						| undefined;
+						HTMLElement | undefined;
 					if (keepPanel) keepPanel.style.display = 'none';
 					if (keepHandle) keepHandle.classList.remove('active');
 				}
@@ -1869,8 +1868,7 @@ export function createGgPlugin(
 				if (!open) {
 					const showPanel = $el?.find('.gg-show-panel').get(0) as HTMLElement | undefined;
 					const showHandle = $el?.find('.gg-pipeline-show-handle').get(0) as
-						| HTMLElement
-						| undefined;
+						HTMLElement | undefined;
 					if (showPanel) showPanel.style.display = 'none';
 					if (showHandle) showHandle.classList.remove('active');
 				}

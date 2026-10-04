@@ -3,7 +3,7 @@
  * Imported from +page.svelte to demonstrate that gg() call-site
  * metadata works correctly from imported .ts files too.
  */
-import { gg, fg, bg, bold, italic, underline, dim } from '$lib/index.js';
+import { gg, fg, bg, bold, italic, underline, dim } from '#lib/index.js';
 
 export function testManualNs() {
 	// Plain label (no template variables) - used as-is

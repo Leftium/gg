@@ -211,7 +211,7 @@ describe('edge cases', () => {
 		// a JS string delimiter, causing the scanner to skip over a subsequent
 		// gg() call inside an onclick handler.
 		const code = `<script>
-	import { gg } from '$lib/index.js';
+	import { gg } from '#lib/index.js';
 </script>
 
 <p>Check Eruda's GG tab.</p>
