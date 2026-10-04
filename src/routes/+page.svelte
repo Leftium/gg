@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { gg } from '$lib/index.js';
-	import OpenInEditorLink from '$lib/OpenInEditorLink.svelte';
+	import { gg } from '#lib/index.js';
+	import OpenInEditorLink from '#lib/OpenInEditorLink.svelte';
 	import {
 		testManualNs,
 		testAnsiColors,

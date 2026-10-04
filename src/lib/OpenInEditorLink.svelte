@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { dev } from '$app/environment';
+	import { dev } from '$app/env';
 
 	type GgCallSiteInfo = { fileName: string; functionName: string; url: string };
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
-	import GgConsole from '$lib/GgConsole.svelte';
+	import GgConsole from '#lib/GgConsole.svelte';
 	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
